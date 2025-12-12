@@ -1,0 +1,29 @@
+{
+  "hard_skills": [
+    "Inspection and Testing",
+    "Preventive Maintenance and AMC"
+  ],
+  "soft_skills": [
+    "Customer Service",
+    "Customer Relationship Management",
+    "Service Contract Management",
+    "Field Technical Services",
+    "Technical Support",
+    "Installations Expertise"
+  ],
+  "working_experience": [
+    {
+      "company": "Sartorius India Pvt. Ltd. – Bio Analytical Division",
+      "role": "Senior Field Service Engineer April 2021 – Present",
+      "dates": "April 2021 – Present",
+      "description": "Executed the installation and qualification of Bio-analytical instruments Completed over 20+ installations Bio-"
+    },
+    {
+      "company": "analytical instruments.\n\nSartorius India Pvt. Ltd. – Analytical Division",
+      "role": "Senior Field Service Engineer Feb 2016 – March 2021",
+      "dates": "Feb 2016 – March 2021",
+      "description": "Executed the installation and qualification of analytical instruments Contributed significantly to revenue generation"
+    }
+  ],
+  "education": []
+}

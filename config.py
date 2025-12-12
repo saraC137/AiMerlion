@@ -11,9 +11,11 @@ OUTPUT_FILENAME_PREFIX = "extracted_resume_data"
 
 # --- AI Model Selection (OPTIMIZED FOR ENGLISH!) ---
 # 💅 Smaller, faster models for English-only processing!
-FAST_MODEL = "llama3.2:1b"        # Quick validation checks
-SMART_MODEL = "llama3.2:3b"       # Complex extractions
-DEFAULT_MODEL = FAST_MODEL         # Use fast by default
+FAST_MODEL = "llama3.1:8b"
+SMART_MODEL = "llama3.1:8b"
+DEFAULT_MODEL = FAST_MODEL
+MODEL_NAME = DEFAULT_MODEL
+SUZUME_MODEL_NAME = SMART_MODEL         # Use fast by default
 
 MODEL_NAME = DEFAULT_MODEL
 SUZUME_MODEL_NAME = SMART_MODEL    # For tough extractions only

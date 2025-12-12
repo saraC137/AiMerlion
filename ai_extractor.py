@@ -1,20 +1,22 @@
 """
-🌸 AI EXTRACTOR - The Multilingual Extraction DIVA! 🌸
-Powered by AI for resume excellence!
+🌸 AI EXTRACTOR - English Resume Specialist 🌸
+Refactored to enforce strict JSON structure and prevent text dumping.
 """
 
 import ollama
 import json
 import re
-from typing import Dict, Optional, List, Tuple
+from typing import Dict, Optional, List, Any, Union
 import logging
 import coloredlogs
-from datetime import datetime
-import unicodedata
+
+# Import helper functions from your utils.py
+from utils import standardize_phone_number, standardize_date
 
 class AIExtractor:
     """
-    💅 The MULTILINGUAL AI Queen! Specializes in Japanese resumes!
+    💅 The English Resume Extraction Specialist!
+    Separates Hard/Soft skills and guarantees structured output for experience.
     """
     
     def __init__(self, model_name: str, logger: Optional[logging.Logger] = None):
@@ -26,326 +28,778 @@ class AIExtractor:
             coloredlogs.install(level='INFO', logger=self.logger,
                               fmt='%(asctime)s - 🌸 %(levelname)s - %(message)s')
         
-        # Test model availability
         self.available = self._test_model()
         
     def _test_model(self) -> bool:
-        """Test if the model is ready to serve!"""
+        """Test if the Ollama model is ready to serve!"""
         try:
             self.logger.info(f"🌸 Initializing {self.model_name} model...")
-            response = ollama.chat(
-                model=self.model_name,
-                messages=[{'role': 'user', 'content': 'こんにちは'}]
-            )
-            self.logger.info(f"✨ {self.model_name} is READY! Multilingual power activated!")
+            ollama.chat(model=self.model_name, messages=[{'role': 'user', 'content': 'Hi'}])
+            self.logger.info(f"✨ {self.model_name} is READY! Extraction engines online!")
             return True
         except Exception as e:
             self.logger.error(f"❌ Model error: {e}")
-            self.logger.error(f"Please ensure the model '{self.model_name}' is available.")
+            self.logger.error(f"Please ensure the model '{self.model_name}' is pulled in Ollama.")
             return False
     
-    def extract_all_fields(self, text: str) -> Dict[str, Optional[str]]:
+    def extract_header_fields(self, text: str) -> Dict[str, Optional[str]]:
         """
-        🎯 Extract ALL fields in one go using Suzume's power!
-        This is more efficient than multiple calls!
+        🎯 PASS 1: Extract HEADER fields (Personal Info).
+        Fast execution on the first 3000 characters.
         """
         if not self.available:
             return {}
         
-        # Limit text to prevent token overflow
         text_sample = text[:3000] if len(text) > 3000 else text
         
-        # 🌟 POWER PROMPT for AI Model!
-        prompt = f"""あなたは履歴書から情報を抽出する専門家です。以下のテキストから**候補者本人**の個人情報を正確に抽出してください。
-
-Extract the following information for the **primary candidate** from this resume. The resume may be in Japanese, English, or mixed.
-Return your answer in JSON format ONLY, with no additional text.
-
-**Extraction Strategy:**
-- The candidate's personal information is almost always at the top of the resume. Prioritize information found in the header.
-- Do not extract contact details from references or previous employers.
+        prompt = f"""You are a precise data parser. Extract the candidate's contact details from the resume header.
 
 **Required fields:**
-1.  **name**: The candidate's full name (名前/氏名). This is usually the most prominent text at the top.
-2.  **email**: The candidate's personal email address (メールアドレス).
-3.  **phone**: The candidate's primary contact phone number (電話番号).
-4.  **date_of_birth**: The candidate's date of birth (生年月日).
-    - **Look for multiple formats**: "January 1, 1990", "1990/01/22", "01-22-1990", "昭和64年1月1日".
-    - **Convert to YYYY-MM-DD format** in the final JSON output.
-5.  **skills**: A list of the candidate's skills (スキル).
-6.  **working_experience**: A list of the candidate's previous jobs (職務経歴).
-7.  **location**: The candidate's current location (現住所).
-8.  **school_university**: The candidate's school or university (学歴).
+1. name (Full Name)
+2. email
+3. phone
+4. location (City, Country)
+5. linkedin (URL)
+6. website (URL)
 
-**JSON Output Format:**
+**JSON Output Format ONLY:**
 {{
-  "name": "Taro Tanaka",
-  "email": "taro.tanaka@example.com",
-  "phone": "090-1234-5678",
-  "date_of_birth": "1989-01-01",
-  "skills": ["Python", "Machine Learning", "Data Analysis"],
-  "working_experience": ["Software Engineer at ABC Inc.", "Data Scientist at XYZ Corp."],
-  "location": "Tokyo, Japan",
-  "school_university": "University of Tokyo"
+  "name": "John Doe",
+  "email": "john@example.com",
+  "phone": "555-0199",
+  "location": "New York, USA",
+  "linkedin": "linkedin.com/in/johndoe",
+  "website": "null"
 }}
-
-If a field is not found, use a `null` value.
 
 Resume text:
 {text_sample}
 
-Remember: Return ONLY the valid JSON object, nothing else."""
+Response must be valid JSON only."""
         
+        return self._call_ollama(prompt)
+
+    def extract_deep_fields(self, text: str) -> Dict[str, Any]:
+        """
+        🚀 MANUAL-FIRST EXTRACTION with AI assistance only for disambiguation
+        Because AI can't be trusted with structure, honey! 💅
+        """
+        if not self.available:
+            return self._pure_manual_extraction(text)
+        
+        self.logger.info("🎭 Starting MANUAL-FIRST extraction...")
+        
+        # ALWAYS start with manual extraction
+        result = self._pure_manual_extraction(text)
+        
+        # ONLY use AI to enhance/disambiguate specific fields if needed
+        if self._needs_ai_enhancement(result):
+            self.logger.info("🤖 Using AI for skill categorization only...")
+            result = self._enhance_skills_with_ai(result, text)
+        
+        self.logger.info(f"✅ Extraction complete: {len(result.get('hard_skills', []))} hard skills, {len(result.get('working_experience', []))} jobs")
+        
+        return result
+
+    def _pure_manual_extraction(self, text: str) -> Dict[str, Any]:
+        """
+        🛠️ PURE MANUAL EXTRACTION - No AI involved!
+        This is the BACKBONE, honey! 💪
+        """
+        self.logger.info("🔧 Running pure manual extraction...")
+        
+        result = {
+            "hard_skills": [],
+            "soft_skills": [],
+            "working_experience": [],
+            "education": []
+        }
+        
+        # ===== EXTRACT SKILLS =====
+        skills_result = self._extract_skills_regex(text)
+        result['hard_skills'] = skills_result['hard_skills']
+        result['soft_skills'] = skills_result['soft_skills']
+        
+        # ===== EXTRACT EXPERIENCE =====
+        result['working_experience'] = self._extract_experience_regex(text)
+        
+        # ===== EXTRACT EDUCATION =====
+        result['education'] = self._extract_education_regex(text)
+        
+        return result
+
+    def _extract_skills_regex(self, text: str) -> Dict[str, list]:
+        """
+        🎯 Extract skills using PURE REGEX
+        """
+        hard_skills = []
+        soft_skills = []
+        
+        # Find SKILLS section
+        skills_patterns = [
+            r'SKILLS?\s*:?\s*(.*?)(?=EXPERIENCE|EMPLOYMENT|WORK|EDUCATION|PROFESSIONAL|$)',
+            r'TECHNICAL\s+SKILLS?\s*:?\s*(.*?)(?=EXPERIENCE|EMPLOYMENT|WORK|EDUCATION|$)',
+            r'CORE\s+COMPETENCIES\s*:?\s*(.*?)(?=EXPERIENCE|EMPLOYMENT|WORK|EDUCATION|$)'
+        ]
+        
+        skills_text = ""
+        for pattern in skills_patterns:
+            match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+            if match:
+                skills_text = match.group(1)
+                break
+        
+        if not skills_text:
+            self.logger.warning("⚠️ No skills section found")
+            return {"hard_skills": [], "soft_skills": []}
+        
+        # Clean and split skills
+        # Remove bullet characters first
+        skills_text = re.sub(r'[•●○◦▪▫■□▸▹►▻⦿⦾]', '\n', skills_text)
+        skills_text = re.sub(r'^\s*[-–—*]\s*', '\n', skills_text, flags=re.MULTILINE)
+        
+        # Split by newlines, commas, semicolons
+        raw_skills = re.split(r'[\n,;]+', skills_text)
+        
+        # Clean each skill
+        all_skills = []
+        for skill in raw_skills:
+            cleaned = skill.strip()
+            # Remove leading numbers/bullets
+            cleaned = re.sub(r'^\d+[\.)]\s*', '', cleaned)
+            # Remove excessive whitespace
+            cleaned = ' '.join(cleaned.split())
+            
+            # Filter valid skills
+            if 3 <= len(cleaned) <= 80 and cleaned and not cleaned.isdigit():
+                # Skip common section headers
+                skip_words = ['skills', 'experience', 'education', 'summary', 'objective', 'profile']
+                if not any(skip.lower() == cleaned.lower() for skip in skip_words):
+                    all_skills.append(cleaned)
+        
+        # Categorize: Hard vs Soft skills
+        tech_keywords = [
+            'software', 'system', 'tool', 'platform', 'framework', 'language',
+            'python', 'java', 'sql', 'javascript', 'c++', 'c#', 'ruby', 'php',
+            'aws', 'azure', 'docker', 'kubernetes', 'linux', 'windows',
+            'api', 'database', 'server', 'cloud', 'network', 'security',
+            'machine learning', 'ai', 'data', 'analytics', 'crm', 'erp',
+            'office', 'excel', 'powerpoint', 'word', 'adobe', 'autocad',
+            'testing', 'qa', 'devops', 'agile', 'scrum', 'git', 'ci/cd'
+        ]
+        
+        soft_keywords = [
+            'communication', 'leadership', 'management', 'teamwork', 'collaboration',
+            'problem solving', 'analytical', 'critical thinking', 'creativity',
+            'time management', 'organization', 'presentation', 'negotiation',
+            'interpersonal', 'customer service', 'conflict resolution', 'adaptability',
+            'decision making', 'strategic', 'planning', 'mentoring', 'coaching'
+        ]
+        
+        for skill in all_skills[:50]:  # Limit to 50 total skills
+            skill_lower = skill.lower()
+            
+            # Check if it's a technical skill
+            is_technical = any(keyword in skill_lower for keyword in tech_keywords)
+            is_soft = any(keyword in skill_lower for keyword in soft_keywords)
+            
+            if is_technical:
+                hard_skills.append(skill)
+            elif is_soft:
+                soft_skills.append(skill)
+            else:
+                # Default categorization based on common patterns
+                # If it contains specific tools/software names, it's technical
+                if re.search(r'[A-Z]{2,}|[0-9]|\.|/', skill):  # Acronyms, numbers, dots, slashes
+                    hard_skills.append(skill)
+                else:
+                    soft_skills.append(skill)
+        
+        self.logger.info(f"📊 Found {len(hard_skills)} hard skills, {len(soft_skills)} soft skills")
+        
+        return {
+            "hard_skills": hard_skills[:30],  # Max 30 hard skills
+            "soft_skills": soft_skills[:20]   # Max 20 soft skills
+        }
+
+    def _extract_experience_regex(self, text: str) -> list:
+        """
+        💼 Extract work experience using PURE REGEX
+        This is AGGRESSIVE pattern matching, honey! 🔥
+        """
+        jobs = []
+        
+        # Find EXPERIENCE section
+        exp_patterns = [
+            r'(?:WORK\s+)?EXPERIENCE\s*:?\s*(.*?)(?=EDUCATION|SKILLS|CERTIFICATIONS|AWARDS|PUBLICATIONS|REFERENCES|$)',
+            r'EMPLOYMENT\s+HISTORY\s*:?\s*(.*?)(?=EDUCATION|SKILLS|CERTIFICATIONS|AWARDS|$)',
+            r'PROFESSIONAL\s+EXPERIENCE\s*:?\s*(.*?)(?=EDUCATION|SKILLS|CERTIFICATIONS|AWARDS|$)'
+        ]
+        
+        exp_text = ""
+        for pattern in exp_patterns:
+            match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+            if match:
+                exp_text = match.group(1)
+                break
+        
+        if not exp_text:
+            self.logger.warning("⚠️ No experience section found")
+            return jobs
+        
+        # Strategy: Find company names using multiple patterns
+        # Pattern 1: Companies with standard suffixes
+        company_indicators = r'(?:Pvt\.?\s*Ltd\.?|Private\s+Limited|Ltd\.?|Limited|Inc\.?|Incorporated|Corp\.?|Corporation|LLC|Company|Co\.)'
+        pattern1 = rf'([A-Z][A-Za-z0-9\s&,\.\']+{company_indicators}[^\n]*)'
+
+        # Pattern 2: Companies with descriptive keywords
+        company_keywords = r'(?:Technologies|Solutions|Services|Systems|Group|International|Industries|Consulting|Partners|Holdings|Enterprises|Software|Digital|Media|Networks|Labs|Studio|Agency|Bank|Healthcare|Pharma|Retail|Manufacturing)'
+        pattern2 = r'([A-Z][A-Za-z\s&,\.]+' + company_keywords + r'[^\n]*)'
+
+        # Pattern 3: Well-known company format (2-4 capitalized words before job title or date)
+        pattern3 = r'([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){1,3})\s*(?=\n[A-Z][a-z]+(?:Engineer|Manager|Developer|Analyst|Specialist|Executive|Consultant|Director|Officer)|\n\w+\s+\d{4})'
+
+        # Try all patterns
+        company_matches = []
+        company_matches.extend(list(re.finditer(pattern1, exp_text, re.IGNORECASE)))
+
+        if not company_matches:
+            company_matches.extend(list(re.finditer(pattern2, exp_text, re.IGNORECASE)))
+            self.logger.info("💼 Using keyword-based company detection")
+
+        if not company_matches:
+            company_matches.extend(list(re.finditer(pattern3, exp_text)))
+            self.logger.info("💼 Using position-based company detection")
+        
+        for i, company_match in enumerate(company_matches):
+            company_name = company_match.group(1).strip()
+            
+            # Determine the text chunk for this job (until next company or end)
+            chunk_start = company_match.start()
+            if i + 1 < len(company_matches):
+                chunk_end = company_matches[i + 1].start()
+            else:
+                chunk_end = len(exp_text)
+            
+            job_chunk = exp_text[chunk_start:chunk_end]
+            
+            # Extract ROLE (usually comes after company name, before dates)
+            role_pattern = r'\n\s*([A-Z][A-Za-z\s]+(?:Engineer|Manager|Developer|Analyst|Specialist|Executive|Consultant|Director|Officer|Coordinator|Lead|Architect|Technician|Administrator|Designer|Associate|Assistant|Supervisor)[^\n]*)'
+            role_match = re.search(role_pattern, job_chunk)
+            role = role_match.group(1).strip() if role_match else "Position not specified"
+            
+            # Extract DATES
+            date_patterns = [
+                r'(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{4}\s*[-–—]\s*(?:(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{4}|Present|Current)',
+                r'\d{1,2}/\d{4}\s*[-–—]\s*(?:\d{1,2}/\d{4}|Present|Current)',
+                r'\d{4}\s*[-–—]\s*(?:\d{4}|Present|Current)'
+            ]
+            
+            dates = "Dates not specified"
+            for date_pattern in date_patterns:
+                date_match = re.search(date_pattern, job_chunk, re.IGNORECASE)
+                if date_match:
+                    dates = date_match.group(0)
+                    break
+            
+            # Extract DESCRIPTION (bullet points after dates)
+            # Find where dates end, then collect bullet points
+            if date_match:
+                desc_start_pos = date_match.end()
+            else:
+                desc_start_pos = len(company_name) + 100
+            
+            desc_chunk = job_chunk[desc_start_pos:desc_start_pos + 600]
+            
+            # Extract bullet points
+            bullet_pattern = r'(?:^|\n)\s*[•●○◦▪▫■□▸▹►▻⦿⦾\-–—*]\s*(.+?)(?=\n\s*[•●○◦▪▫■□▸▹►▻⦿⦾\-–—*]|\n\n|$)'
+            bullets = re.findall(bullet_pattern, desc_chunk, re.MULTILINE)
+            
+            if bullets:
+                # Take first 3-4 bullet points
+                description = ' '.join([b.strip() for b in bullets[:4]])
+            else:
+                # Fallback: just take first few sentences
+                sentences = re.split(r'[.!?]\s+', desc_chunk)
+                description = '. '.join([s.strip() for s in sentences[:3] if s.strip()])
+            
+            # Clean description
+            description = ' '.join(description.split())  # Remove extra whitespace
+            description = description[:400]  # Limit length
+            
+            jobs.append({
+                "company": company_name[:100],
+                "role": role[:100],
+                "dates": dates,
+                "description": description if description else "Description not available"
+            })
+        
+        self.logger.info(f"💼 Found {len(jobs)} jobs")
+        
+        return jobs
+
+    def _extract_education_regex(self, text: str) -> list:
+        """
+        🎓 Extract education using PURE REGEX
+        """
+        education = []
+        
+        # Find EDUCATION section - try multiple patterns
+        edu_patterns = [
+            r'EDUCATION(?:AL)?\s*(?:BACKGROUND|HISTORY)?\s*:?\s*(.*?)(?=EXPERIENCE|EMPLOYMENT|WORK|SKILLS|CERTIFICATIONS|AWARDS|PUBLICATIONS|REFERENCES|PROJECTS|$)',
+            r'ACADEMIC\s+(?:BACKGROUND|QUALIFICATIONS|CREDENTIALS|HISTORY)\s*:?\s*(.*?)(?=EXPERIENCE|EMPLOYMENT|SKILLS|$)',
+            r'QUALIFICATIONS?\s*:?\s*(.*?)(?=EXPERIENCE|EMPLOYMENT|SKILLS|CERTIFICATIONS|$)',
+            r'TRAINING\s+(?:AND|&)\s+EDUCATION\s*:?\s*(.*?)(?=EXPERIENCE|EMPLOYMENT|SKILLS|$)',
+        ]
+
+        edu_text = ""
+        for pattern in edu_patterns:
+            match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+            if match:
+                edu_text = match.group(1)
+                self.logger.info(f"🎓 Found education section")
+                break
+
+        # If no section header found, try to find education entries in the entire text
+        if not edu_text:
+            self.logger.info("🎓 No education section header found, searching entire document...")
+            # Look for university/college patterns anywhere in the document
+            inst_pattern = r'([A-Z][A-Za-z\s\',\.&-]+(?:University|College|Institute|School|Academy)[^\n]*)'
+            if re.search(inst_pattern, text):
+                # Use a reasonable chunk of text that might contain education info
+                # Usually education is at the bottom of resume
+                edu_text = text[-2000:] if len(text) > 2000 else text
+            else:
+                self.logger.info("🎓 No education information found in document")
+                return education
+        
+        # Pattern for institutions
+        inst_pattern = r'([A-Z][A-Za-z\s\',\.&-]+(?:University|College|Institute|School|Academy)[^\n]*)'
+        inst_matches = list(re.finditer(inst_pattern, edu_text))
+        
+        for i, inst_match in enumerate(inst_matches):
+            institution = inst_match.group(1).strip()
+            
+            # Get chunk for this education entry
+            chunk_start = inst_match.start()
+            if i + 1 < len(inst_matches):
+                chunk_end = inst_matches[i + 1].start()
+            else:
+                chunk_end = min(chunk_start + 300, len(edu_text))
+            
+            edu_chunk = edu_text[chunk_start:chunk_end]
+            
+            # Extract DEGREE
+            degree_pattern = r'((?:Bachelor|Master|PhD|Ph\.?\s*D\.?|Doctorate|Diploma|Associate|B\.?\s*[ASE]\.?|M\.?\s*[ASE]\.?|B\.?\s*Tech|M\.?\s*Tech)[^\n]+)'
+            degree_match = re.search(degree_pattern, edu_chunk, re.IGNORECASE)
+            degree = degree_match.group(1).strip() if degree_match else "Degree not specified"
+            
+            # Extract DATES
+            date_pattern = r'\d{4}\s*[-–—]\s*\d{4}'
+            date_match = re.search(date_pattern, edu_chunk)
+            dates = date_match.group(0) if date_match else "Dates not specified"
+            
+            education.append({
+                "institution": institution[:150],
+                "degree": degree[:150],
+                "dates": dates
+            })
+        
+        self.logger.info(f"🎓 Found {len(education)} education entries")
+        
+        return education
+
+    def _needs_ai_enhancement(self, result: Dict) -> bool:
+        """
+        🤔 Check if we need AI to help categorize skills better
+        """
+        # Only use AI if skills are ambiguous
+        total_skills = len(result.get('hard_skills', [])) + len(result.get('soft_skills', []))
+        
+        # If we found very few skills, AI might help
+        if total_skills < 5:
+            return True
+        
+        # If categorization seems off (too many in one category), AI might help
+        hard_count = len(result.get('hard_skills', []))
+        soft_count = len(result.get('soft_skills', []))
+        
+        if hard_count == 0 or soft_count == 0:
+            return True
+        
+        return False
+
+    def _enhance_skills_with_ai(self, result: Dict, text: str) -> Dict:
+        """
+        🤖 Use AI ONLY to re-categorize skills (not extract them!)
+        """
+        all_skills = result.get('hard_skills', []) + result.get('soft_skills', [])
+        
+        if not all_skills:
+            return result
+        
+        skills_list = ', '.join(all_skills[:40])
+        
+        prompt = f"""Categorize these skills as hard (technical) or soft (interpersonal).
+
+    SKILLS: {skills_list}
+
+    Return ONLY this JSON format:
+    {{"hard": ["skill1", "skill2"], "soft": ["skill3", "skill4"]}}"""
+
+        response = self._call_ollama_raw(prompt, num_predict=300)
+        parsed = self._parse_ai_response(response)
+        
+        if parsed and isinstance(parsed.get('hard'), list) and isinstance(parsed.get('soft'), list):
+            result['hard_skills'] = parsed['hard'][:30]
+            result['soft_skills'] = parsed['soft'][:20]
+            self.logger.info("✅ AI re-categorized skills successfully")
+        
+        return result
+
+    def _call_ollama_raw(self, prompt: str, num_predict: int = 500) -> str:
+        """Helper to call Ollama and return raw text response"""
         try:
+            options = {
+                'temperature': 0.1,
+                'top_p': 0.5,
+                'num_ctx': 4096,
+                'num_predict': num_predict
+            }
+
             response = ollama.chat(
                 model=self.model_name,
                 messages=[
-                    {'role': 'system', 'content': 'You are a precise data extraction assistant. Always respond with valid JSON only.'},
+                    {
+                        'role': 'system',
+                        'content': 'You are a precise JSON extraction API. Output ONLY valid JSON - no markdown, no text before/after.'
+                    },
                     {'role': 'user', 'content': prompt}
                 ],
-                options={
-                    'temperature': 0.1,
-                    'top_p': 0.9,
-                    'num_predict': 500,
-                }
+                options=options
+            )
+
+            return response['message']['content']
+
+        except Exception as e:
+            self.logger.error(f"❌ AI Call error: {e}")
+            return ""
+
+    def _call_ollama(self, prompt: str, is_deep: bool = False) -> Dict:
+        """Helper to handle the actual API call"""
+        try:
+            options = {
+                'temperature': 0.1,  # 💅 Tiny bit of warmth for better parsing
+                'top_p': 0.5,
+                'num_ctx': 4096,
+            }
+            
+            if is_deep:
+                options['num_predict'] = 3000  # More room for structured output
+            
+            # 🌟 HERE'S WHERE THE MAGIC HAPPENS, SWEETIE! 🌟
+            response = ollama.chat(
+                model=self.model_name,
+                messages=[
+                    {
+                        'role': 'system', 
+                        'content': '''You are a precise JSON extraction API. 
+    Rules:
+    1. Output ONLY valid JSON - no markdown, no text before/after
+    2. Arrays must contain individual items, never text blocks with bullets
+    3. Each experience entry must be a separate object
+    4. Keep descriptions concise (under 300 chars per job)
+    5. Never copy-paste resume sections verbatim
+    Your output will be validated - formatting errors will be rejected.'''
+                    },
+                    {'role': 'user', 'content': prompt}
+                ],
+                options=options
             )
             
             response_text = response['message']['content']
-            self.logger.debug(f"🌸 Raw AI response: {response_text[:200]}...")
+            parsed_data = self._parse_ai_response(response_text)
             
-            # Extract and parse JSON
-            result = self._parse_ai_response(response_text)
+            # 🌟 VALIDATION LAYER - Check if AI was lazy!
+            if is_deep and parsed_data:
+                parsed_data = self._validate_deep_extraction(parsed_data, response_text)
             
-            if result:
-                # Post-process the results
-                result = self._post_process_results(result)
-                self.logger.info(f"✨ AI extracted: {len([v for v in result.values() if v])} fields")
-                return result
+            return parsed_data
             
         except Exception as e:
-            self.logger.error(f"❌ AI extraction error: {e}")
-            
-        return {}
-    
+            self.logger.error(f"❌ AI Call error: {e}")
+            return {}
+
     def _parse_ai_response(self, response_text: str) -> Optional[Dict]:
         """
-        🔧 Parse JSON from Suzume's response with multiple fallback strategies
+        🔧 Parse JSON and clean text dumps.
         """
-        # Strategy 1: Direct JSON parsing
+        # 1. Clean Markdown
+        cleaned = re.sub(r'```json\s*|\s*```', '', response_text).strip()
+        
+        data = {}
         try:
-            # Remove any markdown code blocks
-            cleaned = re.sub(r'```json\s*|\s*```', '', response_text)
-            return json.loads(cleaned.strip())
+            data = json.loads(cleaned)
         except json.JSONDecodeError:
-            pass
-        
-        # Strategy 2: Find JSON object in response
-        json_match = re.search(r'\{[^{}]*\}', response_text, re.DOTALL)
-        if json_match:
-            try:
-                return json.loads(json_match.group(0))
-            except json.JSONDecodeError:
-                pass
-        
-        # Strategy 3: Extract fields individually from response
-        result = {}
-        
-        # Extract each field with patterns
-        patterns = {
-            'name': r'"name":\s*"([^"]+)"',
-            'name_japanese': r'"name_japanese":\s*"([^"]+)"',
-            'name_english': r'"name_english":\s*"([^"]+)"',
-            'email': r'"email":\s*"([^"]+)"',
-            'phone': r'"phone":\s*"([^"]+)"',
-            'date_of_birth': r'"date_of_birth":\s*"([^"]+)"',
-            'skills': r'"skills":\s*\[([^]]+)\]',
-            'working_experience': r'"working_experience":\s*\[([^]]+)\]',
-            'location': r'"location":\s*"([^"]+)"',
-            'school_university': r'"school_university":\s*"([^"]+)"'
-        }
-        
-        for field, pattern in patterns.items():
-            match = re.search(pattern, response_text)
-            if match:
-                value = match.group(1)
-                if value and value.lower() != 'null':
-                    result[field] = value
-        
-        return result if result else None
-    
-    def _post_process_results(self, results: Dict) -> Dict:
-        """
-        🎨 Clean and standardize extracted results using our new utility functions!
-        """
-        # We need our new functions!
-        from utils import standardize_phone_number, standardize_date
-
-        processed = {}
-        
-        # Process name fields
-        if results.get('name'):
-            processed['name'] = self._clean_name(results['name'])
-        elif results.get('name_japanese'):
-            processed['name'] = results['name_japanese']
-        elif results.get('name_english'):
-            processed['name'] = results['name_english']
-        
-        # Store Japanese name separately if available
-        if results.get('name_japanese'):
-            processed['name_japanese'] = self._clean_name(results['name_japanese'])
-        
-        # Process email
-        if results.get('email'):
-            email = results['email']
-            if isinstance(email, str):
-                email = email.lower().strip()
-                if '@' in email:
-                    processed['email'] = email
-        
-        # 🌟 USE THE NEW STANDARDIZATION FUNCTIONS 🌟
-        # Process phone
-        if results.get('phone'):
-            phone = results.get('phone')
-            if isinstance(phone, str):
-                processed['phone'] = standardize_phone_number(phone)
-            elif isinstance(phone, list) and phone:
-                processed['phone'] = standardize_phone_number(phone[0]) if isinstance(phone[0], str) else None
-        
-        # Process date of birth
-        if results.get('date_of_birth'):
-            dob = results.get('date_of_birth')
-            if isinstance(dob, str):
-                processed['date_of_birth'] = standardize_date(dob)
-            elif isinstance(dob, list) and dob:
-                processed['date_of_birth'] = standardize_date(dob[0]) if isinstance(dob[0], str) else None
-
-        # Process new fields
-        if results.get('skills'):
-            skills_list = []
-            raw_skills = results.get('skills')
-            if isinstance(raw_skills, list):
-                for item in raw_skills:
-                    if isinstance(item, str):
-                        skills_list.append(item.strip())
-                    elif isinstance(item, list):
-                        for sub_item in item:
-                            if isinstance(sub_item, str):
-                                skills_list.append(sub_item.strip())
-            elif isinstance(raw_skills, str):
-                # From regex fallback
-                skills_list = [s.strip().strip('"') for s in raw_skills.split(',')]
-            processed['skills'] = [s for s in skills_list if s]
-
-        if results.get('working_experience'):
-            experience_list = []
-            raw_experience = results.get('working_experience')
-            if isinstance(raw_experience, list):
-                for item in raw_experience:
-                    if isinstance(item, str):
-                        experience_list.append(item.strip())
-                    elif isinstance(item, list):
-                        for sub_item in item:
-                            if isinstance(sub_item, str):
-                                experience_list.append(sub_item.strip())
-            elif isinstance(raw_experience, str):
-                experience_list = [s.strip().strip('"') for s in raw_experience.split(',')]
-            processed['working_experience'] = [e for e in experience_list if e]
-
-        if results.get('location'):
-            location = results.get('location')
-            if isinstance(location, str):
-                processed['location'] = location.strip()
-            elif isinstance(location, list) and location:
-                processed['location'] = str(location[0]).strip()
-
-        if results.get('school_university'):
-            school = results.get('school_university')
-            if isinstance(school, str):
-                processed['school_university'] = school.strip()
-            elif isinstance(school, list) and school:
-                processed['school_university'] = str(school[0]).strip()
-        
-        return processed
-
-    def _clean_name(self, name: str) -> str:
-        """Clean and validate name"""
-        name = name.strip()
-        # Remove common prefixes/suffixes that aren't part of the name
-        name = re.sub(r'^(Mr\.|Ms\.|Mrs\.|Dr\.|様|さん|氏)\s*', '', name)
-        name = re.sub(r'\s*(様|さん|氏)$', '', name)
-        return name
-    
-    def _standardize_phone(self, phone: str) -> str:
-        """Standardize phone number format"""
-        # Convert full-width to half-width
-        phone = unicodedata.normalize('NFKC', phone)
-        
-        # Extract digits
-        digits = re.sub(r'\D', '', phone)
-        
-        # Format based on length and pattern
-        if len(digits) == 11 and digits.startswith('0'):
-            # Japanese mobile: 090-1234-5678
-            return f"{digits[:3]}-{digits[3:7]}-{digits[7:]}"
-        elif len(digits) == 10 and digits.startswith('0'):
-            # Japanese landline: 03-1234-5678
-            return f"{digits[:2]}-{digits[2:6]}-{digits[6:]}"
-        elif digits.startswith('81'):
-            # International format
-            return f"81-{digits[2:4]}-{digits[4:8]}-{digits[8:]}"
-        
-        return phone  # Return as-is if can't standardize
-    
-    def _standardize_date(self, date_str: str) -> Optional[str]:
-        """Standardize date to YYYY-MM-DD format"""
-        # Already in correct format?
-        if re.match(r'^\d{4}-\d{2}-\d{2}$', date_str):
-            return date_str
-        
-        # Try various formats
-        date_patterns = [
-            (r'(\d{4})[/年](\d{1,2})[/月](\d{1,2})', '{}-{:02d}-{:02d}'),
-            (r'(\d{1,2})[/](\d{1,2})[/](\d{4})', '{2}-{0:02d}-{1:02d}'),
-        ]
-        
-        for pattern, format_str in date_patterns:
-            match = re.search(pattern, date_str)
+            # Fallback: Find JSON object
+            match = re.search(r'\{.*\}', cleaned, re.DOTALL)
             if match:
                 try:
-                    parts = [int(g) for g in match.groups()]
-                    return format_str.format(*parts)
+                    data = json.loads(match.group(0))
                 except:
                     pass
         
-        return None
-    
+        if not data:
+            self.logger.warning("⚠️ Could not parse JSON from AI response")
+            return {}
+
+        # 2. 🛡️ SAFETY NET: Fix Malformed Lists
+        # If the AI returned a bulleted string instead of a list, fix it now.
+        data = self._fix_malformed_lists(data)
+        
+        return data
+
+    def _fix_malformed_lists(self, data: Dict) -> Dict:
+        """
+        🚑 EMERGENCY ROOM for Malformed Data!
+        This is like plastic surgery for badly extracted JSON, honey! 💉
+        """
+        self.logger.info("🔧 Running malformed data repair...")
+        
+        # ========== FIX SKILLS ==========
+        for field in ['hard_skills', 'soft_skills', 'skills']:
+            if field in data:
+                if isinstance(data[field], str):
+                    self.logger.warning(f"⚠️ {field} was a string - converting to list!")
+                    raw_text = data[field]
+                    
+                    # AGGRESSIVE CLEANING - Remove ALL bullet characters
+                    cleaned = re.sub(r'[•\-–—*â€¢◦▪▫]', '', raw_text)
+                    
+                    # Split by newlines AND commas
+                    items = re.split(r'[\n,;]+', cleaned)
+                    
+                    # Clean each item and filter
+                    clean_list = []
+                    for item in items:
+                        cleaned_item = item.strip()
+                        # Remove numbering like "1.", "2."
+                        cleaned_item = re.sub(r'^\d+\.?\s*', '', cleaned_item)
+                        # Only keep items with actual content
+                        if cleaned_item and len(cleaned_item) > 2 and len(cleaned_item) < 100:
+                            clean_list.append(cleaned_item)
+                    
+                    data[field] = clean_list
+                    self.logger.info(f"✅ Converted {field} to {len(clean_list)} items")
+                
+                elif isinstance(data[field], list):
+                    # Even if it's a list, clean each item
+                    cleaned_items = []
+                    for item in data[field]:
+                        if isinstance(item, str):
+                            cleaned = item.strip().strip('•\-–—*◦▪▫')
+                            cleaned = re.sub(r'^\d+\.?\s*', '', cleaned)
+                            if cleaned and len(cleaned) > 2 and len(cleaned) < 100:
+                                cleaned_items.append(cleaned)
+                    data[field] = cleaned_items
+
+        # ========== FIX EXPERIENCE ==========
+        if 'working_experience' in data:
+            if isinstance(data['working_experience'], str):
+                self.logger.error("🚨 MAJOR ISSUE: AI dumped experience as text!")
+                self.logger.warning("⚠️ Attempting emergency extraction...")
+                
+                raw_text = data['working_experience']
+                
+                # Try to detect individual jobs by company names or date patterns
+                # Look for patterns like "Company Name" followed by role and dates
+                jobs = []
+                
+                # Split by common section separators
+                sections = re.split(r'\n(?=[A-Z][a-zA-Z\s&,\.]+(?:Pvt\.|Ltd\.|Inc\.|Corp|Company))', raw_text)
+                
+                for section in sections:
+                    if len(section.strip()) < 20:
+                        continue
+                    
+                    # Try to extract company (first line usually)
+                    lines = section.split('\n')
+                    company = lines[0].strip() if lines else "Unknown Company"
+                    
+                    # Look for date patterns
+                    date_match = re.search(r'(\w+\s+\d{4}\s*[-–]\s*(?:\w+\s+\d{4}|Present))', section)
+                    dates = date_match.group(1) if date_match else "N/A"
+                    
+                    # Role is often the second line or has keywords
+                    role = "See Description"
+                    for line in lines[1:4]:  # Check first few lines
+                        if any(keyword in line.lower() for keyword in ['engineer', 'manager', 'developer', 'analyst', 'specialist', 'executive']):
+                            role = line.strip()
+                            break
+                    
+                    # Description is the rest (truncated)
+                    description = section[:400] if len(section) > 400 else section
+                    
+                    jobs.append({
+                        "company": company[:100],
+                        "role": role[:100],
+                        "dates": dates,
+                        "description": description
+                    })
+                
+                data['working_experience'] = jobs if jobs else [{
+                    "company": "Parse Failed - Manual Review Needed",
+                    "role": "Multiple Roles",
+                    "dates": "See Description",
+                    "description": raw_text[:500]
+                }]
+                
+                self.logger.info(f"✅ Extracted {len(data['working_experience'])} jobs from text dump")
+            
+            elif isinstance(data['working_experience'], list):
+                # Validate each job object
+                validated_jobs = []
+                for job in data['working_experience']:
+                    if isinstance(job, dict):
+                        # Ensure required fields exist
+                        validated_job = {
+                            "company": str(job.get('company', 'Unknown'))[:100],
+                            "role": str(job.get('role', 'N/A'))[:100],
+                            "dates": str(job.get('dates', 'N/A')),
+                            "description": str(job.get('description', ''))[:500]
+                        }
+                        validated_jobs.append(validated_job)
+                
+                data['working_experience'] = validated_jobs
+
+        # ========== FIX EDUCATION ==========
+        if 'education' in data:
+            if isinstance(data['education'], str):
+                self.logger.warning("⚠️ Education was a string - attempting to structure...")
+                data['education'] = [{
+                    "institution": "See Description",
+                    "degree": "Multiple Degrees",
+                    "dates": "N/A",
+                    "description": data['education'][:300]
+                }]
+            elif isinstance(data['education'], list):
+                validated_edu = []
+                for edu in data['education']:
+                    if isinstance(edu, dict):
+                        validated_edu.append({
+                            "institution": str(edu.get('institution', 'Unknown'))[:150],
+                            "degree": str(edu.get('degree', 'N/A'))[:150],
+                            "dates": str(edu.get('dates', 'N/A'))
+                        })
+                data['education'] = validated_edu
+
+        return data
+
+    def _validate_deep_extraction(self, data: Dict, original_response: str) -> Dict:
+        """
+        🔍 THE QUALITY CONTROL DIVA checks if AI did its job properly!
+        If not, she throws a FIT and demands a re-do! 💅
+        """
+        issues_found = []
+        
+        # Check 1: Are skills actually lists?
+        for skill_field in ['hard_skills', 'soft_skills']:
+            if skill_field in data:
+                if isinstance(data[skill_field], str):
+                    issues_found.append(f"{skill_field} is a string instead of array")
+                elif isinstance(data[skill_field], list) and len(data[skill_field]) > 0:
+                    # Check if first item looks like it has bullets
+                    first_item = str(data[skill_field][0])
+                    if any(char in first_item for char in ['•', '\n', '–']):
+                        issues_found.append(f"{skill_field} contains improperly formatted items")
+        
+        # Check 2: Is experience properly structured?
+        if 'working_experience' in data:
+            if isinstance(data['working_experience'], str):
+                issues_found.append("working_experience is a string (should be array of objects)")
+            elif isinstance(data['working_experience'], list):
+                if len(data['working_experience']) > 0:
+                    first_job = data['working_experience'][0]
+                    if isinstance(first_job, dict):
+                        # Check if description is suspiciously long (sign of text dump)
+                        desc = first_job.get('description', '')
+                        if len(desc) > 1000:
+                            issues_found.append("Job description is too long (possible text dump)")
+        
+        # Check 3: Response length check - if response is > 80% of original text, likely a dump
+        if len(original_response) > 5000:
+            issues_found.append("Response is excessively long (possible text dump)")
+        
+        # Log issues
+        if issues_found:
+            self.logger.warning(f"⚠️ VALIDATION ISSUES DETECTED:")
+            for issue in issues_found:
+                self.logger.warning(f"   ⚠️ {issue}")
+            self.logger.info("🔧 Applying aggressive cleanup...")
+        
+        # Always run cleanup regardless
+        return self._fix_malformed_lists(data)
+
     def validate_and_enhance(self, regex_results: Dict, text: str) -> Dict:
         """
-        🔍 Validate regex results and fill in missing fields with AI
+        🔍 Merge Regex + AI results
         """
         if not self.available:
             return regex_results
         
-        # Get AI extraction
-        ai_results = self.extract_all_fields(text)
-        
-        # Merge results intelligently
         final_results = regex_results.copy()
         
-        # For each field, prefer regex if available, otherwise use AI
-        for field in ['name', 'name_japanese', 'email', 'phone', 'date_of_birth']:
-            if not final_results.get(field) and ai_results.get(field):
-                final_results[field] = ai_results[field]
-                final_results[f"{field}_source"] = "AI"
-            elif final_results.get(field):
-                final_results[f"{field}_source"] = "Regex"
+        # Pass 1: Headers
+        ai_header = self.extract_header_fields(text)
+        if ai_header:
+            for field in ['name', 'email', 'phone', 'location', 'linkedin', 'website']:
+                if ai_header.get(field):
+                    final_results[field] = ai_header[field]
+                    final_results[f"{field}_source"] = "AI_Header"
+
+        # Pass 2: Deep Fields
+        ai_deep = self.extract_deep_fields(text)
+        if ai_deep:
+            final_results['hard_skills'] = ai_deep.get('hard_skills', [])
+            final_results['soft_skills'] = ai_deep.get('soft_skills', [])
+            
+            # Combine for backwards compatibility
+            final_results['skills'] = final_results['hard_skills'] + final_results['soft_skills']
+            
+            final_results['working_experience'] = ai_deep.get('working_experience', [])
+            final_results['education'] = ai_deep.get('education', [])
+            final_results['experience_source'] = "AI_Deep"
+
+        return self._post_process_results(final_results)
+
+    def _post_process_results(self, results: Dict) -> Dict:
+        """
+        🎨 Final Cleanup
+        """
+        processed = results.copy()
         
-        # Special handling for names - validate with AI
-        if final_results.get('name') and ai_results.get('name'):
-            # If AI found a different name, it might be more accurate
-            if final_results['name'].lower() != ai_results['name'].lower():
-                self.logger.warning(f"🤔 Name mismatch - Regex: {final_results['name']}, AI: {ai_results['name']}")
-                # You can add logic here to choose which one to trust
+        # Phone Standardizer
+        if processed.get('phone'):
+            val = processed['phone']
+            if isinstance(val, list): val = val[0]
+            if isinstance(val, str):
+                processed['phone'] = standardize_phone_number(val)
         
-        final_results['ai_enhanced'] = True
-        return final_results
+        # Name Cleaner
+        if processed.get('name'):
+            processed['name'] = self._clean_name(processed['name'])
+
+        # Ensure Lists
+        for f in ['hard_skills', 'soft_skills', 'working_experience', 'education']:
+            if f not in processed or not isinstance(processed[f], list):
+                processed[f] = []
+
+        processed['ai_enhanced'] = True
+        return processed
+
+    def _clean_name(self, name: str) -> str:
+        if not isinstance(name, str): return ""
+        name = name.strip()
+        name = re.sub(r'^(Mr\.|Ms\.|Mrs\.|Dr\.|Prof\.|Eng\.)\s*', '', name, flags=re.IGNORECASE)
+        name = re.sub(r',\s*(PhD|MD|MBA|M\.Sc|B\.Sc)$', '', name, flags=re.IGNORECASE)
+        return name

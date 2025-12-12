@@ -940,51 +940,139 @@ class UltimateResumeExtractor:
 
     def _extract_data_from_text(self, text: str) -> Tuple[Dict, bool]:
         """
-        A helper to extract data from a single block of text.
-        This encapsulates our AI-first, Regex-fallback strategy.
-        Returns the extracted data and a boolean indicating if AI was used.
+        🎯 Extract data with proper field mapping!
+        Returns formatted dict + whether AI was used
         """
         from utils import standardize_phone_number, standardize_date
+        
         final_results = {}
         ai_assisted = False
         
         # Try AI extraction first if enabled
         if self.ai_enabled:
             try:
-                ai_results = self.ai_extractor.extract_all_fields(text)
+                logger.info("🤖 Attempting AI extraction...")
+                
+                # 🌟 Use the CORRECT methods!
+                header_data = self.ai_extractor.extract_header_fields(text)
+                deep_data = self.ai_extractor.extract_deep_fields(text)
+                
+                # Merge results
+                ai_results = {**header_data, **deep_data}
+                
                 if ai_results:
                     final_results.update(ai_results)
                     ai_assisted = True
-                    logger.info("🤖 AI extraction successful")
+                    logger.info(f"✅ AI extracted: {list(ai_results.keys())}")
             except Exception as e:
                 logger.warning(f"⚠️ AI extraction failed: {e}")
         
-        # Fallback to regex for any missing fields
-        required_fields = ['name', 'email', 'phone', 'date_of_birth', 'skills', 'working_experience', 'location', 'school_university']
+        # Fallback to regex for missing fields
+        required_fields = ['name', 'email', 'phone', 'date_of_birth']
         missing_fields = [field for field in required_fields if not final_results.get(field)]
         
         if not self.ai_enabled or missing_fields:
-            logger.info(f"⚡ Using regex for fields: {missing_fields if missing_fields else 'all'}")
+            logger.info(f"⚡ Using regex for: {missing_fields if missing_fields else 'all fields'}")
             regex_results = self._extract_with_mega_regex(text)
             
-            # Fill in missing fields from regex results
-            for field in missing_fields:
+            # Fill in missing fields
+            for field in required_fields:
                 if not final_results.get(field) and regex_results.get(field):
-                    final_results[field] = regex_results.get(field)
+                    final_results[field] = regex_results[field]
         
-        # Standardize and format for output
+        # 🎯 FORMAT THE OUTPUT PROPERLY!
         formatted_data = {
             "Name": final_results.get("name"),
             "Email": final_results.get("email"),
-            "Phone": final_results.get("phone"),  # <-- DON'T standardize, keep as-is from AI
+            "Phone": final_results.get("phone"),
             "Date_of_Birth": standardize_date(final_results.get("date_of_birth")),
-            "Skills": final_results.get("skills"),
-            "Working_Experience": final_results.get("working_experience"),
+
+            # 💎 THE CRITICAL FIX: Convert lists to JSON strings for CSV export!
+            "Skills": self._format_skills_for_export(final_results),
+            "Working_Experience": self._format_experience_for_export(final_results),
+
             "Location": final_results.get("location"),
-            "School_University": final_results.get("school_university"),
-}
+            "School_University": self._format_education_for_export(final_results),
+        }
         
         return formatted_data, ai_assisted
+
+    def _format_skills_for_export(self, data: Dict) -> Optional[str]:
+        """
+        🎨 Format skills for CSV export
+        Combines hard + soft skills into readable format
+        """
+        import json
+        
+        hard_skills = data.get("hard_skills", [])
+        soft_skills = data.get("soft_skills", [])
+        
+        if not hard_skills and not soft_skills:
+            return None
+        
+        # Option 1: JSON format (structured)
+        # return json.dumps({"hard": hard_skills, "soft": soft_skills}, ensure_ascii=False)
+        
+        # Option 2: Readable list format (better for humans)
+        all_skills = []
+        if hard_skills:
+            all_skills.extend([f"[TECH] {s}" for s in hard_skills])
+        if soft_skills:
+            all_skills.extend([f"[SOFT] {s}" for s in soft_skills])
+        
+        return " | ".join(all_skills)
+
+    def _format_experience_for_export(self, data: Dict) -> Optional[str]:
+        """
+        💼 Format work experience for CSV export
+        Creates readable summary of jobs
+        """
+        import json
+        
+        experience = data.get("working_experience", [])
+        
+        if not experience or not isinstance(experience, list):
+            return None
+        
+        # Option 1: JSON format
+        # return json.dumps(experience, ensure_ascii=False)
+        
+        # Option 2: Readable summary format
+        job_summaries = []
+        for job in experience:
+            if isinstance(job, dict):
+                company = job.get('company', 'Unknown')
+                role = job.get('role', 'N/A')
+                dates = job.get('dates', 'N/A')
+                job_summaries.append(f"{company} - {role} ({dates})")
+        
+        return " || ".join(job_summaries)
+
+    def _format_education_for_export(self, data: Dict) -> Optional[str]:
+        """
+        🎓 Format education for CSV export
+        Creates readable summary of education entries
+        """
+        import json
+
+        education = data.get("education", [])
+
+        if not education or not isinstance(education, list):
+            return None
+
+        # Option 1: JSON format
+        # return json.dumps(education, ensure_ascii=False)
+
+        # Option 2: Readable summary format
+        edu_summaries = []
+        for edu in education:
+            if isinstance(edu, dict):
+                institution = edu.get('institution', 'Unknown')
+                degree = edu.get('degree', 'N/A')
+                dates = edu.get('dates', 'N/A')
+                edu_summaries.append(f"{degree} from {institution} ({dates})")
+
+        return " || ".join(edu_summaries)
 
     def _extract_name_from_folder(self, folder_path: str) -> Optional[str]:
         """
@@ -1074,24 +1162,34 @@ class UltimateResumeExtractor:
             if text:
                 combined_text += text + "\n\n"
         
+        
         # Extract data
         if combined_text and len(combined_text.strip()) > 50:
             extracted_data, ai_used = self._extract_data_from_text(combined_text)
             
+            # 🔍 DEBUG: See what we actually got
+            logger.info("📊 Extraction results:")
+            logger.info(f"   Name: {extracted_data.get('Name', 'NOT FOUND')}")
+            logger.info(f"   Email: {extracted_data.get('Email', 'NOT FOUND')}")
+            logger.info(f"   Skills: {extracted_data.get('Skills', 'NOT FOUND')[:100] if extracted_data.get('Skills') else 'NOT FOUND'}...")
+            logger.info(f"   Experience: {extracted_data.get('Working_Experience', 'NOT FOUND')[:100] if extracted_data.get('Working_Experience') else 'NOT FOUND'}...")
+            
             if ai_used:
                 result["AI_Assisted"] = True
             
-            # Update result
-            for field in ["Name", "Email", "Phone", "Date_of_Birth", "Skills", 
+
+            # Update result - now with PROPER field mapping!
+            for field in ["Name", "Email", "Phone", "Date_of_Birth", "Skills",
                         "Working_Experience", "Location", "School_University"]:
                 if extracted_data.get(field):
                     result[field] = extracted_data[field]
-        
-        # Set status
-        self._set_extraction_status(result, combined_text)
-        
-        logger.info(f"✅ Completed: {result['Extraction_Status']}")
-        return result         
+                    logger.debug(f"✅ Updated {field}: {str(extracted_data[field])[:100]}...")
+
+            # Set status after ALL fields are updated
+            self._set_extraction_status(result, combined_text)
+
+            logger.info(f"✅ Completed: {result['Extraction_Status']}")
+            return result         
 
     def _extract_name_from_filename(self, file_name: str) -> Optional[str]:
         filename_without_ext = os.path.splitext(file_name)[0]
