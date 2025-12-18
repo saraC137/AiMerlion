@@ -73,6 +73,7 @@ Levenshtein
 libclang
 llama2
 lxml
+marker-pdf
 marisa-trie
 Markdown
 markdown-it-py

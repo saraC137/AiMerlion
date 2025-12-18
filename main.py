@@ -24,6 +24,8 @@ import json
 import config
 from utils import display_menu, save_checkpoint, load_checkpoint, print_batch_table, FeedbackLoopSystem, InteractiveCorrectionSystem, PatternLearningSystem, PerformanceMonitor, standardize_phone_number, standardize_date
 from ai_validator import AIValidator
+from marker_extractor import get_marker_extractor
+from document_parser import DocumentParser
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -66,24 +68,42 @@ class UltimateResumeExtractor:
 
     def __init__(self, model_name: str):
         self.model_name = model_name
-        
-        # ✨ REMOVED: Japanese OCR (PaddleOCR)
-        # self.ocr = PaddleOCR(use_angle_cls=True, lang='japan')
-        
-        # 🆕 ADD: English OCR (much faster!)
+
+        # 📄 Marker PDF Extractor
+        self.use_marker = config.USE_MARKER_PDF
+        self.marker_extractor = None
+        if self.use_marker:
+            try:
+                self.marker_extractor = get_marker_extractor()
+                if self.marker_extractor.available:
+                    logger.info("📄 Marker PDF extraction ENABLED!")
+                else:
+                    logger.warning("⚠️ Marker not available - using pdfplumber")
+            except Exception as e:
+                logger.warning(f"⚠️ Marker init failed: {e} - using pdfplumber")
+
+        # 🆕 OCR Engine Setup
+        self.use_ocr = getattr(config, 'USE_OCR', True)
+        self.ocr_engine = getattr(config, 'OCR_ENGINE', 'pytesseract')
+        self.ocr_available = False
+        self.ocr_instance = None
+
+        if self.use_ocr:
+            self._initialize_ocr_engine()
+
+        # 📄 Document Parser (for vector/outline text PDFs)
+        self.document_parser = None
         try:
-            import pytesseract
-            self.ocr_available = True
-            logger.info("✨ English OCR ready!")
-        except ImportError:
-            self.ocr_available = False
-            logger.warning("⚠️ pytesseract not available - OCR disabled")
-        
+            self.document_parser = DocumentParser()
+            logger.info("📄 DocumentParser initialized for OCR fallback")
+        except Exception as e:
+            logger.warning(f"⚠️ DocumentParser init failed: {e}")
+
         # AI setup
         self.use_ai = config.USE_AI_EXTRACTION
         self.ai_extractor = None
         self.ai_enabled = False
-        
+
         if self.use_ai:
             try:
                 from ai_extractor import AIExtractor
@@ -97,6 +117,153 @@ class UltimateResumeExtractor:
                 logger.error(f"❌ Could not initialize AI: {e}")
         else:
             logger.info("🎯 AI extraction disabled - using regex only")
+
+    def _initialize_ocr_engine(self):
+        """
+        🔧 Initialize the configured OCR engine
+        Supports: pytesseract, paddleocr, easyocr
+        """
+        ocr_engine = self.ocr_engine.lower()
+
+        if ocr_engine == "pytesseract":
+            try:
+                import pytesseract
+                # Test if tesseract is available
+                pytesseract.get_tesseract_version()
+                self.ocr_available = True
+                self.ocr_instance = pytesseract
+                logger.info("✅ Pytesseract OCR initialized!")
+            except Exception as e:
+                logger.warning(f"⚠️ Pytesseract not available: {e}")
+                self._try_fallback_ocr()
+
+        elif ocr_engine == "paddleocr":
+            try:
+                from paddleocr import PaddleOCR
+                lang = getattr(config, 'OCR_LANGUAGE', 'en')
+                # Map common language codes
+                paddle_lang = 'en' if lang == 'eng' else lang
+                self.ocr_instance = PaddleOCR(
+                    use_angle_cls=True,
+                    lang=paddle_lang,
+                    show_log=False
+                )
+                self.ocr_available = True
+                logger.info("✅ PaddleOCR initialized!")
+            except Exception as e:
+                logger.warning(f"⚠️ PaddleOCR not available: {e}")
+                self._try_fallback_ocr()
+
+        elif ocr_engine == "easyocr":
+            try:
+                import easyocr
+                lang = getattr(config, 'OCR_LANGUAGE', 'en')
+                # Map to easyocr language code
+                easy_lang = ['en'] if lang == 'eng' else [lang]
+                self.ocr_instance = easyocr.Reader(easy_lang, gpu=False)
+                self.ocr_available = True
+                logger.info("✅ EasyOCR initialized!")
+            except Exception as e:
+                logger.warning(f"⚠️ EasyOCR not available: {e}")
+                self._try_fallback_ocr()
+        else:
+            logger.warning(f"⚠️ Unknown OCR engine: {ocr_engine}, trying pytesseract")
+            self.ocr_engine = "pytesseract"
+            self._initialize_ocr_engine()
+
+    def _try_fallback_ocr(self):
+        """Try alternative OCR engines if primary fails"""
+        fallback_engines = ["pytesseract", "paddleocr", "easyocr"]
+        current = self.ocr_engine.lower()
+
+        for engine in fallback_engines:
+            if engine != current:
+                logger.info(f"🔄 Trying fallback OCR: {engine}")
+                self.ocr_engine = engine
+                try:
+                    self._initialize_ocr_engine()
+                    if self.ocr_available:
+                        return
+                except:
+                    continue
+
+        logger.warning("❌ No OCR engine available - OCR disabled")
+        self.ocr_available = False
+
+    def _extract_with_ocr(self, file_path: str) -> Optional[str]:
+        """
+        📸 Extract text from PDF using OCR
+        Uses the same simple approach as test_ocr.py for reliability
+        """
+        if not self.ocr_available:
+            return None
+
+        file_name = os.path.basename(file_path)
+        ocr_dpi = getattr(config, 'OCR_DPI', 200)  # Default 200 like test_ocr.py
+
+        try:
+            logger.info(f"📸 Running OCR on {file_name} using {self.ocr_engine} (DPI: {ocr_dpi})...")
+
+            # Convert PDF to images (same as test_ocr.py)
+            images = pdf2image.convert_from_path(file_path, dpi=ocr_dpi)
+            logger.info(f"   🖼️ Converted {len(images)} pages to images")
+
+            all_text = []
+
+            for i, img in enumerate(images):
+                logger.info(f"   📄 OCR processing page {i+1}/{len(images)}")
+                page_text = ""
+
+                if self.ocr_engine == "pytesseract":
+                    # Simple call like test_ocr.py - NO extra config for reliability!
+                    page_text = self.ocr_instance.image_to_string(img, lang='eng')
+
+                elif self.ocr_engine == "paddleocr":
+                    # Convert PIL Image to numpy array
+                    img_array = np.array(img)
+                    result = self.ocr_instance.ocr(img_array, cls=True)
+
+                    # Extract ALL text from PaddleOCR (no confidence filter)
+                    if result and result[0]:
+                        for line in result[0]:
+                            if line and len(line) >= 2:
+                                text = line[1][0] if isinstance(line[1], tuple) else line[1]
+                                page_text += str(text) + "\n"
+
+                elif self.ocr_engine == "easyocr":
+                    # Convert PIL Image to numpy array
+                    img_array = np.array(img)
+                    result = self.ocr_instance.readtext(img_array)
+
+                    # Extract ALL text from EasyOCR (no confidence filter)
+                    for detection in result:
+                        text = detection[1]
+                        page_text += text + "\n"
+                else:
+                    page_text = ""
+
+                if page_text.strip():
+                    all_text.append(page_text.strip())
+                    word_count = len(page_text.split())
+                    logger.info(f"      ✅ Page {i+1}: {word_count} words extracted")
+                else:
+                    logger.warning(f"      ⚠️ Page {i+1}: No text extracted")
+
+            combined_text = "\n\n".join(all_text)
+
+            if combined_text.strip():
+                total_words = len(combined_text.split())
+                logger.info(f"✅ OCR complete: {len(combined_text)} chars, {total_words} words from {file_name}")
+                return combined_text
+            else:
+                logger.warning(f"⚠️ OCR produced no text from {file_name}")
+                return None
+
+        except Exception as e:
+            logger.error(f"❌ OCR failed for {file_name}: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+            return None
 
     def process_individual_file(self, file_path: str) -> Dict:
         """
@@ -885,58 +1052,200 @@ class UltimateResumeExtractor:
         return re.sub(r'[（(].*?[）)]', '', name).strip()
 
     def get_text_from_file(self, file_path: str) -> Optional[str]:
-        """📄 Enhanced text extraction - ENGLISH ONLY!"""
+        """📄 Enhanced text extraction with Marker, pdfplumber, and OCR - supports hybrid mode"""
         file_name = os.path.basename(file_path)
-        if file_name.startswith('~$'): 
+        if file_name.startswith('~$'):
             return None
-        
+
         text = ""
+        ocr_min_threshold = getattr(config, 'OCR_MIN_TEXT_THRESHOLD', 100)
+        hybrid_extraction = getattr(config, 'HYBRID_EXTRACTION', True)
+        hybrid_merge_mode = getattr(config, 'HYBRID_MERGE_MODE', 'combine')
+
         try:
             if file_path.lower().endswith('.pdf'):
-                # Try pdfplumber first
-                with pdfplumber.open(file_path) as pdf:
-                    for page in pdf.pages:
-                        page_text = page.extract_text()
-                        if page_text:
-                            text += page_text + "\n"
-                
-                # If no text or very little, try OCR
-                if not text or len(text.strip()) < 50:
-                    logger.warning(f"📸 Low text from pdfplumber, trying OCR for {file_name}")
-                    
-                    if self.ocr_available:
-                        try:
-                            import pytesseract
-                            images = pdf2image.convert_from_path(file_path, dpi=300)
-                            ocr_text = ""
-                            
-                            for i, img in enumerate(images):
-                                logger.info(f"   🖼️ OCR processing page {i+1}/{len(images)}")
-                                page_text = pytesseract.image_to_string(img, lang='eng')
-                                ocr_text += page_text + "\n"
-                            
-                            if len(ocr_text.strip()) > len(text.strip()):
-                                text = ocr_text
-                                logger.info(f"✅ OCR extracted {len(text)} characters")
-                        
-                        except Exception as ocr_error:
-                            logger.error(f"❌ OCR failed for {file_name}: {ocr_error}")
-            
+                # 🌟 HYBRID MODE: Extract with both methods and combine
+                if hybrid_extraction and self.use_ocr and self.ocr_available:
+                    logger.info(f"🔀 HYBRID EXTRACTION MODE for {file_name}")
+
+                    # Step 1: Get text from Marker/pdfplumber (selectable text)
+                    extracted_text = self._extract_selectable_text(file_path)
+
+                    # Step 2: Get text from OCR (image-based text)
+                    logger.info(f"📸 Running OCR to capture image-based text...")
+                    ocr_text = self._extract_with_ocr(file_path)
+
+                    # Step 3: Merge results
+                    if extracted_text and ocr_text:
+                        if hybrid_merge_mode == "combine":
+                            text = self._merge_extracted_texts(extracted_text, ocr_text, file_name)
+                        else:  # "longest" mode
+                            text = extracted_text if len(extracted_text) >= len(ocr_text) else ocr_text
+                            logger.info(f"📊 Using {'extracted' if len(extracted_text) >= len(ocr_text) else 'OCR'} text (longer)")
+                    elif extracted_text:
+                        text = extracted_text
+                        logger.info(f"📄 Using extracted text only ({len(text)} chars)")
+                    elif ocr_text:
+                        text = ocr_text
+                        logger.info(f"📸 Using OCR text only ({len(text)} chars)")
+
+                    if text:
+                        return self._clean_text(text)
+
+                # 🌟 Standard extraction (non-hybrid mode)
+                # Strategy 1: Try Marker first (best quality)
+                if self.use_marker and self.marker_extractor and self.marker_extractor.available:
+                    logger.info(f"📄 Trying Marker extraction for {file_name}")
+                    text = self.marker_extractor.extract_pdf(file_path, use_ocr_fallback=False)
+
+                    if text and len(text.strip()) >= ocr_min_threshold:
+                        logger.info(f"✅ Marker successfully extracted {len(text)} chars")
+                        stats = self.marker_extractor.get_extraction_stats(text)
+                        logger.info(f"   📊 Sections: {stats.get('sections_found', 0)}, Tables: {stats.get('table_rows', 0)} rows")
+                        return self._clean_text(text)
+                    else:
+                        logger.warning(f"⚠️ Marker extracted insufficient text from {file_name}")
+
+                # Strategy 2: Fallback to pdfplumber
+                if not text or len(text.strip()) < ocr_min_threshold:
+                    logger.info(f"📄 Using pdfplumber for {file_name}")
+                    with pdfplumber.open(file_path) as pdf:
+                        for page in pdf.pages:
+                            page_text = page.extract_text()
+                            if page_text:
+                                text += page_text + "\n"
+
+                    if text and len(text.strip()) >= 50:
+                        logger.info(f"✅ pdfplumber extracted {len(text)} chars")
+
+                # Strategy 3: OCR fallback
+                if not text or len(text.strip()) < ocr_min_threshold:
+                    if self.use_ocr and self.ocr_available:
+                        logger.warning(f"📸 Low text, trying OCR for {file_name}")
+                        ocr_text = self._extract_with_ocr(file_path)
+                        if ocr_text and len(ocr_text.strip()) > len(text.strip() if text else ""):
+                            text = ocr_text
+                            logger.info(f"✅ OCR improved extraction: {len(text)} characters")
+
             elif file_path.lower().endswith('.docx'):
                 doc = docx.Document(file_path)
                 text = "\n".join([p.text for p in doc.paragraphs])
-                
+
                 # Also extract from tables
                 for table in doc.tables:
                     for row in table.rows:
                         for cell in row.cells:
                             text += "\n" + cell.text
-            
+
             return self._clean_text(text)
-        
+
         except Exception as e:
             logger.error(f"❌ Extraction failed for {file_name}: {e}")
             return None
+
+    def _extract_selectable_text(self, file_path: str) -> Optional[str]:
+        """Extract selectable/highlightable text from PDF using Marker, pdfplumber, or DocumentParser"""
+        file_name = os.path.basename(file_path)
+        text = ""
+
+        # Try Marker first
+        if self.use_marker and self.marker_extractor and self.marker_extractor.available:
+            text = self.marker_extractor.extract_pdf(file_path, use_ocr_fallback=False)
+            if text and len(text.strip()) >= 50:
+                logger.info(f"✅ Marker extracted {len(text)} chars of selectable text")
+                return text
+
+        # Fallback to pdfplumber
+        try:
+            with pdfplumber.open(file_path) as pdf:
+                for page in pdf.pages:
+                    page_text = page.extract_text()
+                    if page_text:
+                        text += page_text + "\n"
+
+            if text and len(text.strip()) >= 50:
+                logger.info(f"✅ pdfplumber extracted {len(text)} chars of selectable text")
+                return text
+        except Exception as e:
+            logger.warning(f"⚠️ pdfplumber failed: {e}")
+
+        # Fallback to DocumentParser (handles vector/outline text PDFs with OCR)
+        if self.document_parser and (not text or len(text.strip()) < 50):
+            logger.info(f"📄 Trying DocumentParser for {file_name} (may use OCR)...")
+            try:
+                doc_text, method = self.document_parser.parse(file_path)
+                if doc_text and len(doc_text.strip()) >= 50:
+                    logger.info(f"✅ DocumentParser extracted {len(doc_text)} chars using {method}")
+                    return doc_text
+            except Exception as e:
+                logger.warning(f"⚠️ DocumentParser failed: {e}")
+
+        return text if text else None
+
+    def _merge_extracted_texts(self, extracted_text: str, ocr_text: str, file_name: str) -> str:
+        """
+        🔀 Intelligently merge text extraction + OCR results
+        Combines both to capture all text (selectable + image-based)
+        """
+        logger.info(f"🔀 Merging extracted text ({len(extracted_text)} chars) + OCR ({len(ocr_text)} chars)")
+
+        # Normalize texts for comparison
+        extracted_lines = set(line.strip().lower() for line in extracted_text.split('\n') if line.strip() and len(line.strip()) > 3)
+        ocr_lines = [line.strip() for line in ocr_text.split('\n') if line.strip() and len(line.strip()) > 3]
+
+        # Find OCR lines that aren't in extracted text (these are likely from images)
+        new_from_ocr = []
+        for line in ocr_lines:
+            line_lower = line.lower()
+            # Check if this OCR line is substantially different from extracted text
+            is_new = True
+            for extracted_line in extracted_lines:
+                # Use fuzzy matching - if >70% similar, consider it a duplicate
+                if self._text_similarity(line_lower, extracted_line) > 0.7:
+                    is_new = False
+                    break
+            if is_new:
+                new_from_ocr.append(line)
+
+        # Combine: use extracted text as base, add unique OCR content
+        if new_from_ocr:
+            additional_text = "\n".join(new_from_ocr)
+            logger.info(f"📸 Found {len(new_from_ocr)} additional lines from OCR (image-based text)")
+
+            # Add OCR content at the end with a marker
+            merged = extracted_text.strip() + "\n\n" + additional_text
+            logger.info(f"✅ Merged result: {len(merged)} total chars")
+            return merged
+        else:
+            logger.info(f"📄 No additional text from OCR, using extracted text")
+            return extracted_text
+
+    def _text_similarity(self, text1: str, text2: str) -> float:
+        """Calculate similarity ratio between two texts (0.0 to 1.0)"""
+        if not text1 or not text2:
+            return 0.0
+
+        # Simple character-based similarity
+        if text1 == text2:
+            return 1.0
+
+        # Check if one contains the other
+        if text1 in text2 or text2 in text1:
+            return 0.9
+
+        # Use difflib for more accurate comparison
+        try:
+            from difflib import SequenceMatcher
+            return SequenceMatcher(None, text1, text2).ratio()
+        except:
+            # Fallback: simple word overlap
+            words1 = set(text1.split())
+            words2 = set(text2.split())
+            if not words1 or not words2:
+                return 0.0
+            intersection = words1 & words2
+            union = words1 | words2
+            return len(intersection) / len(union) if union else 0.0
 
     def _extract_data_from_text(self, text: str) -> Tuple[Dict, bool]:
         """
