@@ -26,6 +26,7 @@ from utils import display_menu, save_checkpoint, load_checkpoint, print_batch_ta
 from ai_validator import AIValidator
 from marker_extractor import get_marker_extractor
 from document_parser import DocumentParser
+from pdf_inspector import analyze_pdf_type
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -1052,80 +1053,91 @@ class UltimateResumeExtractor:
         return re.sub(r'[（(].*?[）)]', '', name).strip()
 
     def get_text_from_file(self, file_path: str) -> Optional[str]:
-        """📄 Enhanced text extraction with Marker, pdfplumber, and OCR - supports hybrid mode"""
+        """📄 Enhanced text extraction with PDF inspection - uses OCR only when images detected"""
         file_name = os.path.basename(file_path)
         if file_name.startswith('~$'):
             return None
 
         text = ""
         ocr_min_threshold = getattr(config, 'OCR_MIN_TEXT_THRESHOLD', 100)
-        hybrid_extraction = getattr(config, 'HYBRID_EXTRACTION', True)
         hybrid_merge_mode = getattr(config, 'HYBRID_MERGE_MODE', 'combine')
 
         try:
             if file_path.lower().endswith('.pdf'):
-                # 🌟 HYBRID MODE: Extract with both methods and combine
-                if hybrid_extraction and self.use_ocr and self.ocr_available:
-                    logger.info(f"🔀 HYBRID EXTRACTION MODE for {file_name}")
+                # 🔍 STEP 1: Inspect PDF to determine extraction strategy
+                pdf_info = analyze_pdf_type(file_path)
+                logger.info(f"🔍 PDF Inspector: {file_name} → type={pdf_info['pdf_type']}, "
+                           f"images={pdf_info['image_count']}, text={pdf_info['text_length']} chars, "
+                           f"needs_ocr={pdf_info['needs_ocr']}")
 
-                    # Step 1: Get text from Marker/pdfplumber (selectable text)
-                    extracted_text = self._extract_selectable_text(file_path)
+                # 📄 CASE 1: Text-only PDF - no OCR needed
+                if not pdf_info['needs_ocr']:
+                    logger.info(f"📄 Text-only PDF detected - skipping OCR for {file_name}")
 
-                    # Step 2: Get text from OCR (image-based text)
-                    logger.info(f"📸 Running OCR to capture image-based text...")
-                    ocr_text = self._extract_with_ocr(file_path)
+                    # Try Marker first (best quality)
+                    if self.use_marker and self.marker_extractor and self.marker_extractor.available:
+                        logger.info(f"📄 Using Marker extraction for {file_name}")
+                        text = self.marker_extractor.extract_pdf(file_path, use_ocr_fallback=False)
 
-                    # Step 3: Merge results
-                    if extracted_text and ocr_text:
-                        if hybrid_merge_mode == "combine":
-                            text = self._merge_extracted_texts(extracted_text, ocr_text, file_name)
-                        else:  # "longest" mode
-                            text = extracted_text if len(extracted_text) >= len(ocr_text) else ocr_text
-                            logger.info(f"📊 Using {'extracted' if len(extracted_text) >= len(ocr_text) else 'OCR'} text (longer)")
-                    elif extracted_text:
-                        text = extracted_text
-                        logger.info(f"📄 Using extracted text only ({len(text)} chars)")
-                    elif ocr_text:
-                        text = ocr_text
-                        logger.info(f"📸 Using OCR text only ({len(text)} chars)")
+                        if text and len(text.strip()) >= ocr_min_threshold:
+                            logger.info(f"✅ Marker successfully extracted {len(text)} chars")
+                            stats = self.marker_extractor.get_extraction_stats(text)
+                            logger.info(f"   📊 Sections: {stats.get('sections_found', 0)}, Tables: {stats.get('table_rows', 0)} rows")
+                            return self._clean_text(text)
 
-                    if text:
-                        return self._clean_text(text)
+                    # Fallback to pdfplumber
+                    if not text or len(text.strip()) < ocr_min_threshold:
+                        logger.info(f"📄 Using pdfplumber for {file_name}")
+                        with pdfplumber.open(file_path) as pdf:
+                            for page in pdf.pages:
+                                page_text = page.extract_text()
+                                if page_text:
+                                    text += page_text + "\n"
 
-                # 🌟 Standard extraction (non-hybrid mode)
-                # Strategy 1: Try Marker first (best quality)
-                if self.use_marker and self.marker_extractor and self.marker_extractor.available:
-                    logger.info(f"📄 Trying Marker extraction for {file_name}")
-                    text = self.marker_extractor.extract_pdf(file_path, use_ocr_fallback=False)
+                        if text and len(text.strip()) >= 50:
+                            logger.info(f"✅ pdfplumber extracted {len(text)} chars")
+                            return self._clean_text(text)
 
-                    if text and len(text.strip()) >= ocr_min_threshold:
-                        logger.info(f"✅ Marker successfully extracted {len(text)} chars")
-                        stats = self.marker_extractor.get_extraction_stats(text)
-                        logger.info(f"   📊 Sections: {stats.get('sections_found', 0)}, Tables: {stats.get('table_rows', 0)} rows")
-                        return self._clean_text(text)
-                    else:
-                        logger.warning(f"⚠️ Marker extracted insufficient text from {file_name}")
+                # 📸 CASE 2: PDF has images - use OCR (hybrid extraction)
+                else:
+                    logger.info(f"🔀 Images detected ({pdf_info['image_count']}) - using OCR for {file_name}")
 
-                # Strategy 2: Fallback to pdfplumber
-                if not text or len(text.strip()) < ocr_min_threshold:
-                    logger.info(f"📄 Using pdfplumber for {file_name}")
-                    with pdfplumber.open(file_path) as pdf:
-                        for page in pdf.pages:
-                            page_text = page.extract_text()
-                            if page_text:
-                                text += page_text + "\n"
-
-                    if text and len(text.strip()) >= 50:
-                        logger.info(f"✅ pdfplumber extracted {len(text)} chars")
-
-                # Strategy 3: OCR fallback
-                if not text or len(text.strip()) < ocr_min_threshold:
                     if self.use_ocr and self.ocr_available:
-                        logger.warning(f"📸 Low text, trying OCR for {file_name}")
+                        # Step 1: Get text from Marker/pdfplumber (selectable text)
+                        extracted_text = self._extract_selectable_text(file_path)
+
+                        # Step 2: Get text from OCR (image-based text)
+                        logger.info(f"📸 Running OCR to capture image-based text...")
                         ocr_text = self._extract_with_ocr(file_path)
-                        if ocr_text and len(ocr_text.strip()) > len(text.strip() if text else ""):
+
+                        # Step 3: Merge results
+                        if extracted_text and ocr_text:
+                            if hybrid_merge_mode == "combine":
+                                text = self._merge_extracted_texts(extracted_text, ocr_text, file_name)
+                            else:  # "longest" mode
+                                text = extracted_text if len(extracted_text) >= len(ocr_text) else ocr_text
+                                logger.info(f"📊 Using {'extracted' if len(extracted_text) >= len(ocr_text) else 'OCR'} text (longer)")
+                        elif extracted_text:
+                            text = extracted_text
+                            logger.info(f"📄 Using extracted text only ({len(text)} chars)")
+                        elif ocr_text:
                             text = ocr_text
-                            logger.info(f"✅ OCR improved extraction: {len(text)} characters")
+                            logger.info(f"📸 Using OCR text only ({len(text)} chars)")
+
+                        if text:
+                            return self._clean_text(text)
+
+                    # Fallback if OCR not available but images detected
+                    else:
+                        logger.warning(f"⚠️ Images detected but OCR not available - using text extraction only")
+                        if self.use_marker and self.marker_extractor and self.marker_extractor.available:
+                            text = self.marker_extractor.extract_pdf(file_path, use_ocr_fallback=False)
+                        if not text or len(text.strip()) < ocr_min_threshold:
+                            with pdfplumber.open(file_path) as pdf:
+                                for page in pdf.pages:
+                                    page_text = page.extract_text()
+                                    if page_text:
+                                        text += page_text + "\n"
 
             elif file_path.lower().endswith('.docx'):
                 doc = docx.Document(file_path)
@@ -1184,41 +1196,15 @@ class UltimateResumeExtractor:
 
     def _merge_extracted_texts(self, extracted_text: str, ocr_text: str, file_name: str) -> str:
         """
-        🔀 Intelligently merge text extraction + OCR results
-        Combines both to capture all text (selectable + image-based)
+        🔀 Concatenate text extraction + OCR results
+        Keeps ALL text from both sources to ensure nothing is missed
         """
-        logger.info(f"🔀 Merging extracted text ({len(extracted_text)} chars) + OCR ({len(ocr_text)} chars)")
+        logger.info(f"🔀 Concatenating extracted text ({len(extracted_text)} chars) + OCR ({len(ocr_text)} chars)")
 
-        # Normalize texts for comparison
-        extracted_lines = set(line.strip().lower() for line in extracted_text.split('\n') if line.strip() and len(line.strip()) > 3)
-        ocr_lines = [line.strip() for line in ocr_text.split('\n') if line.strip() and len(line.strip()) > 3]
-
-        # Find OCR lines that aren't in extracted text (these are likely from images)
-        new_from_ocr = []
-        for line in ocr_lines:
-            line_lower = line.lower()
-            # Check if this OCR line is substantially different from extracted text
-            is_new = True
-            for extracted_line in extracted_lines:
-                # Use fuzzy matching - if >70% similar, consider it a duplicate
-                if self._text_similarity(line_lower, extracted_line) > 0.7:
-                    is_new = False
-                    break
-            if is_new:
-                new_from_ocr.append(line)
-
-        # Combine: use extracted text as base, add unique OCR content
-        if new_from_ocr:
-            additional_text = "\n".join(new_from_ocr)
-            logger.info(f"📸 Found {len(new_from_ocr)} additional lines from OCR (image-based text)")
-
-            # Add OCR content at the end with a marker
-            merged = extracted_text.strip() + "\n\n" + additional_text
-            logger.info(f"✅ Merged result: {len(merged)} total chars")
-            return merged
-        else:
-            logger.info(f"📄 No additional text from OCR, using extracted text")
-            return extracted_text
+        # Concatenate both - don't filter anything out
+        merged = extracted_text.strip() + "\n\n" + ocr_text.strip()
+        logger.info(f"✅ Concatenated result: {len(merged)} total chars")
+        return merged
 
     def _text_similarity(self, text1: str, text2: str) -> float:
         """Calculate similarity ratio between two texts (0.0 to 1.0)"""
