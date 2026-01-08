@@ -4,3 +4,5 @@ __pycache__
 *.csv
 raw_text_output
 .claude
+extracted_resume_data_20251224_103400.json
+*.json
