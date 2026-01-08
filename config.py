@@ -1,7 +1,23 @@
 # 🔧 REPLACE the entire config.py with this streamlined version:
 
 """
-Configuration settings for the Ultimate Resume Extractor - ENGLISH ONLY EDITION! 💅
+config.py
+
+This module centralizes all configuration settings for the AiMerlion Resume Extraction System.
+It allows users to easily customize various parameters related to resume processing,
+AI model interaction, PDF extraction, and OCR functionalities.
+
+Key configurable sections include:
+- Core Settings: Paths for resume folders and output files.
+- AI Model Selection: Specifies the Ollama models to be used for different extraction tasks.
+- AI Feature Flags: Controls the behavior of AI assistance in the extraction process.
+- Performance Settings: Parameters for batch processing and AI response tuning.
+- Date Settings: Age validation ranges for extracted dates of birth.
+- PDF Extraction Settings: Options for using Marker PDF, pdfplumber, and their fallbacks.
+- OCR Settings: Configuration for OCR engines (pytesseract, paddleocr, easyocr),
+  languages, DPI, and hybrid extraction modes.
+- Tesseract Configuration: Specific settings for the Tesseract OCR engine.
+- Supported File Extensions: Defines the types of files the system can process.
 """
 
 # --- Core Settings ---

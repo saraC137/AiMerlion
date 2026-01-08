@@ -1,3 +1,21 @@
+"""
+main.py
+
+This module serves as the primary entry point and orchestrator for the AiMerlion resume
+extraction system. It provides an interactive command-line interface (CLI) for users
+to process resumes, generate reports, and diagnose AI performance.
+
+It initializes the UltimateResumeExtractor, which handles the complex logic of
+document parsing, text extraction (including OCR fallbacks), and AI-powered
+(or regex-based) data extraction from various resume formats (PDF, DOCX).
+
+Key functionalities include:
+- Interactive menu for user interaction.
+- Orchestration of resume processing across candidate folders.
+- Graceful handling of interruptions (e.g., Ctrl+C) with checkpointing.
+- Generation of detailed CSV and JSON reports summarizing extraction results and AI assistance.
+- Dynamic selection and initialization of OCR engines.
+"""
 # 🧙‍♀️✨ Fairy Codemother's ULTIMATE Resume Extractor - THE ID DIVA EDITION! ✨🧙‍♀️
 
 import numpy as np
@@ -22,7 +40,7 @@ import time
 import unicodedata
 import json
 import config
-from utils import display_menu, save_checkpoint, load_checkpoint, print_batch_table, FeedbackLoopSystem, InteractiveCorrectionSystem, PatternLearningSystem, PerformanceMonitor, standardize_phone_number, standardize_date
+from utils import display_menu, save_checkpoint, load_checkpoint, get_checkpoint_info, clear_checkpoint, print_batch_table, FeedbackLoopSystem, InteractiveCorrectionSystem, PatternLearningSystem, PerformanceMonitor, standardize_phone_number, standardize_date
 from ai_validator import AIValidator
 from marker_extractor import get_marker_extractor
 from document_parser import DocumentParser
@@ -1766,42 +1784,86 @@ def get_user_settings():
         except ValueError:
             print("💔 Numbers only, honey!")
 
-def process_resumes(extractor, folder_list, processed_folders, batch_size):
+def process_resumes(extractor, folder_list, processed_folders, batch_size, existing_results=None):
     """
     Orchestrates the resume processing, batching them for efficiency.
+    Handles Ctrl+C gracefully by saving progress immediately.
     """
-    results = []
-    total_processed_resumes = 0
+    results = existing_results if existing_results else []
+    total_processed_resumes = len(results)  # Start from existing count
     start_time = time.time()
+    interrupted = False
 
     performance_monitor = PerformanceMonitor(FeedbackLoopSystem())
 
     # Process each candidate folder
     total_folders_to_process = len(folder_list)
     pbar = tqdm(total=total_folders_to_process, desc="✨ Processing candidate folders", unit="folder")
-    
-    for candidate_folder_path in folder_list:
-        if candidate_folder_path in processed_folders:
+
+    try:
+        for candidate_folder_path in folder_list:
+            if candidate_folder_path in processed_folders:
+                pbar.update(1)
+                continue
+
+            # Process this candidate's folder
+            result = extractor.process_candidate_folder(candidate_folder_path)
+            if result and result.get("ID"):  # Only add if we got a valid result with ID
+                results.append(result)
+                total_processed_resumes += 1
+
+            processed_folders.append(candidate_folder_path)
+            # Save checkpoint with results included
+            save_checkpoint(processed_folders, config.CHECKPOINT_FILE, results)
             pbar.update(1)
-            continue
-        
-        # Process this candidate's folder
-        result = extractor.process_candidate_folder(candidate_folder_path)
-        if result and result.get("ID"):  # Only add if we got a valid result with ID
-            results.append(result)
-            total_processed_resumes += 1
-        
-        processed_folders.append(candidate_folder_path)
-        save_checkpoint(processed_folders, config.CHECKPOINT_FILE)
-        pbar.update(1)
-    
-    pbar.close()
+
+    except KeyboardInterrupt:
+        interrupted = True
+        pbar.close()
+        print("\n")
+        logger.warning("⚠️ Ctrl+C detected! Saving progress immediately...")
+
+        # Save checkpoint with results
+        save_checkpoint(processed_folders, config.CHECKPOINT_FILE, results)
+        logger.info(f"💾 Checkpoint saved! {len(processed_folders)} folders, {len(results)} candidates extracted.")
+
+        # Save current results to files immediately
+        if results:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+            # Save to CSV
+            df = pd.DataFrame(results)
+            emergency_csv = f"{config.OUTPUT_FILENAME_PREFIX}_interrupted_{timestamp}.csv"
+            df.to_csv(emergency_csv, index=False, encoding='utf-8-sig')
+            logger.info(f"💾 Emergency CSV saved: {emergency_csv}")
+
+            # Save to JSON
+            emergency_json = f"{config.OUTPUT_FILENAME_PREFIX}_interrupted_{timestamp}.json"
+            with open(emergency_json, 'w', encoding='utf-8') as f:
+                json.dump(results, f, ensure_ascii=False, indent=2, default=str)
+            logger.info(f"💾 Emergency JSON saved: {emergency_json}")
+
+            print(f"\n✅ Saved {len(results)} candidates before exit!")
+            print(f"💡 Use option [2] to resume extraction from where you left off.")
+        else:
+            logger.info("No results to save yet.")
+
+        end_time = time.time()
+        total_duration = end_time - start_time
+        logger.info(f"⏱️ Processing interrupted after {total_duration:.2f} seconds.")
+        logger.info(f"📊 Candidates processed before interruption: {total_processed_resumes}")
+
+        # Return results so caller can still use them if needed
+        return results
+
+    if not interrupted:
+        pbar.close()
 
     end_time = time.time()
     total_duration = end_time - start_time
     logger.info(f"🏁 Processing completed in {total_duration:.2f} seconds.")
     logger.info(f"📊 Total candidates processed: {total_processed_resumes}")
-    
+
     performance_monitor.generate_performance_report()
     return results
 
@@ -1821,10 +1883,16 @@ def generate_reports(results: List[Dict], empty_folders: List[str]):
     ai_enhanced_phones = sum(1 for r in results if r.get('AI_Assisted', False) and r.get('Phone'))
     ai_enhanced_dobs = sum(1 for r in results if r.get('AI_Assisted', False) and r.get('Date_of_Birth'))
 
-    # Main data report
+    # Main data report - CSV
     output_csv = f"{config.OUTPUT_FILENAME_PREFIX}_{timestamp}.csv"
     df.to_csv(output_csv, index=False, encoding='utf-8-sig')
     print(f"\n📄 Main data saved to: {output_csv}")
+
+    # Main data report - JSON
+    output_json = f"{config.OUTPUT_FILENAME_PREFIX}_{timestamp}.json"
+    with open(output_json, 'w', encoding='utf-8') as f:
+        json.dump(results, f, ensure_ascii=False, indent=2, default=str)
+    print(f"📄 Main data saved to: {output_json}")
 
     # 🗣️ NEW: Language Classification Report 🗣️
     if 'Language' in df.columns:
@@ -2038,6 +2106,12 @@ def list_candidates_and_files(extractor: "UltimateResumeExtractor"):
         output_csv = f"all_candidates_report_{timestamp}.csv"
         df.to_csv(output_csv, index=False, encoding='utf-8-sig')
         print(f"\n📄 Report saved to: {os.path.abspath(output_csv)}")
+
+        # JSON export
+        output_json = f"all_candidates_report_{timestamp}.json"
+        with open(output_json, 'w', encoding='utf-8') as f:
+            json.dump(report_data, f, ensure_ascii=False, indent=2, default=str)
+        print(f"📄 Report saved to: {os.path.abspath(output_json)}")
         
         # Display the report in the terminal
         print("\n" + df.to_string())
@@ -2046,16 +2120,19 @@ def list_candidates_and_files(extractor: "UltimateResumeExtractor"):
 
 def main():
     """🎭 The Main Show with MENU MAGIC!"""
-    
-    from utils import display_menu, save_checkpoint, load_checkpoint, print_batch_table, FeedbackLoopSystem, InteractiveCorrectionSystem, PatternLearningSystem, PerformanceMonitor, select_folders_to_process
-    
+
+    from utils import display_menu, save_checkpoint, load_checkpoint, get_checkpoint_info, clear_checkpoint, print_batch_table, FeedbackLoopSystem, InteractiveCorrectionSystem, PatternLearningSystem, PerformanceMonitor, select_folders_to_process
+
     folder_list = []
     processed_folders = []
-    
+    existing_results = []  # Store results from checkpoint
+
     while True:
-        display_menu()
+        # Get checkpoint info for menu display
+        checkpoint_info = get_checkpoint_info(config.CHECKPOINT_FILE)
+        display_menu(checkpoint_info)
         choice = input("\n💅 What's it gonna be, sweetie? (1-7): ").strip()
-        
+
         # 🌟 NEW: Get candidate folders with proper structure! 🌟
         try:
             all_folders = find_candidate_folders(config.RESUME_FOLDER)
@@ -2069,17 +2146,27 @@ def main():
 
         if choice == "1":
             print("\n✨ Starting fresh! Let's process all resumes! ✨")
+            # Clear existing checkpoint
+            if checkpoint_info and checkpoint_info.get("exists"):
+                clear_checkpoint(config.CHECKPOINT_FILE)
+                print("🗑️ Previous checkpoint cleared!")
             print(f"🎯 Found {len(all_folders)} candidate folders to process!")
             processed_folders = []
+            existing_results = []
             folder_list = all_folders
             break
-            
+
         elif choice == "2":
-            processed_folders = load_checkpoint(config.CHECKPOINT_FILE)
+            processed_folders, existing_results, timestamp = load_checkpoint(config.CHECKPOINT_FILE)
             if processed_folders:
-                print(f"\n👑 Welcome back! Resuming from where you left off with {len(processed_folders)} folders processed.")
+                print(f"\n👑 Welcome back! Resuming from checkpoint:")
+                print(f"   📁 Folders already processed: {len(processed_folders)}")
+                print(f"   ✅ Candidates already extracted: {len(existing_results)}")
+                remaining = len(all_folders) - len(processed_folders)
+                print(f"   📋 Remaining to process: {remaining}")
             else:
                 print("\n🤔 No checkpoint found, darling. Starting fresh!")
+                existing_results = []
             folder_list = [f for f in all_folders if f not in processed_folders]
             break
             
@@ -2186,19 +2273,26 @@ def main():
 
     if not folder_list:
         print("\n🎉 All candidate folders have been processed! Nothing left to do!")
+        # If we have existing results from checkpoint, offer to generate reports
+        if existing_results:
+            print(f"💡 You have {len(existing_results)} extracted candidates from checkpoint.")
+            generate_choice = input("Generate reports from existing data? (y/n): ").strip().lower()
+            if generate_choice == 'y':
+                generate_reports(existing_results, [])
         return
 
     batch_size, max_to_process = get_user_settings()
-    
+
     extractor = UltimateResumeExtractor(config.SUZUME_MODEL_NAME)
-    
+
     if max_to_process is not None:
         folder_list = folder_list[:max_to_process]
-    
-    results = process_resumes(extractor, folder_list, processed_folders, batch_size)
-    
+
+    # Pass existing_results to continue from where we left off
+    results = process_resumes(extractor, folder_list, processed_folders, batch_size, existing_results)
+
     if results:
-        generate_reports(results, []) # Empty folders check can be integrated elsewhere if needed
+        generate_reports(results, [])  # Empty folders check can be integrated elsewhere if needed
     else:
         print("\nNo new data was processed to generate a report.")
 

@@ -3,3 +3,4 @@ sim
 __pycache__
 *.csv
 raw_text_output
+.claude

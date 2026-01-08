@@ -1,17 +1,25 @@
 """
-Document Parser Module for Resume Data Extraction System
+document_parser.py
 
-This module handles PDF and DOCX parsing with SMART extraction:
-1. First INSPECTS the PDF to determine its type (text, vector, scanned)
-2. Then uses the BEST extraction method based on the inspection
+This module provides robust document parsing capabilities for the AiMerlion system,
+specializing in extracting text from PDF and DOCX files. It implements an intelligent
+extraction strategy to handle various document complexities, including:
 
-Key Features:
-- PDF inspection before extraction (saves time, better results)
-- Smart method selection based on PDF type
-- OCR for vector/scanned PDFs
-- pdfplumber for true text PDFs
-- Hybrid for mixed PDFs
-- Windows path compatibility
+- **PDF Inspection**: Analyzes PDF type (text-based, vector/outline, or scanned)
+  to determine the most effective extraction method.
+- **Smart Method Selection**: Dynamically chooses between `pdfplumber` for
+  standard text PDFs and OCR for image-based or vector PDFs, ensuring optimal
+  text capture.
+- **OCR Fallback**: Integrates OCR (using Tesseract via `pdf2image`) as a fallback
+  for PDFs where direct text extraction yields insufficient or unreadable content.
+- **DOCX Parsing**: Extracts text from Microsoft Word (.docx) documents.
+- **Text Meaningfulness Validation**: Includes logic to check if extracted text
+  is coherent and not gibberish, triggering OCR when necessary.
+- **Path Normalization**: Ensures compatibility across different operating systems,
+  particularly for Windows file paths.
+
+The `DocumentParser` class orchestrates these processes to provide reliable
+text content for subsequent data extraction steps.
 """
 
 import os
@@ -32,7 +40,7 @@ import pytesseract
 from config import TESSERACT_CONFIG, SUPPORTED_EXTENSIONS, OCR_CONFIG
 
 # Import PDF Inspector
-from pdf_inspector import PDFInspector, PDFType, inspect_pdf
+from pdf_inspector import analyze_pdf_type, inspect_pdf
 
 # Setup logging with visual clarity
 logger = logging.getLogger(__name__)

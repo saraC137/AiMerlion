@@ -1,19 +1,6 @@
 """
-ai_extractor.py
-
-This module implements the core AI-powered and regex-based data extraction logic
-for resumes within the AiMerlion system. It specializes in extracting structured
-information such as personal details, skills, work experience, and education.
-
-The AIExtractor class utilizes a hybrid strategy:
-- An AI-first approach for extracting header fields (e.g., name, email, phone)
-  by interacting with an Ollama language model and enforcing strict JSON output.
-- A robust regex-first approach for detailed sections like work experience and
-  education, with AI assistance for validation or to fill in missing information.
-
-It includes advanced text cleaning for markdown, comprehensive regex patterns
-for various data types, and mechanisms to handle malformed AI responses,
-ensuring high-quality and structured data output.
+🌸 AI EXTRACTOR - English Resume Specialist 🌸
+Refactored to enforce strict JSON structure and prevent text dumping.
 """
 
 import ollama
@@ -152,10 +139,7 @@ Response must be valid JSON only."""
         skills_patterns = [
             r'SKILLS?\s*:?\s*(.*?)(?=EXPERIENCE|EMPLOYMENT|WORK|EDUCATION|PROFESSIONAL|$)',
             r'TECHNICAL\s+SKILLS?\s*:?\s*(.*?)(?=EXPERIENCE|EMPLOYMENT|WORK|EDUCATION|$)',
-            r'CORE\s+COMPETENCIES\s*:?\s*(.*?)(?=EXPERIENCE|EMPLOYMENT|WORK|EDUCATION|$)',
-            r'SOFTWARES?\s*:?\s*(.*?)(?=EXPERIENCE|EMPLOYMENT|WORK|EDUCATION|CERTIFICATION|$)',
-            r'(?:KEY|CORE|PROFESSIONAL)\s+SKILLS?\s*:?\s*(.*?)(?=EXPERIENCE|EMPLOYMENT|WORK|EDUCATION|$)',
-            r'TOOLS?\s*(?:&|AND)?\s*(?:TECHNOLOGIES|TECH)?\s*:?\s*(.*?)(?=EXPERIENCE|EMPLOYMENT|EDUCATION|SKILLS|$)',
+            r'CORE\s+COMPETENCIES\s*:?\s*(.*?)(?=EXPERIENCE|EMPLOYMENT|WORK|EDUCATION|$)'
         ]
         
         skills_text = ""
@@ -171,7 +155,7 @@ Response must be valid JSON only."""
         
         # Clean and split skills
         # Remove bullet characters first
-        skills_text = re.sub(r'[•●○◦▪▫■□►▸‣⁃→·∙⋅▶▷◆◇★☆]', '\n', skills_text)
+        skills_text = re.sub(r'[•●○◦▪▫■□▸▹►▻⦿⦾]', '\n', skills_text)
         skills_text = re.sub(r'^\s*[-–—*]\s*', '\n', skills_text, flags=re.MULTILINE)
         
         # Split by newlines, commas, semicolons
@@ -230,11 +214,7 @@ Response must be valid JSON only."""
                     hard_skills.append(skill)
                 else:
                     soft_skills.append(skill)
-
-        # Remove duplicates while preserving order
-        hard_skills = list(dict.fromkeys(hard_skills))
-        soft_skills = list(dict.fromkeys(soft_skills))
-
+        
         self.logger.info(f"📊 Found {len(hard_skills)} hard skills, {len(soft_skills)} soft skills")
         
         return {
@@ -254,212 +234,56 @@ Response must be valid JSON only."""
         self.logger.info("🧹 Cleaned markdown formatting")
         
         # 🔍 STEP 2: FIND EXPERIENCE SECTION
-        # 🎭 FAIRY CODEMOTHER'S ULTIMATE FIX v5.0! 💅
-        # 
-        # THE PROBLEM: The old pattern used keywords like "SKILLS" in the lookahead,
-        # but "skills" appears INSIDE bullet points (e.g., "troubleshooting skills")
-        # causing premature termination! Drama queen behavior! 😱
-        #
-        # THE FIX: Only match section HEADERS (word alone on a line or at line start)
-        # not words embedded in sentences!
-        
         exp_patterns = [
-            # Pattern 1: EXPERIENCE followed by content until a SECTION HEADER
-            # Section headers are words at the START of a line, possibly followed by colon
-            # The key is \n before the section name to ensure it's a header!
-            r'(?:WORK\s+)?EXPERIENCE[S]?\s*:?\s*\n(.+?)(?=\n(?:EDUCATION|SKILL[S]?|CERTIFICATION|AWARD|PROJECT|REFERENCE|ACHIEVEMENT|PUBLICATION|TRAINING|LANGUAGE|HOBBY|HOBBIES|INTEREST|SUMMARY|OBJECTIVE|PROFILE)\s*(?:[:|\n]|$))',
-            
-            # Pattern 2: Same but with ## markdown headers
-            r'(?:WORK\s+)?EXPERIENCE[S]?\s*\n(.+?)(?=\n#+\s*(?:EDUCATION|SKILL|CERTIFICATION|AWARD))',
-            
-            # Pattern 3: GREEDY FALLBACK - capture everything after EXPERIENCE until end
-            # This is the SAFETY NET when no clear section boundary exists!
-            r'(?:WORK\s+)?EXPERIENCE[S]?\s*:?\s*\n(.+)$',
+            r'(?:WORK\s+)?EXPERIENCE\s*:?\s*(.*?)(?=EDUCATION|SKILLS|CERTIFICATIONS|AWARDS|$)',
+            r'EMPLOYMENT\s+(?:HISTORY|BACKGROUND)\s*:?\s*(.*?)(?=EDUCATION|SKILLS|$)',
+            r'PROFESSIONAL\s+(?:EXPERIENCE|BACKGROUND)\s*:?\s*(.*?)(?=EDUCATION|SKILLS|$)',
         ]
         
         exp_text = ""
-        pattern_used = None
+        for pattern in exp_patterns:
+            match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+            if match:
+                exp_text = match.group(1)
+                self.logger.info(f"💼 Found experience section ({len(exp_text)} chars)")
+                break
         
-        for i, pattern in enumerate(exp_patterns):
-            try:
-                match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
-                if match:
-                    exp_text = match.group(1)
-                    pattern_used = i + 1
-                    self.logger.info(f"💼 Found experience section ({len(exp_text)} chars) using pattern {pattern_used}")
-                    break
-            except re.error as e:
-                self.logger.warning(f"⚠️ Regex error in pattern {i+1}: {e}")
-                continue
-        
-        # 🚨 FALLBACK: If no section header found, use full text
+        # 🚨 FALLBACK: If no section header, look for job entries in full text
         if not exp_text or len(exp_text) < 100:
             self.logger.warning("⚠️ No clear experience section - scanning full document")
             exp_text = text
         
-        # 🎭 CRITICAL SAFETY CHECK: If exp_text is suspiciously short, USE FULL TEXT!
-        # This catches the case where "skills" appears early in the text
-        original_len = len(text)
-        captured_len = len(exp_text)
-        
-        if captured_len < 500 and original_len > 1000:
-            self.logger.warning(f"⚠️ Experience section too short ({captured_len} chars vs {original_len} total)")
-            self.logger.warning("⚠️ Likely hit an embedded keyword like 'skills' - using full document!")
-            exp_text = text
-        elif captured_len < original_len * 0.25:  # Less than 25% of original
-            self.logger.warning(f"⚠️ Experience section is only {captured_len}/{original_len} chars ({100*captured_len//original_len}%)")
-            self.logger.warning("⚠️ Using full document for safety")
-            exp_text = text
-        
         # 🏢 STEP 3: FIND ALL COMPANIES
-        # 🎭 FAIRY CODEMOTHER'S PRECISION PATTERNS v5.0 - NOW WITH FLEXIBILITY! 💅
-        # Handles MULTIPLE resume formats: Indian (Pvt Ltd), US (Inc/LLC), Startups, Freelance!
+        # Try multiple patterns in order of specificity
         company_patterns = [
-            # ===== LEGAL SUFFIX PATTERNS (High confidence) =====
+            # Pattern 1: Company with legal suffix
+            (r'([A-Z][A-Za-z0-9\s&,\.\'\-]+\b(?:Pvt\.?\s*Ltd\.?|Private\s+Limited|Ltd\.?|Limited|Inc\.?|Incorporated|Corp\.?|Corporation|LLC|Company|Co\.)[^\n]*)', 'legal_suffix'),
             
-            # Pattern 1: Indian style - "Pvt. Ltd." or "Private Limited"
-            (r'^([A-Z][^\n]{3,60}?(?:Pvt\.?\s*Ltd\.?|Private\s+Limited))(?:\s*[-–][^\n]*)?$', 'pvt_ltd'),
+            # Pattern 2: Company with business keywords
+            (r'([A-Z][A-Za-z\s&,\.\'\-]+\b(?:Technologies|Solutions|Services|Systems|Group|International|Industries|Consulting|Partners|Holdings|Enterprises)[^\n]*)', 'business_keyword'),
             
-            # Pattern 2: US/International - "Ltd", "Inc", "Corp", "LLC", "LLP", "GmbH", "S.A."
-            (r'^([A-Z][^\n]{3,50}?(?:Ltd\.?|Inc\.?|Corp\.?|Corporation|LLC|LLP|GmbH|S\.?A\.?|PLC))(?:\s*[-–][^\n]*)?$', 'legal_suffix'),
-            
-            # Pattern 3: Tech/Business keywords - "Technologies", "Solutions", "Software", etc.
-            (r'^([A-Z][^\n]{3,50}?(?:Technologies|Solutions|Services|Systems|Consulting|Enterprises|Software|Digital|Labs?|Studio|Agency|Media|Group|Partners))(?:\s+(?:Pvt\.?\s*Ltd\.?|Inc\.?|LLC))?(?:\s*[-–][^\n]*)?$', 'tech_company'),
-            
-            # ===== CONTEXTUAL PATTERNS (Medium confidence) =====
-            
-            # Pattern 4: Company name on line BEFORE a job title
-            # Matches: "Google\nSoftware Engineer" or "Acme Corp\nSenior Developer"
-            (r'^([A-Z][A-Za-z0-9\s&\.,\'-]{5,50})\s*$(?=\s*\n\s*(?:Senior|Junior|Lead|Staff|Principal|Chief|Head|VP|Director|Manager|Engineer|Developer|Designer|Analyst|Consultant|Specialist|Architect|Administrator|Coordinator|Executive|Officer|Intern|Trainee))', 'before_job_title'),
-            
-            # Pattern 5: Company with date range on SAME LINE
-            # Matches: "Google Inc. Jan 2020 - Present" or "Acme Corp 2019-2022"
-            (r'^([A-Z][A-Za-z0-9\s&\.,\'-]{5,50}?)(?:\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s*\d{4}|\s+\d{4})\s*[-–]\s*(?:Present|Current|\d{4}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec))', 'company_with_date'),
-            
-            # Pattern 6: Company followed by location
-            # Matches: "Google - Mountain View, CA" or "Acme Corp, New York"
-            (r'^([A-Z][A-Za-z0-9\s&\'-]{5,40})\s*[-–,]\s*(?:[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?,?\s*(?:[A-Z]{2}|[A-Z][a-z]+))$', 'company_with_location'),
-            
-            # ===== SPECIAL PATTERNS =====
-            
-            # Pattern 7: Trading Co / Co. pattern
-            (r'^([A-Z][^\n]+?(?:Trading\s+)?Co\.?[^\n]*)$', 'trading_company'),
-            
-            # Pattern 8: Company with parenthetical info
-            (r'^([A-Z][^\n]+?\([^)\n]+\))$', 'parenthetical_company'),
-            
-            # Pattern 9: Freelance/Self-employed/Contract
-            (r'^((?:Freelance|Self[- ]?Employed|Independent|Contract(?:or)?|Consultant)[^\n]*)$', 'freelance'),
-            
-            # Pattern 10: Known tech companies (no suffix needed)
-            (r'^((?:Google|Meta|Facebook|Amazon|Apple|Microsoft|Netflix|Uber|Airbnb|Stripe|Shopify|Twitter|LinkedIn|Oracle|IBM|Intel|Cisco|Adobe|Salesforce|SAP|VMware|Dell|HP|Accenture|Infosys|TCS|Wipro|HCL|Cognizant|Capgemini|Deloitte|EY|PwC|KPMG)[^\n]*)$', 'known_company'),
-            
-            # ===== FALLBACK PATTERNS (Lower confidence but broad) =====
-            
-            # Pattern 11: Any capitalized multi-word line that's NOT a job description
-            # Must be 2-6 words, all capitalized first letters, no action verbs at start
-            (r'^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,5})$', 'capitalized_name'),
+            # Pattern 3: Line before a job title
+            (r'([A-Z][A-Za-z\s&,\.\'\-]{10,80})\s*\n\s*(?:Senior|Junior|Lead|Chief|Principal)?\s*(?:Engineer|Manager|Developer|Analyst|Consultant|Director|Executive|Coordinator|Specialist)', 'before_title'),
         ]
         
         all_matches = []
         for pattern, pattern_type in company_patterns:
-            try:
-                matches = list(re.finditer(pattern, exp_text, re.MULTILINE | re.IGNORECASE))
-                if matches:
-                    self.logger.info(f"🏢 Found {len(matches)} companies using '{pattern_type}' pattern")
-                    # 🎭 FAIRY CODEMOTHER'S DEBUG TIP: Log what we found!
-                    for m in matches[:3]:  # Show first 3 matches for debugging
-                        self.logger.debug(f"   → Match: '{m.group(1)[:50]}...' at pos {m.start()}")
-                    all_matches.extend([(m, pattern_type) for m in matches])
-            except re.error as regex_err:
-                # 🚨 Handle malformed regex gracefully - don't let one bad pattern crash everything!
-                self.logger.error(f"❌ Regex error in '{pattern_type}' pattern: {regex_err}")
-                continue
+            matches = list(re.finditer(pattern, exp_text, re.MULTILINE))
+            if matches:
+                self.logger.info(f"🏢 Found {len(matches)} companies using '{pattern_type}' pattern")
+                all_matches.extend([(m, pattern_type) for m in matches])
         
         if not all_matches:
-            # 🎭 ENHANCED ERROR HANDLING: Log sample of text for debugging
-            self.logger.warning("⚠️ No companies found with standard patterns, trying AGGRESSIVE fallback...")
-            
-            # 🚨 AGGRESSIVE FALLBACK: Look for ANY line that might be a company
-            # This catches edge cases that slip through the patterns
-            fallback_matches = []
-            lines = exp_text.split('\n')
-            
-            for i, line in enumerate(lines):
-                line = line.strip()
-                if not line or len(line) < 5 or len(line) > 80:
-                    continue
-                
-                # Skip lines that start with action verbs (job descriptions)
-                action_verbs = ['developed', 'created', 'managed', 'led', 'built', 'designed',
-                               'implemented', 'executed', 'worked', 'responsible', 'achieved',
-                               'increased', 'decreased', 'improved', 'reduced', 'collaborated',
-                               'coordinated', 'analyzed', 'maintained', 'provided', 'ensured',
-                               'utilized', 'demonstrated', 'conducted', 'supported', 'delivered',
-                               'performed', 'generated', 'resolved', 'diagnosed', 'authored',
-                               'assisted', 'prepared', 'established', 'organized', 'trained']
-                
-                first_word = line.split()[0].lower() if line.split() else ''
-                if first_word in action_verbs:
-                    continue
-                
-                # Skip common non-company lines
-                skip_patterns = [
-                    r'^(education|skills?|experience|summary|objective|profile|contact|references?|projects?|certifications?|awards?|languages?|hobbies|interests)$',
-                    r'^\d+',  # Starts with number
-                    r'^[-•●○▪]',  # Bullet points
-                    r'@',  # Email addresses
-                    r'^\+?\d[\d\s\-()]+$',  # Phone numbers
-                ]
-                if any(re.match(pat, line, re.IGNORECASE) for pat in skip_patterns):
-                    continue
-                
-                # Check if this line might be a company (followed by job title or date)
-                if i + 1 < len(lines):
-                    next_line = lines[i + 1].strip().lower()
-                    job_indicators = ['engineer', 'developer', 'manager', 'analyst', 'designer',
-                                     'consultant', 'specialist', 'architect', 'director', 'lead',
-                                     'senior', 'junior', 'intern', 'trainee', 'executive', 'officer']
-                    date_indicators = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 
-                                      'sep', 'oct', 'nov', 'dec', 'present', '2019', '2020', 
-                                      '2021', '2022', '2023', '2024', '2025']
-                    
-                    if any(ind in next_line for ind in job_indicators + date_indicators):
-                        # Create a fake match object
-                        class FakeMatch:
-                            def __init__(self, text, pos):
-                                self._text = text
-                                self._start = pos
-                            def group(self, n=0):
-                                return self._text if n <= 1 else self._text
-                            def start(self):
-                                return self._start
-                        
-                        fallback_matches.append((FakeMatch(line, exp_text.find(line)), 'fallback'))
-                        self.logger.info(f"🎯 Fallback found: '{line[:50]}'")
-            
-            if fallback_matches:
-                all_matches = fallback_matches
-            else:
-                self.logger.error("❌ No companies found in text!")
-                self.logger.debug(f"📄 Experience text sample (first 500 chars):\n{exp_text[:500]}")
-                return jobs
+            self.logger.error("❌ No companies found in text!")
+            return jobs
         
-        # Remove duplicates based on position AND content (improved deduplication)
-        # Sometimes different patterns match the same company - we keep the first match
+        # Remove duplicates based on position
         seen_positions = set()
-        seen_companies = set()
         unique_matches = []
-        
         for match, ptype in all_matches:
             pos = match.start()
-            company_text = match.group(1).strip().lower()[:50]  # Normalize for comparison
-            
-            # Skip if we've seen this position OR very similar company name
-            position_key = pos // 10  # Allow 10-char tolerance for position
-            if position_key not in seen_positions and company_text not in seen_companies:
-                seen_positions.add(position_key)
-                seen_companies.add(company_text)
+            if pos not in seen_positions:
+                seen_positions.add(pos)
                 unique_matches.append((match, ptype))
         
         # Sort by position in text
@@ -485,39 +309,28 @@ Response must be valid JSON only."""
             job_chunk = exp_text[chunk_start:chunk_end]
             
             # 👔 EXTRACT ROLE
-            # 🎭 FAIRY CODEMOTHER'S ENHANCED ROLE PATTERNS!
-            # These patterns are like a talent scout - they spot the job titles hiding in the crowd! 💅
             role_patterns = [
-                # Pattern 1: Specific job titles with common prefixes
-                r'((?:Senior|Junior|Lead|Principal|Chief|Head\s+of|VP\s+of|Associate|Assistant|Staff|Trainee)?\s*(?:Field\s+Service\s+)?(?:Engineer|Manager|Developer|Analyst|Specialist|Executive|Consultant|Director|Officer|Coordinator|Lead|Architect|Technician|Administrator|Designer|Supervisor|Intern))',
-                # Pattern 2: Service/Sales specific roles
-                r'((?:Senior|Junior)?\s*(?:Service|Sales|Quality\s+Control|Technical\s+Support)\s*(?:Engineer|Executive|Manager|Specialist))',
-                # Pattern 3: Any capitalized multi-word phrase that looks like a title
-                r'\n\s*([A-Z][A-Za-z]+(?:\s+[A-Z]?[a-z]+){1,4})\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|\d{4})',
+                r'\n\s*((?:Senior|Junior|Lead|Principal|Chief|Head\s+of|VP\s+of)?\s*[A-Z][A-Za-z\s]+(?:Engineer|Manager|Developer|Analyst|Specialist|Executive|Consultant|Director|Officer|Coordinator|Lead|Architect|Technician|Administrator|Designer|Associate|Assistant|Supervisor|Trainee|Intern))',
+                r'\n\s*([A-Z][A-Za-z\s]{5,60})',  # Any capitalized phrase (fallback)
             ]
             
             role = "Position not specified"
             for pattern in role_patterns:
-                role_match = re.search(pattern, job_chunk, re.MULTILINE | re.IGNORECASE)
+                role_match = re.search(pattern, job_chunk, re.MULTILINE)
                 if role_match:
                     potential_role = role_match.group(1).strip()
                     potential_role = re.sub(r'\s+', ' ', potential_role)
                     
-                    # Validate it's not the company name again and meets length requirements
-                    if (potential_role.lower() != company_name.lower()[:len(potential_role)] and 
-                        len(potential_role) >= 5 and 
-                        len(potential_role) <= 60):
-                        # 🎭 Additional validation: shouldn't contain location indicators
-                        location_words = ['india', 'mumbai', 'delhi', 'bangalore', 'usa', 'uk', 'pvt', 'ltd']
-                        if not any(loc in potential_role.lower() for loc in location_words):
-                            role = potential_role
-                            break
+                    # Validate it's not the company name again
+                    if potential_role.lower() != company_name.lower() and len(potential_role) >= 5:
+                        role = potential_role
+                        break
             
             # 📅 EXTRACT DATES
             date_patterns = [
-                r'((?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+\d{4}\s*(?:[-–—]|to)\s*(?:(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+\d{4}|Present|Current|present|current|ongoing|Ongoing))',
-                r'(\d{1,2}/\d{4}\s*(?:[-–—]|to)\s*(?:\d{1,2}/\d{4}|Present|Current))',
-                r'(\d{4}\s*(?:[-–—]|to)\s*(?:\d{4}|Present|Current|present|current))',
+                r'((?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+\d{4}\s*[-–—to]+\s*(?:(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+\d{4}|Present|Current|present|current|ongoing|Ongoing))',
+                r'(\d{1,2}/\d{4}\s*[-–—to]+\s*(?:\d{1,2}/\d{4}|Present|Current))',
+                r'(\d{4}\s*[-–—to]+\s*(?:\d{4}|Present|Current|present|current))',
             ]
             
             dates = "Dates not specified"
@@ -565,22 +378,7 @@ Response must be valid JSON only."""
             # Clean description
             description = re.sub(r'\s+', ' ', description)
             description = description[:500]  # Max 500 chars
-
-            # Skip entries that are actually bullet points/descriptions, not company names
-            skip_start_words = [
-                'performs', 'developed', 'created', 'managed', 'led', 'responsible',
-                'achieved', 'implemented', 'conducted', 'provided', 'ensured', 'utilized',
-                'demonstrated', 'maintained', 'coordinated', 'executed', 'built', 'designed',
-                'analyzed', 'prepared', 'supported', 'delivered', 'generated', 'resolved'
-            ]
-            if any(company_name.lower().startswith(word) for word in skip_start_words):
-                self.logger.debug(f"Skipping bullet point: {company_name[:50]}")
-                continue
-
-            # Skip if too many words (likely a description, not a company)
-            if company_name.count(' ') > 12:
-                continue
-
+            
             # 🎯 STEP 5: ADD TO RESULTS
             jobs.append({
                 "company": company_name[:100],
@@ -831,7 +629,7 @@ Response must be valid JSON only."""
                     raw_text = data[field]
                     
                     # AGGRESSIVE CLEANING - Remove ALL bullet characters
-                    cleaned = re.sub(r'[•●○◦▪▫■□►▸‣⁃→·∙⋅▶▷◆◇★☆\-–—*]', '', raw_text)
+                    cleaned = re.sub(r'[•\-–—*â€¢◦▪▫]', '', raw_text)
                     
                     # Split by newlines AND commas
                     items = re.split(r'[\n,;]+', cleaned)
@@ -1065,44 +863,22 @@ Response must be valid JSON only."""
         """
         🧹 Remove markdown formatting that confuses regex!
         This is like removing makeup before bed, darling! 💄
-        
-        FAIRY CODEMOTHER'S ENHANCED VERSION:
-        - Handles nested markdown formatting
-        - Normalizes ALL types of dashes and special chars
-        - Preserves essential structure while removing noise
         """
-        if not text:
-            return ""
-            
-        # Remove markdown headers (##, ###, etc.) - must come first!
-        text = re.sub(r'^#+\s*', '', text, flags=re.MULTILINE)
+        # Remove markdown headers (##, ###, etc.)
+        text = re.sub(r'^#+\s+', '', text, flags=re.MULTILINE)
         
-        # Remove bold/italic markers (**text** or *text* or __text__ or _text_)
-        text = re.sub(r'\*\*\*([^\*]+)\*\*\*', r'\1', text)  # ***bold italic*** -> text
-        text = re.sub(r'\*\*([^\*]+)\*\*', r'\1', text)      # **bold** -> bold
-        text = re.sub(r'\*([^\*\n]+)\*', r'\1', text)        # *italic* -> italic (not across lines)
-        text = re.sub(r'__([^_]+)__', r'\1', text)           # __bold__ -> bold
-        text = re.sub(r'_([^_\n]+)_', r'\1', text)           # _italic_ -> italic
+        # Remove bold/italic markers (**text** or *text*)
+        text = re.sub(r'\*\*([^\*]+)\*\*', r'\1', text)  # **bold** -> bold
+        text = re.sub(r'\*([^\*]+)\*', r'\1', text)      # *italic* -> italic
         
-        # Remove bullet point markers (-, *, •, ▪, etc.) at line start
-        # Keep the content, just remove the marker
-        text = re.sub(r'^\s*[-\*•▪▸►◦○●]\s+', '', text, flags=re.MULTILINE)
+        # Remove bullet point markers (-, *, •)
+        # Keep the content, just remove the marker at line start
+        text = re.sub(r'^\s*[-\*•]\s+', '', text, flags=re.MULTILINE)
         
-        # Normalize ALL types of dashes (em-dash, en-dash, etc.) -> regular hyphen with spaces
-        # This is CRITICAL for company names like "Sartorius India Pvt. Ltd. – Bio Analytical Division"
-        text = text.replace('–', ' - ')   # en-dash (U+2013)
-        text = text.replace('—', ' - ')   # em-dash (U+2014)
-        text = text.replace('−', ' - ')   # minus sign (U+2212)
-        text = text.replace('‐', '-')     # hyphen (U+2010)
-        text = text.replace('‑', '-')     # non-breaking hyphen (U+2011)
+        # Normalize dashes (em-dash, en-dash -> regular dash)
+        text = text.replace('–', '-').replace('—', '-')
         
-        # Normalize special quotes to regular quotes
-        text = text.replace('"', '"').replace('"', '"')
-        text = text.replace(''', "'").replace(''', "'")
+        # Remove extra whitespace
+        text = re.sub(r'\n\s*\n\s*\n+', '\n\n', text)  # Multiple blank lines -> 2 lines
         
-        # Remove extra whitespace but preserve paragraph structure
-        text = re.sub(r'[ \t]+', ' ', text)           # Multiple spaces/tabs -> single space
-        text = re.sub(r'\n\s*\n\s*\n+', '\n\n', text) # Multiple blank lines -> 2 lines
-        text = re.sub(r'^\s+', '', text, flags=re.MULTILINE)  # Leading whitespace per line
-        
-        return text.strip()
+        return text

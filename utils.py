@@ -1,3 +1,30 @@
+"""
+utils.py
+
+This module contains a collection of utility functions supporting the AiMerlion
+resume extraction system. These functions provide common functionalities such as:
+
+- **CLI Menu Display**: Renders the interactive command-line menu for user interaction.
+- **Checkpoint Management**: Saves and loads processing progress, allowing for
+  interruption and resumption of resume extraction tasks.
+- **Batch Processing Display**: Provides visual feedback for batch processing.
+- **Folder Selection**: Enables users to selectively choose which resume folders
+  to process.
+- **Data Standardization**: Functions for normalizing phone numbers and dates
+  into consistent formats.
+- **Folder Structure Detection**: Identifies the organization of resume files
+  within the designated folder.
+- **Feedback Loop System**: Manages feedback, corrections, and learning from
+  extraction results to improve future_performance.
+- **Interactive Correction System**: Facilitates manual review and correction of
+  extracted data.
+- **Pattern Learning System**: Analyzes corrections to suggest and learn new
+  extraction patterns.
+- **Performance Monitoring**: Tracks and reports on the overall performance
+  of the extraction process.
+- **File Type Detection and Text Extraction**: Helper functions to identify file
+  types and extract raw text from various document formats (PDF, DOCX, etc.).
+"""
 import json
 import os
 import datetime
@@ -8,19 +35,40 @@ from fuzzywuzzy import fuzz
 import jsonlines
 import unicodedata
 
-def display_menu() -> None:
+def display_menu(checkpoint_info: Dict = None) -> None:
     """✨ Display the most GORGEOUS menu ever! ✨"""
     print("\n" + "╔" + "═"*78 + "╗")
     print("║" + " "*78 + "║")
     print("║" + "   ✨💅 FAIRY CODEMOTHER'S RESUME EXTRACTOR DELUXE 💅✨".center(78) + "║")
     print("║" + "              ~ Where Every Resume Gets Its Glow-Up ~".center(78) + "║")
     print("║" + " "*78 + "║")
+
+    # Show checkpoint status if available
+    if checkpoint_info and checkpoint_info.get("exists"):
+        print("╠" + "═"*78 + "╣")
+        print("║" + " "*78 + "║")
+        print("║" + "   💾 CHECKPOINT STATUS:".ljust(78) + "║")
+        ts = checkpoint_info.get("timestamp", "Unknown")
+        if ts and ts != "Unknown":
+            # Format timestamp nicely
+            try:
+                dt = datetime.datetime.fromisoformat(ts)
+                ts_formatted = dt.strftime("%Y-%m-%d %H:%M:%S")
+            except:
+                ts_formatted = ts
+        else:
+            ts_formatted = "Unknown"
+        print("║" + f"      📅 Last saved: {ts_formatted}".ljust(78) + "║")
+        print("║" + f"      📁 Folders processed: {checkpoint_info.get('total_processed', 0)}".ljust(78) + "║")
+        print("║" + f"      ✅ Candidates extracted: {checkpoint_info.get('total_results', 0)}".ljust(78) + "║")
+        print("║" + " "*78 + "║")
+
     print("╠" + "═"*78 + "╣")
     print("║" + " "*78 + "║")
     print("║" + "   🎭 Choose Your Adventure, Darling:".center(78) + "║")
     print("║" + " "*78 + "║")
-    print("║" + "     [1] 💄 Fresh Start - Process ALL resumes".ljust(78) + "║")
-    print("║" + "     [2] 👑 Continue the Show - Resume from last checkpoint".ljust(78) + "║")
+    print("║" + "     [1] 💄 Fresh Start - Process ALL resumes (clears checkpoint)".ljust(78) + "║")
+    print("║" + "     [2] 👑 Resume Extraction - Continue from last checkpoint".ljust(78) + "║")
     print("║" + "     [3] 🎯 Selective Processing - Choose specific folders".ljust(78) + "║")
     print("║" + "     [4] 🔎 Test mode - Testing the stage before the show!".ljust(78) + "║")
     print("║" + "     [5] 📭 Find Candidates with Missing Resumes".ljust(78) + "║")
@@ -29,26 +77,58 @@ def display_menu() -> None:
     print("║" + " "*78 + "║")
     print("╚" + "═"*78 + "╝")
 
-def save_checkpoint(processed_files: List[str], checkpoint_file: str) -> None:
-    """💾 Save our progress, honey!"""
+def save_checkpoint(processed_files: List[str], checkpoint_file: str, results: List[Dict] = None) -> None:
+    """💾 Save our progress with extracted results, honey!"""
     checkpoint_data = {
         "processed_files": processed_files,
         "timestamp": datetime.datetime.now().isoformat(),
-        "total_processed": len(processed_files)
+        "total_processed": len(processed_files),
+        "results": results or []
     }
     with open(checkpoint_file, 'w', encoding='utf-8') as f:
-        json.dump(checkpoint_data, f, indent=2)
+        json.dump(checkpoint_data, f, indent=2, ensure_ascii=False, default=str)
 
-def load_checkpoint(checkpoint_file: str) -> List[str]:
-    """📂 Load our previous work!"""
+def load_checkpoint(checkpoint_file: str) -> Tuple[List[str], List[Dict], Optional[str]]:
+    """📂 Load our previous work with results!
+    Returns: (processed_files, results, timestamp)
+    """
     if os.path.exists(checkpoint_file):
         with open(checkpoint_file, 'r', encoding='utf-8') as f:
             try:
                 data = json.load(f)
-                return data.get("processed_files", [])
+                processed_files = data.get("processed_files", [])
+                results = data.get("results", [])
+                timestamp = data.get("timestamp", None)
+                return processed_files, results, timestamp
             except json.JSONDecodeError:
-                return []
-    return []
+                return [], [], None
+    return [], [], None
+
+def get_checkpoint_info(checkpoint_file: str) -> Optional[Dict]:
+    """📊 Get checkpoint status without loading full data"""
+    if os.path.exists(checkpoint_file):
+        try:
+            with open(checkpoint_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return {
+                    "total_processed": data.get("total_processed", 0),
+                    "total_results": len(data.get("results", [])),
+                    "timestamp": data.get("timestamp", "Unknown"),
+                    "exists": True
+                }
+        except (json.JSONDecodeError, Exception):
+            return {"exists": False}
+    return {"exists": False}
+
+def clear_checkpoint(checkpoint_file: str) -> bool:
+    """🗑️ Clear checkpoint file for fresh start"""
+    if os.path.exists(checkpoint_file):
+        try:
+            os.remove(checkpoint_file)
+            return True
+        except Exception:
+            return False
+    return True
 
 def print_batch_table(batch_num: int, total_batches: int, batch_files: List[str], total_files: int, batch_size: int) -> None:
     """Prints a dazzling ASCII art table for the current batch."""
@@ -88,7 +168,7 @@ def select_folders_to_process(resume_folder: str) -> List[str]:
             continue
 
         if choice_input == 'all':
-            selected_folders = subfolders
+            selected_folders = all_folders
             break
 
         try:
