@@ -191,38 +191,86 @@ def select_folders_to_process(resume_folder: str) -> List[str]:
 
 def standardize_phone_number(phone: str) -> Optional[str]:
     """
-    📱 Standardizes phone numbers to common English formats.
-    Supports: US, UK, and international formats.
+    📱 FIXED: Standardizes phone numbers - NOW SUPPORTS INTERNATIONAL!
+    
+    SUPPORTS:
+    - Singapore: 8 digits (91234567) → +65 9123 4567
+    - Malaysia: 10-11 digits (0123456789) → +60 12-345 6789
+    - India: 10 digits (9876543210) → +91 98765 43210
+    - US/Canada: 10 digits → +1 (123) 456-7890
+    - UK: 10-11 digits → +44 XXXX XXXXXX
+    - International with + → preserved
+    
+    🔧 FIXES:
+    - Now accepts 8+ digit phones (was 10+, breaking Singapore numbers!)
     """
     if not phone:
         return None
     
-    # Clean the input
+    # Clean the input - keep only digits and +
     cleaned = re.sub(r'[^\d+\-\(\)\s]', '', phone).strip()
     
     # Extract only digits
     digits = re.sub(r'\D', '', cleaned)
     
-    # US/Canada format (10 digits)
+    # Too short = not a phone
+    if len(digits) < 7:
+        return None
+    
+    # Too long = probably garbage
+    if len(digits) > 15:
+        return None
+    
+    # ========== SINGAPORE (8 digits, starting with 6, 8, or 9) ==========
+    if len(digits) == 8 and digits[0] in '689':
+        return f"+65 {digits[:4]} {digits[4:]}"
+    
+    # Singapore with country code (10 digits: 65 + 8 digit number)
+    if len(digits) == 10 and digits.startswith('65') and digits[2] in '689':
+        return f"+65 {digits[2:6]} {digits[6:]}"
+    
+    # ========== MALAYSIA (starts with 60 or 0) ==========
+    if digits.startswith('60') and len(digits) >= 11:
+        return f"+60 {digits[2:4]}-{digits[4:7]} {digits[7:]}"
+    
+    if digits.startswith('0') and len(digits) in [10, 11] and digits[1] == '1':
+        # Malaysian mobile: 012-XXX-XXXX
+        return f"+60 {digits[1:3]}-{digits[3:6]} {digits[6:]}"
+    
+    # ========== INDIA (starts with 91 or single digit 6-9) ==========
+    if digits.startswith('91') and len(digits) == 12:
+        return f"+91 {digits[2:7]} {digits[7:]}"
+    
+    if len(digits) == 10 and digits[0] in '6789':
+        # Could be India mobile
+        return f"+91 {digits[:5]} {digits[5:]}"
+    
+    # ========== US/CANADA (10 digits) ==========
     if len(digits) == 10:
-        return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
+        return f"+1 ({digits[:3]}) {digits[3:6]}-{digits[6:]}"
     
     # US/Canada with country code (11 digits starting with 1)
-    elif len(digits) == 11 and digits.startswith('1'):
+    if len(digits) == 11 and digits.startswith('1'):
         return f"+1 ({digits[1:4]}) {digits[4:7]}-{digits[7:]}"
     
-    # UK format (10-11 digits)
-    elif len(digits) in [10, 11] and cleaned.startswith(('+44', '44')):
-        if digits.startswith('44'):
-            digits = digits[2:]
-        return f"+44 {digits[:4]} {digits[4:7]} {digits[7:]}"
+    # ========== UK (starts with 44) ==========
+    if digits.startswith('44') and len(digits) >= 12:
+        return f"+44 {digits[2:6]} {digits[6:]}"
     
-    # International format with + (keep as-is but format nicely)
-    elif cleaned.startswith('+') and len(digits) >= 10:
+    # ========== AUSTRALIA (starts with 61) ==========
+    if digits.startswith('61') and len(digits) >= 11:
+        return f"+61 {digits[2:5]} {digits[5:8]} {digits[8:]}"
+    
+    # ========== INTERNATIONAL with + ==========
+    if cleaned.startswith('+') and len(digits) >= 8:
         return cleaned
     
-    # If we can't format it, return the cleaned version
-    return cleaned if len(digits) >= 7 else None
+    # ========== GENERIC FALLBACK ==========
+    # If we have 8+ digits, return the cleaned version
+    if len(digits) >= 8:
+        return cleaned
+    
+    return None
 
 def standardize_date(date_str: str) -> Optional[str]:
     """

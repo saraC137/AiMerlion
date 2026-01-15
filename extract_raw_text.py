@@ -1,9 +1,10 @@
 """
-Raw Text Extraction from PDFs using Marker + OCR Hybrid
-Extracts and saves raw text from all resume PDFs for inspection
+Raw Text Extraction from PDFs and DOCX files using Marker + OCR Hybrid
+Extracts and saves raw text from all resume files for inspection
 Uses PDF inspector to determine extraction strategy:
 - Text-only PDFs: Marker only (fast)
 - PDFs with images: Hybrid (Marker + OCR merged)
+- DOCX files: python-docx extraction
 """
 
 import os
@@ -200,6 +201,145 @@ class HybridExtractor:
 
         return None
 
+    def extract_docx(self, file_path: str) -> Optional[str]:
+        """
+        DOCX EXTRACTION: Extract text from Word documents using python-docx
+        Handles standard paragraphs/tables AND text boxes/shapes (common in resumes)
+        """
+        file_name = os.path.basename(file_path)
+        logger.info(f"DOCX EXTRACTION for {file_name}")
+
+        try:
+            from docx import Document
+        except ImportError:
+            logger.error("python-docx not installed. Install with: pip install python-docx")
+            return None
+
+        try:
+            doc = Document(file_path)
+            all_text = []
+
+            # Extract text from paragraphs
+            for para in doc.paragraphs:
+                if para.text.strip():
+                    all_text.append(para.text)
+
+            # Extract text from tables
+            for table in doc.tables:
+                for row in table.rows:
+                    row_text = []
+                    for cell in row.cells:
+                        if cell.text.strip():
+                            row_text.append(cell.text.strip())
+                    if row_text:
+                        all_text.append(" | ".join(row_text))
+
+            combined_text = "\n".join(all_text)
+
+            # If standard extraction found nothing, try XML-based extraction
+            # This handles text boxes, shapes, and other non-standard layouts
+            if not combined_text.strip():
+                logger.info("Standard extraction found no text, trying XML-based extraction...")
+                combined_text = self._extract_docx_from_xml(file_path)
+
+            if combined_text and combined_text.strip():
+                logger.info(f"DOCX extracted: {len(combined_text)} chars, {len(combined_text.split())} words")
+                return combined_text
+            else:
+                logger.warning(f"DOCX extraction produced no text")
+                return None
+
+        except Exception as e:
+            logger.error(f"DOCX extraction failed: {e}")
+            return None
+
+    def _extract_docx_from_xml(self, file_path: str) -> Optional[str]:
+        """
+        Extract text directly from DOCX XML when standard extraction fails.
+        Handles text boxes, shapes, drawings, and other non-standard layouts.
+        """
+        import zipfile
+        import re
+
+        try:
+            all_texts = []
+
+            with zipfile.ZipFile(file_path, 'r') as z:
+                # Process main document
+                if 'word/document.xml' in z.namelist():
+                    content = z.read('word/document.xml').decode('utf-8')
+                    texts = self._extract_text_from_xml_content(content)
+                    all_texts.extend(texts)
+
+                # Also check headers/footers for additional content
+                for name in z.namelist():
+                    if name.startswith('word/header') or name.startswith('word/footer'):
+                        content = z.read(name).decode('utf-8')
+                        texts = self._extract_text_from_xml_content(content)
+                        all_texts.extend(texts)
+
+            if all_texts:
+                # Join text elements, handling spacing intelligently
+                combined = self._join_xml_text_elements(all_texts)
+                logger.info(f"XML extraction found {len(combined)} chars from {len(all_texts)} text elements")
+                return combined
+
+            return None
+
+        except Exception as e:
+            logger.error(f"XML-based DOCX extraction failed: {e}")
+            return None
+
+    def _extract_text_from_xml_content(self, xml_content: str) -> list:
+        """Extract all <w:t> text elements from XML content"""
+        import re
+        # Match <w:t> elements, including those with attributes like xml:space="preserve"
+        texts = re.findall(r'<w:t[^>]*>([^<]*)</w:t>', xml_content)
+        return texts
+
+    def _join_xml_text_elements(self, texts: list) -> str:
+        """
+        Intelligently join XML text elements to reconstruct readable text.
+        Handles spacing and line breaks based on content patterns.
+        """
+        import re
+
+        if not texts:
+            return ""
+
+        result = []
+        current_line = []
+
+        for text in texts:
+            # Skip empty or whitespace-only elements
+            if not text or text.isspace():
+                # If we have content in current line, this might be a separator
+                if current_line and text and len(text) > 3:
+                    # Multiple spaces often indicate new section
+                    result.append(' '.join(current_line))
+                    current_line = []
+                continue
+
+            current_line.append(text)
+
+            # Check for natural line endings
+            if text.endswith((':',)) or any(text.strip().endswith(x) for x in ['.', '!', '?']):
+                # Might be end of a section
+                pass
+
+        # Add any remaining content
+        if current_line:
+            result.append(' '.join(current_line))
+
+        # Join lines with newlines and clean up excessive whitespace
+        combined = '\n'.join(result)
+        # Clean up multiple consecutive spaces
+        combined = re.sub(r' +', ' ', combined)
+        # Clean up multiple consecutive newlines
+        combined = re.sub(r'\n\s*\n', '\n\n', combined)
+
+        return combined.strip()
+
     def get_extraction_stats(self, text: str) -> dict:
         """Get statistics about extracted text"""
         if self.marker_extractor:
@@ -267,15 +407,15 @@ def get_extraction_limit():
 
 def extract_raw_text(resume_folder: str = "merlion_resumes", output_folder: str = "raw_text_output", limit: int = 0):
     """
-    Extract raw text from all PDFs and save to text files and Excel
+    Extract raw text from all PDFs and DOCX files and save to text files and Excel
 
     Args:
-        resume_folder: Folder containing resume PDFs
+        resume_folder: Folder containing resume PDFs and DOCX files
         output_folder: Folder to save raw text files
         limit: Maximum number of candidates to extract (0 = extract all)
     """
     print("\n" + "="*80)
-    print("RAW TEXT EXTRACTION WITH HYBRID METHOD".center(80))
+    print("RAW TEXT EXTRACTION (PDF + DOCX)".center(80))
     print("="*80 + "\n")
 
     # Show extraction limit
@@ -298,67 +438,87 @@ def extract_raw_text(resume_folder: str = "merlion_resumes", output_folder: str 
 
     logger.info("Hybrid Extractor initialized!\n")
 
-    # Find all PDFs
-    pdf_files = []
+    # Find all PDFs and DOCX files
+    resume_files = []
     for root, dirs, files in os.walk(resume_folder):
         for file in files:
-            if file.lower().endswith('.pdf'):
-                pdf_files.append(os.path.join(root, file))
+            if file.lower().endswith('.pdf') or file.lower().endswith('.docx'):
+                resume_files.append(os.path.join(root, file))
 
-    total_found = len(pdf_files)
+    total_found = len(resume_files)
 
     # Apply limit if specified
-    if limit > 0 and limit < len(pdf_files):
-        pdf_files = pdf_files[:limit]
-        logger.info(f"Found {total_found} PDF files, processing first {limit}\n")
+    if limit > 0 and limit < len(resume_files):
+        resume_files = resume_files[:limit]
+        logger.info(f"Found {total_found} files (PDF/DOCX), processing first {limit}\n")
     else:
-        logger.info(f"Found {len(pdf_files)} PDF files to process\n")
+        logger.info(f"Found {len(resume_files)} files (PDF/DOCX) to process\n")
 
-    if not pdf_files:
-        logger.warning("No PDF files found!")
+    if not resume_files:
+        logger.warning("No PDF or DOCX files found!")
         return
 
-    # Process each PDF
+    # Process each file (PDF or DOCX)
     successful = 0
     failed = 0
     extraction_data = []  # Store data for Excel generation
 
-    for idx, pdf_path in enumerate(pdf_files, 1):
-        file_name = os.path.basename(pdf_path)
-        folder_name = os.path.basename(os.path.dirname(pdf_path))
+    for idx, file_path in enumerate(resume_files, 1):
+        file_name = os.path.basename(file_path)
+        folder_name = os.path.basename(os.path.dirname(file_path))
+        is_docx = file_name.lower().endswith('.docx')
 
         print(f"\n{'='*80}")
-        print(f"[{idx}/{len(pdf_files)}] Processing: {folder_name}/{file_name}")
+        print(f"[{idx}/{len(resume_files)}] Processing: {folder_name}/{file_name}")
         print(f"{'='*80}")
 
         try:
-            # Step 1: Inspect PDF to determine extraction strategy
-            pdf_info = analyze_pdf_type(pdf_path)
-            logger.info(f"PDF Inspector: type={pdf_info['pdf_type']}, "
-                       f"images={pdf_info['image_count']}, text={pdf_info['text_length']} chars, "
-                       f"needs_ocr={pdf_info['needs_ocr']}")
-
-            # Step 2: Extract based on PDF type
-            if pdf_info['needs_ocr']:
-                # PDF has images - use HYBRID extraction (Marker + OCR merged)
-                logger.info(f"Images detected ({pdf_info['image_count']}) - using HYBRID extraction")
-                text = extractor.extract_hybrid(pdf_path)
+            # Handle DOCX files
+            if is_docx:
+                logger.info(f"DOCX file detected - using python-docx extraction")
+                text = extractor.extract_docx(file_path)
+                pdf_info = {
+                    'pdf_type': 'DOCX',
+                    'image_count': 0,
+                    'text_length': len(text) if text else 0,
+                    'needs_ocr': False
+                }
             else:
-                # Text-only PDF - use Marker only (faster)
-                logger.info(f"Text-only PDF - using Marker extraction")
-                text = extractor.extract_text_only(pdf_path)
+                # Step 1: Inspect PDF to determine extraction strategy
+                pdf_info = analyze_pdf_type(file_path)
+                logger.info(f"PDF Inspector: type={pdf_info['pdf_type']}, "
+                           f"images={pdf_info['image_count']}, text={pdf_info['text_length']} chars, "
+                           f"needs_ocr={pdf_info['needs_ocr']}")
+
+                # Step 2: Extract based on PDF type
+                if pdf_info['needs_ocr']:
+                    # PDF has images - use HYBRID extraction (Marker + OCR merged)
+                    logger.info(f"Images detected ({pdf_info['image_count']}) - using HYBRID extraction")
+                    text = extractor.extract_hybrid(file_path)
+                else:
+                    # Text-only PDF - use Marker only (faster)
+                    logger.info(f"Text-only PDF - using Marker extraction")
+                    text = extractor.extract_text_only(file_path)
 
             if text and len(text.strip()) >= 50:
                 # Create output filename
                 output_name = f"{folder_name}_{os.path.splitext(file_name)[0]}.txt"
                 output_path = os.path.join(output_folder, output_name)
 
+                # Determine extraction method description
+                if is_docx:
+                    extraction_method = 'python-docx'
+                elif pdf_info['needs_ocr']:
+                    extraction_method = 'HYBRID (Marker + OCR)'
+                else:
+                    extraction_method = 'Marker only'
+
                 # Save raw text
                 with open(output_path, 'w', encoding='utf-8') as f:
-                    f.write(f"Source: {pdf_path}\n")
-                    f.write(f"PDF Type: {pdf_info['pdf_type']}\n")
+                    f.write(f"Source: {file_path}\n")
+                    f.write(f"File Type: {pdf_info['pdf_type']}\n")
                     f.write(f"Images Found: {pdf_info['image_count']}\n")
-                    f.write(f"Extraction Method: {'HYBRID (Marker + OCR)' if pdf_info['needs_ocr'] else 'Marker only'}\n")
+                    f.write(f"Extraction Method: {extraction_method}\n")
                     f.write(f"{'='*80}\n\n")
                     f.write(text)
 
@@ -383,10 +543,10 @@ def extract_raw_text(resume_folder: str = "merlion_resumes", output_folder: str 
                     'Candidate_ID': idx,
                     'Folder_Name': folder_name,
                     'File_Name': file_name,
-                    'PDF_Path': pdf_path,
-                    'PDF_Type': pdf_info['pdf_type'],
+                    'File_Path': file_path,
+                    'File_Type': pdf_info['pdf_type'],
                     'Images_Found': pdf_info['image_count'],
-                    'Extraction_Method': 'HYBRID' if pdf_info['needs_ocr'] else 'Marker',
+                    'Extraction_Method': 'DOCX' if is_docx else ('HYBRID' if pdf_info['needs_ocr'] else 'Marker'),
                     'Characters': stats['total_chars'],
                     'Words': stats['total_words'],
                     'Lines': stats['total_lines'],

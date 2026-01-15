@@ -29,6 +29,7 @@ import coloredlogs
 import ollama
 import pypdf
 import docx
+import docx2txt
 import pdfplumber
 from pathlib import Path
 from paddleocr import PaddleOCR
@@ -136,6 +137,57 @@ class UltimateResumeExtractor:
                 logger.error(f"❌ Could not initialize AI: {e}")
         else:
             logger.info("🎯 AI extraction disabled - using regex only")
+
+    def _clean_text_for_extraction(self, text: str) -> str:
+        """
+        🧹 Clean resume text BEFORE extraction!
+        
+        This fixes encoding issues that break regex patterns - 
+        often THE reason why extraction fails!
+        """
+        if not text:
+            return ""
+        
+        # Fix common encoding garbage
+        replacements = {
+            '\u00a0': ' ',      # Non-breaking space → regular space
+            '\u2028': '\n',     # Line separator
+            '\u2029': '\n',     # Paragraph separator
+            '\u200b': '',       # Zero-width space (REMOVE)
+            '\u200c': '',       # Zero-width non-joiner
+            '\u200d': '',       # Zero-width joiner
+            '\ufeff': '',       # BOM (REMOVE)
+            '–': '-',           # En-dash → hyphen
+            '—': '-',           # Em-dash → hyphen
+            ''': "'",           # Smart quote → regular
+            ''': "'",           # Smart quote → regular
+            '"': '"',           # Smart quote → regular
+            '"': '"',           # Smart quote → regular
+            '•': '* ',          # Bullet → asterisk
+            '●': '* ',          # Bullet
+            '○': '* ',          # Bullet
+            '■': '* ',          # Bullet
+            '□': '* ',          # Bullet
+            '▪': '* ',          # Bullet
+            '►': '* ',          # Bullet
+            '　': ' ',          # Full-width space → regular
+            '\r\n': '\n',       # Windows line endings
+            '\r': '\n',         # Old Mac line endings
+        }
+        
+        for old, new in replacements.items():
+            text = text.replace(old, new)
+        
+        # Remove control characters (except newlines and tabs)
+        text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
+        
+        # Normalize multiple spaces (but preserve newlines)
+        text = re.sub(r'[ \t]+', ' ', text)
+        
+        # Normalize multiple newlines
+        text = re.sub(r'\n\s*\n\s*\n+', '\n\n', text)
+        
+        return text.strip()
 
     def _initialize_ocr_engine(self):
         """
@@ -296,26 +348,32 @@ class UltimateResumeExtractor:
         
         result = {
             "ID": int(id_match.group(1)) if id_match else None,
-            "Name": None, 
-            "Email": None, 
+            "Name": None,
+            "Email": None,
             "Phone": None,
-            "Date_of_Birth": None, 
+            "Date_of_Birth": None,
+            "Skills": None,
+            "Working_Experience": None,
+            "Location": None,
+            "School_University": None,
+            "Language": "English",
             "Extraction_Status": "Failed",
             "Notes": "",
             "AI_Assisted": False,
             "Filenames_Processed": filename
         }
-        
+
         # Get text and extract data
         text = self.get_text_from_file(file_path)
         if text and len(text.strip()) >= 50:
             extracted_data, ai_used = self._extract_data_from_text(text)
-            
+
             if ai_used:
                 result["AI_Assisted"] = True
-            
-            # Update result with extracted data
-            for field in ["Name", "Email", "Phone", "Date_of_Birth"]:
+
+            # Update result with extracted data - ALL fields!
+            for field in ["Name", "Email", "Phone", "Date_of_Birth", "Skills",
+                          "Working_Experience", "Location", "School_University"]:
                 if extracted_data.get(field):
                     result[field] = extracted_data[field]
             
@@ -354,8 +412,13 @@ class UltimateResumeExtractor:
         """
         🌟 MEGA REGEX for ENGLISH resumes only!
         Cleaner, faster, more accurate!
+        
+        🧚‍♀️ NOW WITH TEXT CLEANING to fix encoding issues!
         """
         logger.debug("🎭 ENGLISH-ONLY REGEX BEGINS!")
+        
+        # 🧹 CLEAN TEXT FIRST - fixes encoding issues that break regex!
+        text = self._clean_text_for_extraction(text)
         
         data: Dict[str, Optional[str]] = {
             "name": None,
@@ -372,19 +435,25 @@ class UltimateResumeExtractor:
         table_data = self._extract_from_table_format(text)
         data.update(table_data)
         
-        # --- 📧 EMAIL EXTRACTION (most reliable!) ---
+        # --- 📧 EMAIL EXTRACTION (FIXED!) ---
         if not data["email"]:
             email_patterns = [
-                r'\b[A-Za-z0-9][A-Za-z0-9._%+-]*@[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Z|a-z]{2,}\b',
-                r'(?:[Ee]-?[Mm]ail|MAIL|Email)[\s:]*([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,})',
+                # FIXED: [A-Za-z] instead of [A-Z|a-z] - the | was being treated literally!
+                r'\b[A-Za-z0-9][A-Za-z0-9._%+-]*@[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z]{2,}\b',
+                r'(?:[Ee]-?[Mm]ail|MAIL|Email)[\s:]*([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})',
             ]
             for pattern in email_patterns:
                 matches = re.findall(pattern, text, re.IGNORECASE)
                 if matches:
                     email = matches[0] if isinstance(matches[0], str) else matches[0]
-                    data["email"] = email.lower()
-                    logger.info(f"✨ Found email: {data['email']}")
-                    break
+                    # Clean up the email
+                    email = email.strip().lower()
+                    # Skip excluded emails
+                    excluded = ['example.com', 'test.com', 'noreply@', 'support@', 'info@']
+                    if not any(excl in email for excl in excluded):
+                        data["email"] = email
+                        logger.info(f"✨ Found email: {data['email']}")
+                        break
         
         # --- 📱 PHONE EXTRACTION ---
         if not data["phone"]:
@@ -436,56 +505,175 @@ class UltimateResumeExtractor:
 
     def _extract_phone_english(self, text: str, email: Optional[str]) -> Optional[str]:
         """
-        📱 Extract phone numbers from ENGLISH resumes!
-        Supports US, UK, and international formats.
+        📱 BULLETPROOF phone extraction with INTERNATIONAL support!
+        
+        NOW SUPPORTS:
+        - Singapore: +65 9XXX XXXX, 9XXX XXXX (8 digits)
+        - Malaysia: +60 12-XXX XXXX, 012-XXX XXXX
+        - India: +91 XXXXX XXXXX
+        - US/Canada: (XXX) XXX-XXXX, XXX-XXX-XXXX
+        - UK: +44 7XXX XXXXXX
+        - Australia: +61 4XX XXX XXX
+        - Generic international formats
         """
         
-        # If we have an email, search near it first
+        # If we have an email, search near it first (contact info is usually grouped)
         search_areas = []
         if email:
-            email_index = text.find(email)
+            email_index = text.lower().find(email.lower())
             if email_index != -1:
-                start = max(0, email_index - 300)
-                end = min(len(text), email_index + 300)
+                start = max(0, email_index - 500)
+                end = min(len(text), email_index + 500)
                 search_areas.append(("near email", text[start:end]))
         
+        # Header area (contact info is usually in first 3000 chars)
+        search_areas.append(("header", text[:3000] if len(text) > 3000 else text))
+        
+        # Full text as last resort
         search_areas.append(("full text", text))
         
-        # Phone patterns for English resumes
+        # ==========================================================================
+        # 📱 COMPREHENSIVE PHONE PATTERNS - ALL COUNTRIES!
+        # ==========================================================================
         phone_patterns = [
-            # US/Canada: (123) 456-7890
-            (r'\((\d{3})\)\s*(\d{3})[-\s]?(\d{4})', 'us_paren'),
-            # US/Canada: 123-456-7890
-            (r'\b(\d{3})[-\.\s](\d{3})[-\.\s](\d{4})\b', 'us_dash'),
-            # International: +1 123 456 7890
-            (r'\+1\s*\(?(\d{3})\)?[-\.\s]?(\d{3})[-\.\s]?(\d{4})', 'us_intl'),
-            # UK: +44 1234 567890
-            (r'\+44\s*(\d{3,4})\s*(\d{3})\s*(\d{3,4})', 'uk'),
-            # After label
-            (r'(?:Phone|Tel|Mobile|Cell|Contact)[\s:]*([+\d\-\s\(\)\.]{10,20})', 'labeled'),
-            # Generic 10+ digits
-            (r'\b(\d{3}[-\.\s]?\d{3}[-\.\s]?\d{4})\b', 'generic'),
+            # ========== LABELED PATTERNS (highest priority!) ==========
+            # "Phone: +65 9123 4567" or "Tel: 91234567" or "HP: 012-3456789"
+            (r'(?:phone|tel|mobile|cell|contact|hp|h/p|handphone|no\.?\s*(?:tel|hp))[\s.:]*\+?[\d\s.()\-]{7,20}', 'LABELED', 7),
+            
+            # ========== SINGAPORE (+65) ==========
+            # +65 9123 4567 or +65 91234567 or +6591234567
+            (r'\+65[\s.-]?[689]\d{3}[\s.-]?\d{4}', 'SG', 8),
+            # 65 9123 4567 (without +)
+            (r'(?<!\d)65[\s.-]?[689]\d{3}[\s.-]?\d{4}(?!\d)', 'SG', 8),
+            # Local SG: 9123 4567 or 91234567 (8 digits starting with 6, 8, or 9)
+            (r'(?<!\d)[689]\d{3}[\s.-]?\d{4}(?!\d)', 'SG_LOCAL', 8),
+            
+            # ========== MALAYSIA (+60) ==========
+            # +60 12-345 6789 or +60 123456789
+            (r'\+60[\s.-]?\d{1,2}[\s.-]?\d{3,4}[\s.-]?\d{4}', 'MY', 9),
+            # Local MY: 012-345 6789 or 0123456789
+            (r'(?<!\d)0\d{1,2}[\s.-]?\d{3,4}[\s.-]?\d{4}(?!\d)', 'MY_LOCAL', 10),
+            
+            # ========== INDIA (+91) ==========
+            # +91 98765 43210
+            (r'\+91[\s.-]?[6-9]\d{4}[\s.-]?\d{5}', 'IN', 10),
+            # Local IN: 98765 43210 (10 digits starting with 6-9)
+            (r'(?<!\d)[6-9]\d{4}[\s.-]?\d{5}(?!\d)', 'IN_LOCAL', 10),
+            
+            # ========== US/CANADA (+1) ==========
+            # +1 (123) 456-7890
+            (r'\+1[\s.-]?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}', 'US', 10),
+            # (123) 456-7890
+            (r'\(\d{3}\)[\s.-]?\d{3}[\s.-]?\d{4}', 'US_LOCAL', 10),
+            # 123-456-7890
+            (r'(?<!\d)\d{3}[\s.-]\d{3}[\s.-]\d{4}(?!\d)', 'US_LOCAL', 10),
+            
+            # ========== UK (+44) ==========
+            # +44 7XXX XXXXXX
+            (r'\+44[\s.-]?7\d{3}[\s.-]?\d{6}', 'UK', 10),
+            # 07XXX XXXXXX
+            (r'(?<!\d)07\d{3}[\s.-]?\d{6}(?!\d)', 'UK_LOCAL', 11),
+            
+            # ========== AUSTRALIA (+61) ==========
+            # +61 4XX XXX XXX
+            (r'\+61[\s.-]?4\d{2}[\s.-]?\d{3}[\s.-]?\d{3}', 'AU', 9),
+            # 04XX XXX XXX
+            (r'(?<!\d)04\d{2}[\s.-]?\d{3}[\s.-]?\d{3}(?!\d)', 'AU_LOCAL', 10),
+            
+            # ========== GENERIC INTERNATIONAL ==========
+            (r'\+\d{1,3}[\s.-]?\d{1,4}[\s.-]?\d{2,4}[\s.-]?\d{2,4}[\s.-]?\d{0,4}', 'INTL', 8),
+            
+            # ========== GENERIC FALLBACK ==========
+            (r'(?<!\d)[\d][\d\s.\-()]{6,18}[\d](?!\d)', 'GENERIC', 8),
         ]
         
         for area_name, search_text in search_areas:
-            for pattern, pattern_type in phone_patterns:
-                matches = re.finditer(pattern, search_text, re.IGNORECASE)
+            for pattern, pattern_type, min_digits in phone_patterns:
+                try:
+                    matches = list(re.finditer(pattern, search_text, re.IGNORECASE))
+                except re.error:
+                    continue
+                
                 for match in matches:
-                    phone_text = match.group(0) if pattern_type == 'labeled' else match.group(0)
+                    phone_raw = match.group(0).strip()
                     
-                    # Validate it looks like a phone
-                    digits_only = re.sub(r'\D', '', phone_text)
+                    # Extract digits only
+                    digits_only = re.sub(r'\D', '', phone_raw)
                     
-                    # Must be 10-15 digits
-                    if 10 <= len(digits_only) <= 15:
-                        # Not all same digit
-                        if not re.match(r'^(\d)\1+$', digits_only):
-                            formatted = standardize_phone_number(phone_text)
-                            if formatted:
-                                logger.info(f"✨ Found phone: {formatted}")
-                                return formatted
+                    # =========================================================
+                    # 🔧 THE CRITICAL FIX: Accept 8+ digits (not 10+!)
+                    # Singapore phones are 8 digits!
+                    # =========================================================
+                    if len(digits_only) < min_digits:
+                        continue
+                    if len(digits_only) > 15:
+                        continue
+                    
+                    # Skip fake numbers (all same digit)
+                    if len(set(digits_only)) <= 2:
+                        continue
+                    
+                    # Skip obvious false positives
+                    if digits_only.startswith('0000') or digits_only.startswith('1234567'):
+                        continue
+                    
+                    # Format and return
+                    formatted = self._format_phone_international(phone_raw, pattern_type, digits_only)
+                    if formatted:
+                        logger.info(f"✨ Found phone ({pattern_type}): {formatted}")
+                        return formatted
         
         return None
+    
+    def _format_phone_international(self, raw: str, phone_type: str, digits: str) -> str:
+        """📱 Format phone number based on detected country"""
+        # Remove label prefix if present
+        cleaned = re.sub(r'^(?:phone|tel|mobile|cell|contact|hp|h/p|handphone|no\.?\s*(?:tel|hp))[\s.:]*', '', raw, flags=re.IGNORECASE).strip()
+        
+        # Singapore
+        if phone_type.startswith('SG'):
+            if len(digits) == 8:
+                return f"+65 {digits[:4]} {digits[4:]}"
+            elif len(digits) == 10 and digits.startswith('65'):
+                return f"+65 {digits[2:6]} {digits[6:]}"
+        
+        # Malaysia
+        elif phone_type.startswith('MY'):
+            if digits.startswith('60') and len(digits) >= 11:
+                return f"+60 {digits[2:4]}-{digits[4:7]} {digits[7:]}"
+            elif digits.startswith('0') and len(digits) >= 10:
+                return f"+60 {digits[1:3]}-{digits[3:6]} {digits[6:]}"
+        
+        # India
+        elif phone_type.startswith('IN'):
+            if digits.startswith('91') and len(digits) == 12:
+                return f"+91 {digits[2:7]} {digits[7:]}"
+            elif len(digits) == 10 and digits[0] in '6789':
+                return f"+91 {digits[:5]} {digits[5:]}"
+        
+        # US/Canada
+        elif phone_type.startswith('US'):
+            if len(digits) == 10:
+                return f"+1 ({digits[:3]}) {digits[3:6]}-{digits[6:]}"
+            elif len(digits) == 11 and digits.startswith('1'):
+                return f"+1 ({digits[1:4]}) {digits[4:7]}-{digits[7:]}"
+        
+        # UK
+        elif phone_type.startswith('UK'):
+            if digits.startswith('44') and len(digits) >= 12:
+                return f"+44 {digits[2:6]} {digits[6:]}"
+            elif digits.startswith('0') and len(digits) >= 11:
+                return f"+44 {digits[1:5]} {digits[5:]}"
+        
+        # Australia
+        elif phone_type.startswith('AU'):
+            if digits.startswith('61') and len(digits) >= 11:
+                return f"+61 {digits[2:5]} {digits[5:8]} {digits[8:]}"
+            elif digits.startswith('04') and len(digits) == 10:
+                return f"+61 {digits[1:4]} {digits[4:7]} {digits[7:]}"
+        
+        # Labeled or generic - clean up and return
+        return cleaned if cleaned else raw.strip()
 
     def _extract_dob_english(self, text: str) -> Optional[str]:
         """
@@ -1158,6 +1346,7 @@ class UltimateResumeExtractor:
                                         text += page_text + "\n"
 
             elif file_path.lower().endswith('.docx'):
+                # Try python-docx first
                 doc = docx.Document(file_path)
                 text = "\n".join([p.text for p in doc.paragraphs])
 
@@ -1166,6 +1355,16 @@ class UltimateResumeExtractor:
                     for row in table.rows:
                         for cell in row.cells:
                             text += "\n" + cell.text
+
+                # Fallback to docx2txt if python-docx returns empty (handles text boxes, etc.)
+                if not text or len(text.strip()) < 50:
+                    logger.info(f"📄 python-docx returned minimal text, trying docx2txt for {file_name}")
+                    try:
+                        text = docx2txt.process(file_path)
+                        if text:
+                            logger.info(f"✅ docx2txt extracted {len(text)} chars")
+                    except Exception as e:
+                        logger.warning(f"⚠️ docx2txt failed: {e}")
 
             return self._clean_text(text)
 
@@ -1294,6 +1493,7 @@ class UltimateResumeExtractor:
                     final_results[field] = regex_results[field]
         
         # 🎯 FORMAT THE OUTPUT PROPERLY!
+        # Pass raw text for fallback extraction if structured parsing fails
         formatted_data = {
             "Name": final_results.get("name"),
             "Email": final_results.get("email"),
@@ -1301,91 +1501,145 @@ class UltimateResumeExtractor:
             "Date_of_Birth": standardize_date(final_results.get("date_of_birth")),
 
             # 💎 THE CRITICAL FIX: Convert lists to JSON strings for CSV export!
-            "Skills": self._format_skills_for_export(final_results),
-            "Working_Experience": self._format_experience_for_export(final_results),
+            # 🆘 Now with RAW TEXT FALLBACK when structured parsing fails!
+            "Skills": self._format_skills_for_export(final_results, text),
+            "Working_Experience": self._format_experience_for_export(final_results, text),
 
             "Location": final_results.get("location"),
-            "School_University": self._format_education_for_export(final_results),
+            "School_University": self._format_education_for_export(final_results, text),
         }
-        
+
         return formatted_data, ai_assisted
 
-    def _format_skills_for_export(self, data: Dict) -> Optional[str]:
+    def _extract_section_raw(self, text: str, section_keywords: List[str]) -> Optional[str]:
+        """
+        🆘 EMERGENCY FALLBACK: Extract raw text content from a section.
+        Used when structured parsing fails but we still want to capture content.
+        """
+        import re
+
+        if not text:
+            return None
+
+        # Common section terminators (next section headers)
+        terminators = [
+            'EXPERIENCE', 'WORK EXPERIENCE', 'EMPLOYMENT', 'EDUCATION', 'SKILLS',
+            'TECHNICAL SKILLS', 'CERTIFICATIONS', 'AWARDS', 'PROJECTS', 'REFERENCES',
+            'ACHIEVEMENTS', 'PUBLICATIONS', 'LANGUAGES', 'HOBBIES', 'INTERESTS',
+            'SUMMARY', 'OBJECTIVE', 'PROFILE', 'QUALIFICATIONS'
+        ]
+
+        for keyword in section_keywords:
+            # Create pattern to find section and capture until next section
+            terminator_pattern = '|'.join([t for t in terminators if t != keyword])
+            pattern = rf'(?:^|\n)\s*{re.escape(keyword)}[S]?\s*[:\n]\s*(.*?)(?=\n\s*(?:{terminator_pattern})\s*(?:[:|\n]|$)|$)'
+
+            match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+            if match:
+                content = match.group(1).strip()
+                # Clean up the content
+                content = re.sub(r'\s+', ' ', content)  # Normalize whitespace
+                content = re.sub(r'[•●○▪■►]', '|', content)  # Replace bullets with |
+
+                # Limit to reasonable length for CSV
+                if len(content) > 50:
+                    return content[:2000] if len(content) > 2000 else content
+
+        return None
+
+    def _format_skills_for_export(self, data: Dict, raw_text: str = "") -> Optional[str]:
         """
         🎨 Format skills for CSV export
         Combines hard + soft skills into readable format
+        WITH FALLBACK: If no structured skills found, extract from raw text!
         """
         import json
-        
+
         hard_skills = data.get("hard_skills", [])
         soft_skills = data.get("soft_skills", [])
-        
-        if not hard_skills and not soft_skills:
-            return None
-        
-        # Option 1: JSON format (structured)
-        # return json.dumps({"hard": hard_skills, "soft": soft_skills}, ensure_ascii=False)
-        
-        # Option 2: Readable list format (better for humans)
-        all_skills = []
-        if hard_skills:
-            all_skills.extend([f"[TECH] {s}" for s in hard_skills])
-        if soft_skills:
-            all_skills.extend([f"[SOFT] {s}" for s in soft_skills])
-        
-        return " | ".join(all_skills)
 
-    def _format_experience_for_export(self, data: Dict) -> Optional[str]:
+        if hard_skills or soft_skills:
+            # Option 2: Readable list format (better for humans)
+            all_skills = []
+            if hard_skills:
+                all_skills.extend(hard_skills)
+            if soft_skills:
+                all_skills.extend(soft_skills)
+            return " | ".join(all_skills)
+
+        # 🆘 FALLBACK: Extract skills section as raw text
+        if raw_text:
+            skills_fallback = self._extract_section_raw(raw_text,
+                ['SKILLS', 'TECHNICAL SKILLS', 'KEY SKILLS', 'CORE COMPETENCIES',
+                 'PROFICIENCIES', 'EXPERTISE', 'CAPABILITIES', 'QUALIFICATIONS'])
+            if skills_fallback:
+                return skills_fallback
+
+        return None
+
+    def _format_experience_for_export(self, data: Dict, raw_text: str = "") -> Optional[str]:
         """
         💼 Format work experience for CSV export
         Creates readable summary of jobs
+        WITH FALLBACK: If no structured experience found, extract from raw text!
         """
         import json
-        
-        experience = data.get("working_experience", [])
-        
-        if not experience or not isinstance(experience, list):
-            return None
-        
-        # Option 1: JSON format
-        # return json.dumps(experience, ensure_ascii=False)
-        
-        # Option 2: Readable summary format
-        job_summaries = []
-        for job in experience:
-            if isinstance(job, dict):
-                company = job.get('company', 'Unknown')
-                role = job.get('role', 'N/A')
-                dates = job.get('dates', 'N/A')
-                job_summaries.append(f"{company} - {role} ({dates})")
-        
-        return " || ".join(job_summaries)
 
-    def _format_education_for_export(self, data: Dict) -> Optional[str]:
+        experience = data.get("working_experience", [])
+
+        if experience and isinstance(experience, list) and len(experience) > 0:
+            # Option 2: Readable summary format
+            job_summaries = []
+            for job in experience:
+                if isinstance(job, dict):
+                    company = job.get('company', 'Unknown')
+                    role = job.get('role', 'N/A')
+                    dates = job.get('dates', 'N/A')
+                    job_summaries.append(f"{company} - {role} ({dates})")
+            if job_summaries:
+                return " || ".join(job_summaries)
+
+        # 🆘 FALLBACK: Extract experience section as raw text
+        if raw_text:
+            exp_fallback = self._extract_section_raw(raw_text,
+                ['EXPERIENCE', 'WORK EXPERIENCE', 'EMPLOYMENT', 'EMPLOYMENT HISTORY',
+                 'PROFESSIONAL EXPERIENCE', 'CAREER HISTORY', 'WORK HISTORY'])
+            if exp_fallback:
+                return exp_fallback
+
+        return None
+
+    def _format_education_for_export(self, data: Dict, raw_text: str = "") -> Optional[str]:
         """
         🎓 Format education for CSV export
         Creates readable summary of education entries
+        WITH FALLBACK: If no structured education found, extract from raw text!
         """
         import json
 
         education = data.get("education", [])
 
-        if not education or not isinstance(education, list):
-            return None
+        if education and isinstance(education, list) and len(education) > 0:
+            # Option 2: Readable summary format
+            edu_summaries = []
+            for edu in education:
+                if isinstance(edu, dict):
+                    institution = edu.get('institution', 'Unknown')
+                    degree = edu.get('degree', 'N/A')
+                    dates = edu.get('dates', 'N/A')
+                    edu_summaries.append(f"{degree} from {institution} ({dates})")
+            if edu_summaries:
+                return " || ".join(edu_summaries)
 
-        # Option 1: JSON format
-        # return json.dumps(education, ensure_ascii=False)
+        # 🆘 FALLBACK: Extract education section as raw text
+        if raw_text:
+            edu_fallback = self._extract_section_raw(raw_text,
+                ['EDUCATION', 'ACADEMIC', 'QUALIFICATIONS', 'ACADEMIC BACKGROUND',
+                 'EDUCATIONAL BACKGROUND', 'SCHOOLING', 'DEGREES'])
+            if edu_fallback:
+                return edu_fallback
 
-        # Option 2: Readable summary format
-        edu_summaries = []
-        for edu in education:
-            if isinstance(edu, dict):
-                institution = edu.get('institution', 'Unknown')
-                degree = edu.get('degree', 'N/A')
-                dates = edu.get('dates', 'N/A')
-                edu_summaries.append(f"{degree} from {institution} ({dates})")
-
-        return " || ".join(edu_summaries)
+        return None
 
     def _extract_name_from_folder(self, folder_path: str) -> Optional[str]:
         """
@@ -1502,7 +1756,13 @@ class UltimateResumeExtractor:
             self._set_extraction_status(result, combined_text)
 
             logger.info(f"✅ Completed: {result['Extraction_Status']}")
-            return result         
+            return result
+        else:
+            # No text extracted or text too short
+            logger.warning(f"⚠️ Could not extract text from files (got {len(combined_text.strip()) if combined_text else 0} chars)")
+            result["Notes"] += "⚠️ Text extraction failed or returned minimal content. "
+            result["Extraction_Status"] = "Failed"
+            return result
 
     def _extract_name_from_filename(self, file_name: str) -> Optional[str]:
         filename_without_ext = os.path.splitext(file_name)[0]

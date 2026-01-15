@@ -35,8 +35,7 @@ def test_marker():
 
     # Test with a sample PDF
     test_files = [
-        "merlion_resumes/44233_Unknown_Candidate/Reyner_Tan_SystemsLead.pdf",
-        "merlion_resumes/45885_ANG KAI WIN/Kai Win Ang Cloud Engineer (Level 2)- Singaporean Only Resume.pdf",
+        "merlion_resumes/43205_Yishun/George_Li___Singapore_6.03_yrs (1)_1.docx",
     ]
 
     for test_file in test_files:
