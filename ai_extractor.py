@@ -206,54 +206,124 @@ class AIExtractor:
     def _extract_languages_regex(self, text: str) -> List[Dict[str, str]]:
         """
         🌐 Extract languages with proficiency levels VERBATIM.
+        
+        🧚‍♀️ FAIRY CODEMOTHER'S FIX v3.0! 💅
+        - Fixed: Now tries INLINE pattern FIRST (single-line entries)
+        - Fixed: Added "Work Experience" as explicit terminator  
+        - Fixed: Added sanity checks to prevent slurping entire resume
         """
         languages = []
-
-        # Find languages section
+        
+        # =================================================================
+        # 🎯 STEP 1: TRY INLINE PATTERN FIRST!
+        # This catches "Language : English & Chinese" on a single line
+        # This is the MOST COMMON format in Singapore resumes!
+        # =================================================================
+        inline_match = re.search(r'Languages?\s*[:\-]\s*([^\n]+)', text, re.IGNORECASE)
+        if inline_match:
+            lang_text = inline_match.group(1).strip()
+            self.logger.info(f"🌐 Found inline language pattern: '{lang_text[:100]}'")
+            
+            # 🛡️ SANITY CHECK 1: Language entries should be SHORT (< 200 chars)!
+            if len(lang_text) > 200:
+                self.logger.warning(f"⚠️ Inline language too long ({len(lang_text)} chars) - truncating!")
+                lang_text = lang_text[:100]
+            
+            # 🛡️ SANITY CHECK 2: Should NOT contain job-related keywords
+            job_keywords = ['experience', 'present', 'consultant', 'manager', 'pte ltd', 
+                        'company', 'education', 'skills', 'achievements', 'financial',
+                        'carried', 'conducted', 'managed', 'worked', 'responsible']
+            if not any(kw in lang_text.lower() for kw in job_keywords):
+                # This is a valid language entry!
+                return self._parse_language_text(lang_text)
+            else:
+                self.logger.warning(f"⚠️ Inline pattern captured job keywords - trying section pattern")
+        
+        # =================================================================
+        # 🎯 STEP 2: Try section pattern (multi-line language sections)
+        # FIXED: Added "WORK\s+EXPERIENCE" and "WORK\s+HISTORY" as terminators!
+        # =================================================================
         lang_patterns = [
-            r'(?:^|\n)\s*(?:LANGUAGES?|LANGUAGE\s+SKILLS?|LINGUISTIC\s+SKILLS?)\s*[:\n]\s*(.*?)(?=\n\s*(?:EXPERIENCE|EDUCATION|SKILLS|EMPLOYMENT|WORK|PROJECTS?|CERTIFICATIONS?|AWARDS?|ACHIEVEMENTS?|REFERENCES?|HOBBIES?|INTERESTS?)\s*(?:[:|\n]|$)|$)',
+            # Pattern with EXPLICIT compound terminators!
+            r'(?:^|\n)\s*(?:LANGUAGES?|LANGUAGE\s+SKILLS?|LINGUISTIC\s+SKILLS?)\s*[:\n]\s*(.*?)(?=\n\s*(?:WORK\s+EXPERIENCE|WORK\s+HISTORY|EMPLOYMENT\s+HISTORY|PROFESSIONAL\s+EXPERIENCE|EXPERIENCE|EDUCATION|SKILLS|EMPLOYMENT|PROJECTS?|CERTIFICATIONS?|AWARDS?|ACHIEVEMENTS?|REFERENCES?|HOBBIES?|INTERESTS?|PERSONAL\s+PARTICULARS?)\s*(?:[:|\n]|$)|$)',
         ]
-
+        
         lang_text = ""
         for pattern in lang_patterns:
             match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
             if match:
-                lang_text = match.group(1)
+                lang_text = match.group(1).strip()
+                self.logger.info(f"🌐 Found section language pattern: '{lang_text[:100]}...'")
                 break
-
-        if not lang_text:
-            # Try inline pattern: "Languages: English (Native), Mandarin (Fluent)"
-            inline_match = re.search(r'Languages?\s*[:\-]\s*([^\n]+)', text, re.IGNORECASE)
-            if inline_match:
-                lang_text = inline_match.group(1)
-
+        
         if not lang_text:
             return languages
+        
+        # 🛡️ SANITY CHECK 3: Section should be reasonably short
+        if len(lang_text) > 500:
+            self.logger.warning(f"⚠️ Language section too long ({len(lang_text)} chars) - likely captured too much!")
+            # Only keep first 200 characters
+            lang_text = lang_text[:200]
+        
+        return self._parse_language_text(lang_text)
 
+    def _parse_language_text(self, lang_text: str) -> List[Dict[str, str]]:
+        """
+        🧚‍♀️ Helper method to parse language text into structured entries
+        ADD THIS AS A NEW METHOD IN AIExtractor class (after _extract_languages_regex)!
+        """
+        languages = []
+        
         # Split by common delimiters
-        items = re.split(r'[,;|•●○▪■►\n]', lang_text)
-
+        items = re.split(r'[,;|]|\band\b|\b&\b|[•◦○▪■►\n]', lang_text)
+        
         for item in items:
             item = item.strip()
-            if len(item) < 2:
+            if len(item) < 2 or len(item) > 50:  # Language names are 2-50 chars
                 continue
-
-            # Skip section headers
-            if re.match(r'^languages?$', item, re.IGNORECASE):
+            
+            # 🛡️ Skip section headers that might have slipped through
+            if re.match(r'^(?:languages?|skills?|experience|education)$', item, re.IGNORECASE):
                 continue
-
+            
+            # 🛡️ Skip items that look like dates (job entries bleeding in!)
+            if re.search(r'(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}', item, re.IGNORECASE):
+                self.logger.debug(f"⭐️ Skipping date entry in languages: {item[:50]}")
+                continue
+            
+            # 🛡️ Skip items that look like company names
+            company_keywords = ['pte ltd', 'pvt ltd', 'company', 'consultant', 'manager', 
+                            'engineer', 'executive', 'analyst', 'director']
+            if any(kw in item.lower() for kw in company_keywords):
+                self.logger.debug(f"⭐️ Skipping company-like entry in languages: {item[:50]}")
+                continue
+            
+            # 🛡️ Skip items that are action verbs (job responsibilities)
+            action_verbs = ['carried', 'conducted', 'managed', 'maintained', 'established',
+                        'engaged', 'created', 'held', 'ensured', 'worked', 'achieved']
+            first_word = item.split()[0].lower() if item.split() else ''
+            if first_word in action_verbs:
+                self.logger.debug(f"⭐️ Skipping action verb in languages: {item[:50]}")
+                continue
+            
             lang_entry = {"language": item, "proficiency": ""}
-
+            
             # Try to extract proficiency level
-            prof_match = re.search(r'\(?(\s*(?:Native|Fluent|Advanced|Intermediate|Basic|Beginner|Professional|Working|Conversational|Elementary|Mother\s+Tongue|Bilingual|C2|C1|B2|B1|A2|A1)\s*)\)?', item, re.IGNORECASE)
+            prof_match = re.search(
+                r'\(?(\s*(?:Native|Fluent|Advanced|Intermediate|Basic|Beginner|Professional|Working|Conversational|Elementary|Mother\s+Tongue|Bilingual|C2|C1|B2|B1|A2|A1)\s*)\)?', 
+                item, re.IGNORECASE
+            )
             if prof_match:
                 lang_entry["proficiency"] = prof_match.group(1).strip()
                 # Clean language name by removing proficiency
-                lang_entry["language"] = re.sub(r'\(?\s*(?:Native|Fluent|Advanced|Intermediate|Basic|Beginner|Professional|Working|Conversational|Elementary|Mother\s+Tongue|Bilingual|C2|C1|B2|B1|A2|A1)\s*\)?', '', item, flags=re.IGNORECASE).strip(' -–:')
-
-            if lang_entry["language"]:
+                lang_entry["language"] = re.sub(
+                    r'\(?\s*(?:Native|Fluent|Advanced|Intermediate|Basic|Beginner|Professional|Working|Conversational|Elementary|Mother\s+Tongue|Bilingual|C2|C1|B2|B1|A2|A1)\s*\)?', 
+                    '', item, flags=re.IGNORECASE
+                ).strip(' -–":')
+            
+            if lang_entry["language"] and len(lang_entry["language"]) >= 2:
                 languages.append(lang_entry)
-
+        
         self.logger.info(f"🌐 Found {len(languages)} languages")
         return languages
 
@@ -704,7 +774,22 @@ Response must be valid JSON only."""
         soft_skills = []
 
         # 🎭 IMPROVED: Section terminators must be at LINE START to avoid false matches
-        section_end = r'(?=\n\s*(?:WORK\s+)?EXPERIENCE[S]?|EMPLOYMENT|WORK\s+HISTORY|EDUCATION|CERTIFICATION|AWARD|PROJECT|REFERENCE|ACHIEVEMENT|PUBLICATION|LANGUAGE[S]?|HOBBIES?|INTEREST|SUMMARY|OBJECTIVE|PROFILE|COMMENDATION|PROFESSIONAL\s+DEVELOPMENT|CAREER|CO-?CURRICULAR|ADDITIONAL\s+QUALIFICATIONS?)\s*(?:[:|\n]|$)|(?=\n\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}\s+to)|$)'
+        # Define terminator keywords for the skills section
+        terminator_keywords = [
+            '(?:WORK\s+)?EXPERIENCE[S]?', 'EMPLOYMENT', 'WORK\s+HISTORY', 'EDUCATION', 'CERTIFICATION',
+            'AWARD', 'PROJECT', 'REFERENCE', 'ACHIEVEMENT', 'PUBLICATION', 'LANGUAGE[S]?',
+            'HOBBIES?', 'INTEREST', 'SUMMARY', 'OBJECTIVE', 'PROFILE', 'COMMENDATION',
+            'PROFESSIONAL\s+DEVELOPMENT', 'CAREER', 'CO-?CURRICULAR', 'ADDITIONAL\s+QUALIFICATIONS?'
+        ]
+        
+        # 1. Section headers pattern
+        headers_pattern = r'\n\s*(?:' + '|'.join(terminator_keywords) + r')\s*(?:[:|\n]|$)'
+        
+        # 2. Date pattern for start of a new job entry
+        date_pattern = r'\n\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}\s+to'
+        
+        # Combine all parts into a single lookahead.
+        section_end = f'(?=({headers_pattern})|({date_pattern})|$)'
 
         # 🆕 ENHANCED v6.0: More patterns to catch skills in various resume formats!
         skills_patterns = [
@@ -1438,47 +1523,176 @@ Response must be valid JSON only."""
             # Format dates
             dates = f"{start_date} - {end_date}"
             
-            # Get description (text until next date pattern or section header)
+            # 🎯 Get description (text until next date pattern or section header)
             chunk_start = match.end()
             if i + 1 < len(matches):
                 chunk_end = matches[i + 1].start()
             else:
-                # Find next section header
-                next_section = re.search(r'\n\s*(?:Education|Skills|Achievements|Co-Curricular|Additional)', 
-                                        text[chunk_start:], re.IGNORECASE)
-                chunk_end = chunk_start + (next_section.start() if next_section else 1500)
-            
+                # Find next section header with MORE specific boundaries, darling! 💅
+                next_section = re.search(
+                    r'\n\s*(?:Education|Skills|Achievements|Co-Curricular|Additional|Qualifications?)\s*(?:\n|$)', 
+                    text[chunk_start:], 
+                    re.IGNORECASE
+                )
+                chunk_end = chunk_start + (next_section.start() if next_section else 2000)  # 🆕 Increased from 1500!
+
             desc_chunk = text[chunk_start:chunk_end]
-            
-            # Extract bullet points - capture ALL of them
-            bullet_lines = []
-            in_bullets = False
+
+            # 🎭 FAIRY CODEMOTHER'S ENHANCED DESCRIPTION EXTRACTOR v2.0!
+            description_lines = []
             consecutive_empty = 0
+
+            # 🎯 Action verbs that typically START job responsibilities
+            action_verb_starters = (
+                'carried', 'conducted', 'managed', 'developed', 'worked', 
+                'maintained', 'achieved', 'established', 'engaged', 'created', 
+                'held', 'ensured', 'performed', 'led', 'built', 'designed', 
+                'implemented', 'executed', 'responsible', 'assisted', 'organized', 
+                'organised', 'supported', 'delivered', 'generated', 'resolved', 
+                'authored', 'diagnosed', 'prepared', 'trained', 'mentored', 
+                'supervised', 'oversaw', 'spearheaded', 'streamlined', 'optimized', 
+                'optimised', 'facilitated', 'hosted', 'educated', 'collaborated', 
+                'improved', 'increased', 'decreased', 'reduced', 'enhanced', 
+                'drove', 'directed', 'handled', 'processed', 'administered', 
+                'monitored', 'evaluated', 'assessed', 'identified', 'formulated', 
+                'defined', 'planned', 'contributed', 'participated', 'provided',
+                'applied', 'utilized', 'utilised', 'demonstrated', 'initiated',
+                'launched', 'negotiated', 'presented', 'reviewed', 'analyzed',
+                'analysed', 'coordinated', 'enforced', 'managing', 'providing',
+                'enforcement', 'providing', 'assisting'
+            )
 
             for line in desc_chunk.split('\n'):
                 line = line.strip()
-
+                
                 # Track empty lines
                 if len(line) < 5:
                     consecutive_empty += 1
-                    if consecutive_empty >= 3 and bullet_lines:
+                    # Stop if we hit 3+ consecutive empty lines (likely end of section)
+                    if consecutive_empty >= 3 and description_lines:
                         break
                     continue
-
+                
                 consecutive_empty = 0
+                
+                # 🛑 STOP CONDITIONS: These indicate we've left the job description
+                # Check for date patterns (next job entry)
+                if re.match(r'^(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}', line, re.IGNORECASE):
+                    break
+                
+                # Check for section headers
+                if re.match(r'^(?:Education|Skills|Achievements|Co-Curricular|Additional|Awards|Certifications|References|Projects|Languages|Hobbies)\s*$', line, re.IGNORECASE):
+                    break
+                
+                # 🎯 CAPTURE CONDITIONS:
+                
+                # 1. Lines with bullet markers
+                is_bullet = line.startswith(('*', '-', '•', '·', '►', '➢', '○', '◦', '▪', '▸'))
+                
+                # 2. Lines starting with action verbs (job responsibilities!)
+                first_word = line.split()[0].lower().rstrip('.,') if line.split() else ''
+                is_action_line = first_word in action_verb_starters
+                
+                # Clean bullet markers if present
+                if is_bullet:
+                    cleaned = re.sub(r'^[\*\-•·►➢○◦▪▸]\s*', '', line).strip()
+                else:
+                    cleaned = line
+                
+                # Capture if it's a bullet OR action line
+                if (is_bullet or is_action_line) and len(cleaned) > 10:
+                    description_lines.append(cleaned)
+                elif description_lines and len(line) > 20 and len(line) < 500:
+                    # Continue capturing if we already have content and line is substantial
+                    # This catches continuation lines
+                    # But skip if it looks like a new section/header (all caps, short)
+                    if not line.isupper() and not re.match(r'^[A-Z][a-z]+\s+[A-Z][a-z]+$', line):
+                        description_lines.append(line)
 
-                # Check for bullet markers
-                if line.startswith(('*', '-', '•', '·', '►', '➢', '○', '●')):
-                    # Clean the bullet
-                    cleaned = re.sub(r'^[\*\-•·►➢○●]\s*', '', line).strip()
-                    if len(cleaned) > 10:
-                        bullet_lines.append(cleaned)
-                        in_bullets = True
-                elif in_bullets and len(line) > 10:
-                    # Continue capturing non-bullet lines if we're in the description
-                    bullet_lines.append(line)
-
-            description = ' | '.join(bullet_lines) if bullet_lines else "Description not available"
+           # 💎 Join with pipe delimiter + REMOVE DUPLICATES for beautiful formatting!
+            if description_lines:
+                # Remove duplicate lines while preserving order 🌟
+                seen = set()
+                unique_lines = []
+                for line in description_lines:
+                    # Normalize for comparison (lowercase, strip whitespace)
+                    normalized = line.lower().strip()
+                    if normalized not in seen and len(normalized) > 5:
+                        seen.add(normalized)
+                        unique_lines.append(line)
+                
+                description = ' | '.join(unique_lines) if unique_lines else "Description not available"
+            else:
+                description = "Description not available"
+            
+            # 🎭 Action verbs that typically START job responsibilities
+            action_verb_starters = (
+                'carried', 'conducted', 'managed', 'developed', 'worked', 
+                'maintained', 'achieved', 'established', 'engaged', 'created', 
+                'held', 'ensured', 'performed', 'led', 'built', 'designed', 
+                'implemented', 'executed', 'responsible', 'assisted', 'organized', 
+                'organised', 'supported', 'delivered', 'generated', 'resolved', 
+                'authored', 'diagnosed', 'prepared', 'trained', 'mentored', 
+                'supervised', 'oversaw', 'spearheaded', 'streamlined', 'optimized', 
+                'optimised', 'facilitated', 'hosted', 'educated', 'collaborated', 
+                'improved', 'increased', 'decreased', 'reduced', 'enhanced', 
+                'drove', 'directed', 'handled', 'processed', 'administered', 
+                'monitored', 'evaluated', 'assessed', 'identified', 'formulated', 
+                'defined', 'planned', 'contributed', 'participated', 'provided',
+                'applied', 'utilized', 'utilised', 'demonstrated', 'initiated',
+                'launched', 'negotiated', 'presented', 'reviewed', 'analyzed',
+                'analysed', 'coordinated', 'enforced', 'managing', 'providing',
+                'enforcement', 'providing', 'assisting'
+            )
+            
+            for line in desc_chunk.split('\n'):
+                line = line.strip()
+                
+                # Track empty lines
+                if len(line) < 5:
+                    consecutive_empty += 1
+                    # Stop if we hit 3+ consecutive empty lines (likely end of section)
+                    if consecutive_empty >= 3 and description_lines:
+                        break
+                    continue
+                
+                consecutive_empty = 0
+                
+                # 🛑 STOP CONDITIONS: These indicate we've left the job description
+                # Check for date patterns (next job entry)
+                if re.match(r'^(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}', line, re.IGNORECASE):
+                    break
+                
+                # Check for section headers
+                if re.match(r'^(?:Education|Skills|Achievements|Co-Curricular|Additional|Awards|Certifications|References|Projects|Languages|Hobbies)\s*$', line, re.IGNORECASE):
+                    break
+                
+                # 🎯 CAPTURE CONDITIONS:
+                
+                # 1. Lines with bullet markers
+                is_bullet = line.startswith(('*', '-', '•', '·', '►', '➢', '○', '◦', '▪', '▸'))
+                
+                # 2. Lines starting with action verbs (job responsibilities!)
+                first_word = line.split()[0].lower().rstrip('.,') if line.split() else ''
+                is_action_line = first_word in action_verb_starters
+                
+                # Clean bullet markers if present
+                if is_bullet:
+                    cleaned = re.sub(r'^[\*\-•·►➢○◦▪▸]\s*', '', line).strip()
+                else:
+                    cleaned = line
+                
+                # Capture if it's a bullet OR action line
+                if (is_bullet or is_action_line) and len(cleaned) > 10:
+                    description_lines.append(cleaned)
+                elif description_lines and len(line) > 20 and len(line) < 500:
+                    # Continue capturing if we already have content and line is substantial
+                    # This catches continuation lines
+                    # But skip if it looks like a new section/header (all caps, short)
+                    if not line.isupper() and not re.match(r'^[A-Z][a-z]+\s+[A-Z][a-z]+$', line):
+                        description_lines.append(line)
+            
+            description = ' | '.join(description_lines) if description_lines else "Description not available"
 
             jobs.append({
                 "company": company[:200],  # Increased limit

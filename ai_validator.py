@@ -216,36 +216,6 @@ Example: 1995-05-23""",
         
         return None
 
-    def preprocess_japanese_text(self, text: str) -> str:
-        """
-        🎌 Prepare Japanese text for better extraction!
-        Like doing skincare before makeup, darling!
-        """
-        # Fix common OCR issues with Japanese text
-        replacements = {
-            '―': 'ー',  # Fix long vowel marks
-            '～': '〜',  # Fix wave dash
-            '壱': '一', '弐': '二', '参': '三',  # Fix old kanji
-            '○': '0', '〇': '0',  # Circle to zero
-            '㈱': '株式会社',  # Expand abbreviations
-            '㈲': '有限会社',
-            '０': '0', '１': '1', '２': '2', '３': '3', '４': '4',
-            '５': '5', '６': '6', '７': '7', '８': '8', '９': '9',
-            # Add more as you discover them!
-        }
-        
-        for old, new in replacements.items():
-            text = text.replace(old, new)
-        
-        # Fix spacing issues (Japanese doesn't use spaces but OCR might add them)
-        text = re.sub(r'([ぁ-んァ-ヶー一-龯])\s+([ぁ-んァ-ヶー一-龯])', r'\1\2', text)
-        
-        # Fix common OCR mistakes in email addresses
-        text = re.sub(r'([a-zA-Z0-9._%+-]+)\s*@\s*([a-zA-Z0-9.-]+)\s*\.\s*([a-zA-Z]{2,})', 
-                     r'\1@\2.\3', text)
-        
-        return text
-
     def validate_email(self, email: str) -> bool:
         """
         📧 Validate email format!
