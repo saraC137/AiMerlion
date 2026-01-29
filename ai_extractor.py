@@ -52,13 +52,133 @@ class AIExtractor:
             self.logger.info(f"✨ {self.model_name} is READY! Extraction engines online!")
             return True
         except Exception as e:
-            self.logger.error(f"❌ Model error: {e}")
+            self.logger.error(f"âŒ Model error: {e}")
             self.logger.error(f"Please ensure the model '{self.model_name}' is pulled in Ollama.")
             return False
     
+    def _normalize_text_for_extraction(self, text: str) -> str:
+        """
+        🧚‍♀️✨ FAIRY CODEMOTHER'S ULTIMATE TEXT NORMALIZER v1.0! ✨🧚‍♀️
+        
+        This method MUST be called ONCE at the very beginning of extraction!
+        It transforms chaotic raw text into clean, regex-ready text.
+        
+        Handles:
+        - Encoding issues (mojibake from UTF-8 misread as Latin-1)
+        - Invisible characters (zero-width spaces, BOM, etc.)
+        - Multiple whitespace types (NBSP, em-space, etc.)
+        - Different dash characters (en-dash, em-dash, minus sign)
+        - Smart quotes (curly quotes, guillemets, etc.)
+        - Various bullet characters (bullet, pointer, checkmark, etc.)
+        - Line ending normalization (Windows, Mac, Unix)
+        
+        WHY THIS MATTERS:
+        Raw text: "Feb 2016 [en-dash] Aug 2016" -> Regex for "-" WON'T MATCH!
+        Normalized: "Feb 2016 - Aug 2016" -> Regex for "-" WILL MATCH!
+        
+        Returns:
+            Normalized text ready for regex extraction
+        """
+        if not text:
+            return ""
+        
+        # =====================================================================
+        # STEP 1: FIX ENCODING ISSUES (Mojibake from UTF-8 -> Latin-1)
+        # =====================================================================
+        encoding_fixes = {
+            '–': '-', '–': '-',  # dashes
+            ''': "'", ''': "'", '"': '"', '"': '"',  # quotes
+            '•': '* ',  # bullet
+            '"¦': '...',  # ellipsis
+            'Ã©': 'e', 'Ã¨': 'e', 'Ã¢': 'a', 'Ã®': 'i', 'Ã´': 'o', 'Ã»': 'u', 'Ã§': 'c', 'Ã±': 'n',
+            ' ': ' ', '·': '*',
+        }
+        for bad, good in encoding_fixes.items():
+            text = text.replace(bad, good)
+        
+        # =====================================================================
+        # STEP 2: REMOVE INVISIBLE CHARACTERS
+        # =====================================================================
+        invisible_chars = [
+            '\u200b', '\u200c', '\u200d', '\u200e', '\u200f',
+            '\u202a', '\u202b', '\u202c', '\u202d', '\u202e',
+            '\u2060', '\u2061', '\u2062', '\u2063', '\u2064',
+            '\ufeff', '\ufffe', '\uffff',
+        ]
+        for char in invisible_chars:
+            text = text.replace(char.encode().decode('unicode_escape'), '')
+        
+        # =====================================================================
+        # STEP 3: NORMALIZE WHITESPACE CHARACTERS
+        # =====================================================================
+        whitespace_map = {
+            '\u00a0': ' ', '\u2000': ' ', '\u2001': ' ', '\u2002': ' ',
+            '\u2003': ' ', '\u2004': ' ', '\u2005': ' ', '\u2006': ' ',
+            '\u2007': ' ', '\u2008': ' ', '\u2009': ' ', '\u200a': ' ',
+            '\u202f': ' ', '\u205f': ' ', '\u3000': ' ',
+        }
+        for char, replacement in whitespace_map.items():
+            text = text.replace(char.encode().decode('unicode_escape'), replacement)
+        
+        # =====================================================================
+        # STEP 4: NORMALIZE LINE SEPARATORS
+        # =====================================================================
+        text = text.replace('\u2028'.encode().decode('unicode_escape'), '\n')
+        text = text.replace('\u2029'.encode().decode('unicode_escape'), '\n')
+        text = text.replace('\r\n', '\n')
+        text = text.replace('\r', '\n')
+        
+        # =====================================================================
+        # STEP 5: NORMALIZE DASHES (Critical for date ranges!)
+        # =====================================================================
+        dash_chars = [
+            '\u2013', '\u2014', '\u2010', '\u2011', '\u2012',
+            '\u2015', '\u2212', '\u2043', '\ufe58', '\ufe63', '\uff0d',
+        ]
+        for char in dash_chars:
+            text = text.replace(char.encode().decode('unicode_escape'), '-')
+        
+        # =====================================================================
+        # STEP 6: NORMALIZE QUOTES
+        # =====================================================================
+        double_quotes = ['\u201c', '\u201d', '\u201e', '\u201f', '\u00ab', '\u00bb', '\u2033']
+        single_quotes = ['\u2018', '\u2019', '\u201a', '\u201b', '\u2039', '\u203a', '\u2032', '\u0060', '\u00b4']
+        for char in double_quotes:
+            text = text.replace(char.encode().decode('unicode_escape'), '"')
+        for char in single_quotes:
+            text = text.replace(char.encode().decode('unicode_escape'), "'")
+        
+        # =====================================================================
+        # STEP 7: NORMALIZE BULLET CHARACTERS
+        # =====================================================================
+        bullet_chars = [
+            '\u2022', '\u25cf', '\u25cb', '\u25e6', '\u25a0', '\u25a1',
+            '\u25aa', '\u25ab', '\u25ba', '\u25b8', '\u25b6', '\u25b7',
+            '\u2023', '\u2219', '\u22c5', '\u00b7', '\u2192', '\u27a2',
+            '\u27a4', '\u25c6', '\u25c7', '\u2605', '\u2606', '\u2713',
+            '\u2714', '\u2717', '\u2718', '\u261e', '\u2794',
+        ]
+        for char in bullet_chars:
+            text = text.replace(char.encode().decode('unicode_escape'), '* ')
+        
+        # =====================================================================
+        # STEP 8: CLEAN UP CONTROL CHARACTERS
+        # =====================================================================
+        text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
+        
+        # =====================================================================
+        # STEP 9: NORMALIZE MULTIPLE SPACES
+        # =====================================================================
+        text = re.sub(r'[ ]+', ' ', text)
+        text = re.sub(r'\n\s*\n\s*\n+', '\n\n', text)
+        text = re.sub(r'[ \t]+$', '', text, flags=re.MULTILINE)
+        
+        self.logger.info("🧚‍♀️ Text normalization complete!")
+        return text.strip()
+    
     def _extract_email_regex(self, text: str) -> Optional[str]:
         """
-        📧 Extract email using PURE REGEX - bulletproof extraction!
+        📝§ Extract email using PURE REGEX - bulletproof extraction!
         Returns the first valid email found, or None.
         """
         # Standard email regex pattern
@@ -80,14 +200,14 @@ class AIExtractor:
                 # Skip if it looks like a company support email embedded in text
                 if 'support@' in email_lower or 'info@' in email_lower or 'noreply@' in email_lower:
                     continue
-                self.logger.info(f"📧 Regex found email: {email}")
+                self.logger.info(f"📝§ Regex found email: {email}")
                 return email
 
         return None
 
     def _is_valid_email(self, email: str) -> bool:
         """
-        ✅ Validate that a string is actually an email address format.
+        âœ… Validate that a string is actually an email address format.
         Returns False for garbage text that AI might return.
         """
         if not email or not isinstance(email, str):
@@ -107,7 +227,7 @@ class AIExtractor:
 
     def _find_contact_area(self, text: str) -> str:
         """
-        📍 Find the contact/header area of the resume (usually first 2000 chars).
+        📝 Find the contact/header area of the resume (usually first 2000 chars).
         This area typically contains personal details like DOB, phone, email.
         """
         if not text:
@@ -128,7 +248,7 @@ class AIExtractor:
 
     def _extract_summary_regex(self, text: str) -> str:
         """
-        📝 Extract professional summary/objective section VERBATIM.
+        📝 Extract professional summary/objective section VERBATIM.
         Does NOT paraphrase - extracts exactly as written.
         """
         summary_patterns = [
@@ -142,14 +262,14 @@ class AIExtractor:
                 # Clean but preserve original wording
                 summary = re.sub(r'\s+', ' ', summary)
                 if len(summary) > 20:
-                    self.logger.info(f"📝 Found summary: {len(summary)} chars")
+                    self.logger.info(f"📝 Found summary: {len(summary)} chars")
                     return summary[:2000]  # Allow longer summaries
 
         return ""
 
     def _extract_certifications_regex(self, text: str) -> List[Dict[str, str]]:
         """
-        🏆 Extract certifications/licenses VERBATIM.
+        🏅 Extract certifications/licenses VERBATIM.
         Captures: name, issuer, date, credential ID if present.
         """
         certifications = []
@@ -170,7 +290,7 @@ class AIExtractor:
             return certifications
 
         # Split by common delimiters and extract each certification
-        lines = re.split(r'\n|[•●○▪■►]', cert_text)
+        lines = re.split(r'\n|[•◗◗‹▪â– ►]', cert_text)
 
         for line in lines:
             line = line.strip()
@@ -200,14 +320,14 @@ class AIExtractor:
 
             certifications.append(cert_entry)
 
-        self.logger.info(f"🏆 Found {len(certifications)} certifications")
+        self.logger.info(f"🏅 Found {len(certifications)} certifications")
         return certifications
 
     def _extract_languages_regex(self, text: str) -> List[Dict[str, str]]:
         """
-        🌐 Extract languages with proficiency levels VERBATIM.
+        🌐 Extract languages with proficiency levels VERBATIM.
         
-        🧚‍♀️ FAIRY CODEMOTHER'S FIX v3.0! 💅
+        🧚"â™€ FAIRY CODEMOTHER'S FIX v3.0! 💅
         - Fixed: Now tries INLINE pattern FIRST (single-line entries)
         - Fixed: Added "Work Experience" as explicit terminator  
         - Fixed: Added sanity checks to prevent slurping entire resume
@@ -222,14 +342,14 @@ class AIExtractor:
         inline_match = re.search(r'Languages?\s*[:\-]\s*([^\n]+)', text, re.IGNORECASE)
         if inline_match:
             lang_text = inline_match.group(1).strip()
-            self.logger.info(f"🌐 Found inline language pattern: '{lang_text[:100]}'")
+            self.logger.info(f"🌐 Found inline language pattern: '{lang_text[:100]}'")
             
-            # 🛡️ SANITY CHECK 1: Language entries should be SHORT (< 200 chars)!
+            # 🛡 SANITY CHECK 1: Language entries should be SHORT (< 200 chars)!
             if len(lang_text) > 200:
-                self.logger.warning(f"⚠️ Inline language too long ({len(lang_text)} chars) - truncating!")
+                self.logger.warning(f"⚠ Inline language too long ({len(lang_text)} chars) - truncating!")
                 lang_text = lang_text[:100]
             
-            # 🛡️ SANITY CHECK 2: Should NOT contain job-related keywords
+            # 🛡 SANITY CHECK 2: Should NOT contain job-related keywords
             job_keywords = ['experience', 'present', 'consultant', 'manager', 'pte ltd', 
                         'company', 'education', 'skills', 'achievements', 'financial',
                         'carried', 'conducted', 'managed', 'worked', 'responsible']
@@ -237,7 +357,7 @@ class AIExtractor:
                 # This is a valid language entry!
                 return self._parse_language_text(lang_text)
             else:
-                self.logger.warning(f"⚠️ Inline pattern captured job keywords - trying section pattern")
+                self.logger.warning(f"⚠ Inline pattern captured job keywords - trying section pattern")
         
         # =================================================================
         # 🎯 STEP 2: Try section pattern (multi-line language sections)
@@ -253,57 +373,96 @@ class AIExtractor:
             match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
             if match:
                 lang_text = match.group(1).strip()
-                self.logger.info(f"🌐 Found section language pattern: '{lang_text[:100]}...'")
+                self.logger.info(f"🌐 Found section language pattern: '{lang_text[:100]}...'")
                 break
         
         if not lang_text:
             return languages
         
-        # 🛡️ SANITY CHECK 3: Section should be reasonably short
+        # 🛡 SANITY CHECK 3: Section should be reasonably short
         if len(lang_text) > 500:
-            self.logger.warning(f"⚠️ Language section too long ({len(lang_text)} chars) - likely captured too much!")
+            self.logger.warning(f"⚠ Language section too long ({len(lang_text)} chars) - likely captured too much!")
             # Only keep first 200 characters
             lang_text = lang_text[:200]
         
         return self._parse_language_text(lang_text)
+    
+    def _extract_language_from_header(self, text: str) -> Optional[str]:
+            """
+            🗣 FAIRY CODEMOTHER'S HEADER LANGUAGE EXTRACTOR! 💅
+            
+            Singapore resumes often have language in the HEADER area (first 2000 chars)
+            like: "Language : English & Chinese" - NOT in a dedicated section!
+            
+            This is like finding the VIP guest list at the door, honey! 🚪✨
+            """
+            # Only search in header area (first 2000 chars where contact info lives)
+            header_text = text[:2000] if len(text) > 2000 else text
+            
+            # 🎯 Patterns for header-style language (with TAB or colon separator)
+            header_lang_patterns = [
+                # "Language : English & Chinese" or "Language\tEnglish & Chinese"
+                r'Language[\s:\t]+([A-Za-z&,\s]+?)(?=\n|Date|Nationality|Address|HP|Phone|Email|NRIC|$)',
+                # Simpler fallback
+                r'Language\s*[:\t]\s*([^\n]+)',
+            ]
+            
+            for pattern in header_lang_patterns:
+                match = re.search(pattern, header_text, re.IGNORECASE)
+                if match:
+                    language = match.group(1).strip()
+                    # Clean up trailing punctuation and normalize spaces
+                    language = re.sub(r'[,;.\s]+$', '', language)
+                    language = re.sub(r'\s+', ' ', language)
+                    
+                    # Validate it contains actual language names
+                    if len(language) >= 3 and len(language) <= 100:
+                        known_languages = ['english', 'chinese', 'mandarin', 'malay', 'tamil', 
+                                        'hindi', 'japanese', 'korean', 'french', 'german', 
+                                        'spanish', 'cantonese', 'hokkien', 'teochew']
+                        if any(lang in language.lower() for lang in known_languages):
+                            self.logger.info(f"🗣 Found language in header: {language}")
+                            return language
+            
+            return None
 
     def _parse_language_text(self, lang_text: str) -> List[Dict[str, str]]:
         """
-        🧚‍♀️ Helper method to parse language text into structured entries
+        🧚"â™€ Helper method to parse language text into structured entries
         ADD THIS AS A NEW METHOD IN AIExtractor class (after _extract_languages_regex)!
         """
         languages = []
         
         # Split by common delimiters
-        items = re.split(r'[,;|]|\band\b|\b&\b|[•◦○▪■►\n]', lang_text)
+        items = re.split(r'[,;|]|\band\b|\b&\b|[•◗¦◗‹▪â– ►\n]', lang_text)
         
         for item in items:
             item = item.strip()
             if len(item) < 2 or len(item) > 50:  # Language names are 2-50 chars
                 continue
             
-            # 🛡️ Skip section headers that might have slipped through
+            # 🛡 Skip section headers that might have slipped through
             if re.match(r'^(?:languages?|skills?|experience|education)$', item, re.IGNORECASE):
                 continue
             
-            # 🛡️ Skip items that look like dates (job entries bleeding in!)
+            # 🛡 Skip items that look like dates (job entries bleeding in!)
             if re.search(r'(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}', item, re.IGNORECASE):
-                self.logger.debug(f"⭐️ Skipping date entry in languages: {item[:50]}")
+                self.logger.debug(f"⭐ Skipping date entry in languages: {item[:50]}")
                 continue
             
-            # 🛡️ Skip items that look like company names
+            # 🛡 Skip items that look like company names
             company_keywords = ['pte ltd', 'pvt ltd', 'company', 'consultant', 'manager', 
                             'engineer', 'executive', 'analyst', 'director']
             if any(kw in item.lower() for kw in company_keywords):
-                self.logger.debug(f"⭐️ Skipping company-like entry in languages: {item[:50]}")
+                self.logger.debug(f"⭐ Skipping company-like entry in languages: {item[:50]}")
                 continue
             
-            # 🛡️ Skip items that are action verbs (job responsibilities)
+            # 🛡 Skip items that are action verbs (job responsibilities)
             action_verbs = ['carried', 'conducted', 'managed', 'maintained', 'established',
                         'engaged', 'created', 'held', 'ensured', 'worked', 'achieved']
             first_word = item.split()[0].lower() if item.split() else ''
             if first_word in action_verbs:
-                self.logger.debug(f"⭐️ Skipping action verb in languages: {item[:50]}")
+                self.logger.debug(f"⭐ Skipping action verb in languages: {item[:50]}")
                 continue
             
             lang_entry = {"language": item, "proficiency": ""}
@@ -319,12 +478,12 @@ class AIExtractor:
                 lang_entry["language"] = re.sub(
                     r'\(?\s*(?:Native|Fluent|Advanced|Intermediate|Basic|Beginner|Professional|Working|Conversational|Elementary|Mother\s+Tongue|Bilingual|C2|C1|B2|B1|A2|A1)\s*\)?', 
                     '', item, flags=re.IGNORECASE
-                ).strip(' -–":')
+                ).strip(' -"“":')
             
             if lang_entry["language"] and len(lang_entry["language"]) >= 2:
                 languages.append(lang_entry)
         
-        self.logger.info(f"🌐 Found {len(languages)} languages")
+        self.logger.info(f"🌐 Found {len(languages)} languages")
         return languages
 
     def _extract_projects_regex(self, text: str) -> List[Dict[str, str]]:
@@ -358,20 +517,20 @@ class AIExtractor:
                 continue
 
             lines = entry.split('\n')
-            project_name = lines[0].strip().strip('•●○▪■►-*')
+            project_name = lines[0].strip().strip('•◗◗‹▪â– ►-*')
 
             # Skip if it looks like a section header
             if re.match(r'^projects?$', project_name, re.IGNORECASE):
                 continue
 
-            description = ' '.join(line.strip().strip('•●○▪■►-*') for line in lines[1:] if line.strip())
+            description = ' '.join(line.strip().strip('•◗◗‹▪â– ►-*') for line in lines[1:] if line.strip())
 
             # Try to extract technologies used
             tech_match = re.search(r'(?:Technologies?|Tech\s*Stack|Built\s+with|Using)\s*[:\-]?\s*([^\n]+)', entry, re.IGNORECASE)
             technologies = tech_match.group(1).strip() if tech_match else ""
 
             # Try to extract date/duration
-            date_match = re.search(r'(\d{4}(?:\s*[-–]\s*\d{4})?|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4})', entry, re.IGNORECASE)
+            date_match = re.search(r'(\d{4}(?:\s*[-–“]\s*\d{4})?|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4})', entry, re.IGNORECASE)
             dates = date_match.group(1) if date_match else ""
 
             projects.append({
@@ -386,7 +545,7 @@ class AIExtractor:
 
     def _extract_achievements_regex(self, text: str) -> List[str]:
         """
-        🏅 Extract achievements/awards/honors VERBATIM.
+        🏢 Extract achievements/awards/honors VERBATIM.
         """
         achievements = []
 
@@ -406,7 +565,7 @@ class AIExtractor:
             return achievements
 
         # Split by bullets or newlines
-        items = re.split(r'\n|[•●○▪■►]', ach_text)
+        items = re.split(r'\n|[•◗◗‹▪â– ►]', ach_text)
 
         for item in items:
             item = item.strip().strip('-*')
@@ -419,12 +578,12 @@ class AIExtractor:
 
             achievements.append(item)
 
-        self.logger.info(f"🏅 Found {len(achievements)} achievements")
+        self.logger.info(f"🏢 Found {len(achievements)} achievements")
         return achievements[:50]  # Max 50 achievements
 
     def _extract_references_regex(self, text: str) -> List[Dict[str, str]]:
         """
-        📞 Extract references VERBATIM if present.
+        📝ž Extract references VERBATIM if present.
         """
         references = []
 
@@ -476,7 +635,7 @@ class AIExtractor:
 
             references.append(ref_entry)
 
-        self.logger.info(f"📞 Found {len(references)} references")
+        self.logger.info(f"📝ž Found {len(references)} references")
         return references
 
     def _extract_hobbies_regex(self, text: str) -> List[str]:
@@ -501,7 +660,7 @@ class AIExtractor:
             return hobbies
 
         # Split by bullets, commas, or newlines
-        items = re.split(r'[,\n]|[•●○▪■►]', hobby_text)
+        items = re.split(r'[,\n]|[•◗◗‹▪â– ►]', hobby_text)
 
         for item in items:
             item = item.strip().strip('-*')
@@ -526,7 +685,7 @@ class AIExtractor:
         if not self.available:
             return {}
 
-        # 📧 FIRST: Try regex extraction for email (most reliable!)
+        # 📝§ FIRST: Try regex extraction for email (most reliable!)
         regex_email = self._extract_email_regex(text)
 
         text_sample = text[:6000] if len(text) > 6000 else text
@@ -560,17 +719,17 @@ Response must be valid JSON only."""
 
         result = self._call_ollama(prompt)
 
-        # 📧 VALIDATE EMAIL: If AI returned garbage, use regex result
+        # 📝§ VALIDATE EMAIL: If AI returned garbage, use regex result
         ai_email = result.get('email')
         if not self._is_valid_email(ai_email):
             if ai_email:
-                self.logger.warning(f"⚠️ AI returned invalid email: '{str(ai_email)[:50]}...' - using regex fallback")
+                self.logger.warning(f"⚠ AI returned invalid email: '{str(ai_email)[:50]}...' - using regex fallback")
             if regex_email:
                 result['email'] = regex_email
-                self.logger.info(f"✅ Using regex-extracted email: {regex_email}")
+                self.logger.info(f"âœ… Using regex-extracted email: {regex_email}")
             else:
                 result['email'] = None
-                self.logger.warning("⚠️ No valid email found in resume")
+                self.logger.warning("⚠ No valid email found in resume")
 
         return result
 
@@ -592,14 +751,14 @@ Response must be valid JSON only."""
             self.logger.info("🤖 Using AI for skill categorization only...")
             result = self._enhance_skills_with_ai(result, text)
         
-        self.logger.info(f"✅ Extraction complete: {len(result.get('hard_skills', []))} hard skills, {len(result.get('working_experience', []))} jobs")
+        self.logger.info(f"âœ… Extraction complete: {len(result.get('hard_skills', []))} hard skills, {len(result.get('working_experience', []))} jobs")
         
         return result
 
     def _pure_manual_extraction(self, text: str) -> Dict[str, Any]:
         """
-        🛠️ PURE MANUAL EXTRACTION - No AI involved!
-        This is the BACKBONE, honey! 💪
+        🛠 PURE MANUAL EXTRACTION - No AI involved!
+        This is the BACKBONE, honey! 🚪
 
         COMPREHENSIVE EXTRACTION - Captures ALL resume sections VERBATIM:
         - Skills (hard & soft)
@@ -613,7 +772,7 @@ Response must be valid JSON only."""
         - References
         - Hobbies/Interests
         """
-        self.logger.info("🔧 Running COMPREHENSIVE manual extraction...")
+        self.logger.info("📧 Running COMPREHENSIVE manual extraction...")
 
         result = {
             "hard_skills": [],
@@ -647,7 +806,13 @@ Response must be valid JSON only."""
         result['certifications'] = self._extract_certifications_regex(text)
 
         # ===== EXTRACT LANGUAGES =====
-        result['languages'] = self._extract_languages_regex(text)
+        # 🏆• FAIRY CODEMOTHER'S FIX: Try header extraction FIRST (Singapore-style)!
+        header_language = self._extract_language_from_header(text)
+        if header_language:
+            result['languages'] = [{"language": header_language, "proficiency": ""}]
+            self.logger.info(f"🗣 Using header language: {header_language}")
+        else:
+            result['languages'] = self._extract_languages_regex(text)
 
         # ===== EXTRACT PROJECTS =====
         result['projects'] = self._extract_projects_regex(text)
@@ -661,7 +826,7 @@ Response must be valid JSON only."""
         # ===== EXTRACT HOBBIES =====
         result['hobbies'] = self._extract_hobbies_regex(text)
 
-        self.logger.info(f"📊 Comprehensive extraction complete:")
+        self.logger.info(f"📝Š Comprehensive extraction complete:")
         self.logger.info(f"   - Summary: {len(result['summary'])} chars")
         self.logger.info(f"   - Hard Skills: {len(result['hard_skills'])}")
         self.logger.info(f"   - Soft Skills: {len(result['soft_skills'])}")
@@ -676,10 +841,10 @@ Response must be valid JSON only."""
 
     def _expand_cmfas_certifications(self, text: str) -> str:
         """
-        🏆 CMFAS Certification Expander - Singapore Financial Industry Certifications
+        🏅 CMFAS Certification Expander - Singapore Financial Industry Certifications
 
         CMFAS (Capital Markets and Financial Advisory Services) modules are listed as:
-        "CMFAS M5 | M8 | M8A | M9 | M9A | HI | CGI – BCP | ComGI | PGI"
+        "CMFAS M5 | M8 | M8A | M9 | M9A | HI | CGI "“ BCP | ComGI | PGI"
 
         This function expands abbreviated module lists so each module retains the CMFAS prefix:
         "CMFAS M5 | CMFAS M8 | CMFAS M8A | CMFAS M9 | CMFAS M9A | CMFAS HI | ..."
@@ -687,7 +852,7 @@ Response must be valid JSON only."""
         Also handles standalone CMFAS modules on separate lines:
         "CMFAS M5, M8, M8A
          HI
-         CGI – BCP, ComGI, PGI"
+         CGI "“ BCP, ComGI, PGI"
         """
         if not text:
             return text
@@ -696,10 +861,10 @@ Response must be valid JSON only."""
         # M1-M10: Various advisory modules
         # HI: Health Insurance, CGI: Collective Investment, BCP: Bundled Coverage Product
         # ComGI: Commercial General Insurance, PGI: Personal General Insurance
-        # Also includes compound forms like "CGI – BCP"
+        # Also includes compound forms like "CGI "“ BCP"
         cmfas_module_single = r'M\d+[A-Z]?|HI|CGI|BCP|ComGI|PGI|PHI|CLI|BCPP'
-        # Compound module (e.g., "CGI – BCP")
-        cmfas_module = r'(?:' + cmfas_module_single + r')(?:\s*[–\-]\s*(?:' + cmfas_module_single + r'))?'
+        # Compound module (e.g., "CGI "“ BCP")
+        cmfas_module = r'(?:' + cmfas_module_single + r')(?:\s*["“\-]\s*(?:' + cmfas_module_single + r'))?'
 
         # Pattern to find CMFAS followed by a list of modules separated by | or ,
         # Greedily capture everything that looks like CMFAS modules
@@ -719,7 +884,7 @@ Response must be valid JSON only."""
                 if part.upper().startswith('CMFAS'):
                     expanded.append(part)
                 else:
-                    # Handle compound modules like "CGI – BCP"
+                    # Handle compound modules like "CGI "“ BCP"
                     expanded.append(f"CMFAS {part}")
             return ' | '.join(expanded)
 
@@ -728,7 +893,7 @@ Response must be valid JSON only."""
         # PHASE 2: Handle standalone CMFAS modules on separate lines
         # These appear in "Additional Qualifications" or similar sections without CMFAS prefix
         # Pattern: Standalone line containing ONLY CMFAS module codes (no other text)
-        # e.g., "HI" or "CGI – BCP, ComGI, PGI"
+        # e.g., "HI" or "CGI "“ BCP, ComGI, PGI"
         standalone_modules = ['ComGI', 'PGI', 'PHI', 'CLI', 'BCPP', 'HI', 'CGI', 'BCP']  # Longer names first
 
         # Only apply this if we found CMFAS somewhere in the text (indicates this is a financial resume)
@@ -742,16 +907,91 @@ Response must be valid JSON only."""
             # "CMFAS CMFAS X" -> "CMFAS X"
             result = re.sub(r'CMFAS\s+CMFAS\s+', 'CMFAS ', result)
 
-            # Clean up: Fix compound modules like "CMFAS CGI – CMFAS BCP" -> "CMFAS CGI – BCP"
+            # Clean up: Fix compound modules like "CMFAS CGI "“ CMFAS BCP" -> "CMFAS CGI "“ BCP"
             # The second module in a compound shouldn't have CMFAS prefix
             modules_alt = '|'.join(re.escape(m) for m in standalone_modules)
-            compound_fix = r'(CMFAS\s+(?:' + modules_alt + r'))(\s*[–\-]\s*)CMFAS\s+(' + modules_alt + r')'
+            compound_fix = r'(CMFAS\s+(?:' + modules_alt + r'))(\s*["“\-]\s*)CMFAS\s+(' + modules_alt + r')'
             result = re.sub(compound_fix, r'\1\2\3', result)
 
         if result != text:
-            self.logger.info("🏆 Expanded CMFAS certifications for proper extraction")
+            self.logger.info("🏅 Expanded CMFAS certifications for proper extraction")
 
         return result
+
+    def _extract_skills_from_nested_categories(self, text: str) -> Dict[str, List[str]]:
+        """
+        🎯 Extract skills from NESTED CATEGORIES common in Singapore resumes!
+        
+        Handles format like:
+        Skills & Abilities
+        Organisation Skills
+        - Prepared and hosted for seminars...
+        - Organised for internal audit...
+        
+        Interpersonal Skills
+        - Applied emotional competence...
+        """
+        hard_skills = []
+        soft_skills = []
+        
+        # Find Skills section with nested categories
+        skills_section_pattern = r'(?:Skills?\s*(?:&|and)?\s*Abilities?|Skills?)\s*\n(.*?)(?=\n\s*(?:Additional|Certification|Education|Experience|Achievement|Award|Reference|$))'
+        
+        match = re.search(skills_section_pattern, text, re.IGNORECASE | re.DOTALL)
+        if not match:
+            return {"hard_skills": [], "soft_skills": []}
+        
+        skills_text = match.group(1)
+        
+        # 🎯 Detect category headers (end with "Skills")
+        category_pattern = r'^([A-Z][A-Za-z]+(?:\s+[A-Z]?[a-z]+)*\s+Skills?)\s*$'
+        
+        current_category = None
+        category_items = []
+        
+        for line in skills_text.split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+            
+            # Check if this is a category header
+            if re.match(category_pattern, line, re.IGNORECASE):
+                # Save previous category's items
+                if current_category and category_items:
+                    # Determine if soft or hard skill category
+                    if any(soft_kw in current_category.lower() for soft_kw in 
+                        ['organisation', 'organization', 'interpersonal', 'leadership', 
+                            'communication', 'teamwork', 'management', 'soft']):
+                        soft_skills.append(current_category)  # Add category name
+                        soft_skills.extend(category_items)
+                    else:
+                        hard_skills.append(current_category)
+                        hard_skills.extend(category_items)
+                
+                current_category = line
+                category_items = []
+            else:
+                # This is a skill item under current category
+                if len(line) > 10:  # Skip very short lines
+                    # Clean bullet markers
+                    cleaned = re.sub(r'^[\*\-•◗◗‹▪â– ►]\s*', '', line)
+                    if cleaned:
+                        category_items.append(cleaned)
+        
+        # Don't forget the last category!
+        if current_category and category_items:
+            if any(soft_kw in current_category.lower() for soft_kw in 
+                ['organisation', 'organization', 'interpersonal', 'leadership', 
+                    'communication', 'teamwork', 'management', 'soft']):
+                soft_skills.append(current_category)
+                soft_skills.extend(category_items)
+            else:
+                hard_skills.append(current_category)
+                hard_skills.extend(category_items)
+        
+        self.logger.info(f"📝Š Nested skills: {len(hard_skills)} hard, {len(soft_skills)} soft")
+        
+        return {"hard_skills": hard_skills, "soft_skills": soft_skills}
 
     def _extract_skills_regex(self, text: str) -> Dict[str, list]:
         """
@@ -768,7 +1008,7 @@ Response must be valid JSON only."""
         - Product & Project Managers
         - HR, Sales, Marketing & Admin
         
-        This queen recognizes skills across ALL industries, darling! 👑
+        This queen recognizes skills across ALL industries, darling! 👉
         """
         hard_skills = []
         soft_skills = []
@@ -791,7 +1031,7 @@ Response must be valid JSON only."""
         # Combine all parts into a single lookahead.
         section_end = f'(?=({headers_pattern})|({date_pattern})|$)'
 
-        # 🆕 ENHANCED v6.0: More patterns to catch skills in various resume formats!
+        # 🏆• ENHANCED v6.0: More patterns to catch skills in various resume formats!
         skills_patterns = [
             # Pattern 1: Generic "SKILLS" section (most common)
             (r'(?:^|\n)\s*(?:#*\s*\**)?SKILLS?\s*[:\n]\s*(.*?)' + section_end, 'skills'),
@@ -817,25 +1057,25 @@ Response must be valid JSON only."""
             (r'(?:^|\n)\s*(?:#*\s*\**)?CERTIFICATIONS?\s*[:\n]\s*(.*?)' + section_end, 'certifications'),
             # Pattern 12: "PROFESSIONAL QUALIFICATIONS"
             (r'(?:^|\n)\s*(?:#*\s*\**)?PROFESSIONAL\s+QUALIFICATIONS?\s*[:\n]\s*(.*?)' + section_end, 'pro_quals'),
-            # 🆕 Pattern 13: "TECH STACK" (common in developer resumes)
+            # 🏆• Pattern 13: "TECH STACK" (common in developer resumes)
             (r'(?:^|\n)\s*(?:#*\s*\**)?TECH(?:NICAL)?\s+STACK\s*[:\n]\s*(.*?)' + section_end, 'tech_stack'),
-            # 🆕 Pattern 14: "PROFICIENCIES"
+            # 🏆• Pattern 14: "PROFICIENCIES"
             (r'(?:^|\n)\s*(?:#*\s*\**)?(?:TECHNICAL\s+)?PROFICIENC(?:IES|Y)\s*[:\n]\s*(.*?)' + section_end, 'proficiencies'),
-            # 🆕 Pattern 15: "CAPABILITIES"
+            # 🏆• Pattern 15: "CAPABILITIES"
             (r'(?:^|\n)\s*(?:#*\s*\**)?(?:CORE\s+)?CAPABILITIES\s*[:\n]\s*(.*?)' + section_end, 'capabilities'),
-            # 🆕 Pattern 16: "STRENGTHS"
+            # 🏆• Pattern 16: "STRENGTHS"
             (r'(?:^|\n)\s*(?:#*\s*\**)?(?:KEY\s+)?STRENGTHS\s*[:\n]\s*(.*?)' + section_end, 'strengths'),
-            # 🆕 Pattern 17: "SPECIALIZATIONS"
+            # 🏆• Pattern 17: "SPECIALIZATIONS"
             (r'(?:^|\n)\s*(?:#*\s*\**)?(?:AREAS?\s+OF\s+)?SPECIALIZ(?:ATION|ATIONS?)\s*[:\n]\s*(.*?)' + section_end, 'specializations'),
-            # 🆕 Pattern 18: "DOMAINS" or "DOMAIN KNOWLEDGE"
+            # 🏆• Pattern 18: "DOMAINS" or "DOMAIN KNOWLEDGE"
             (r'(?:^|\n)\s*(?:#*\s*\**)?(?:DOMAIN\s+)?(?:KNOWLEDGE|EXPERTISE|DOMAINS?)\s*[:\n]\s*(.*?)' + section_end, 'domains'),
-            # 🆕 Pattern 19: Singapore-specific - "LICENSES" or "LICENCES"
+            # 🏆• Pattern 19: Singapore-specific - "LICENSES" or "LICENCES"
             (r'(?:^|\n)\s*(?:#*\s*\**)?LICEN[CS]ES?\s*[:\n]\s*(.*?)' + section_end, 'licenses'),
-            # 🆕 Pattern 20: "DATABASES" section
+            # 🏆• Pattern 20: "DATABASES" section
             (r'(?:^|\n)\s*(?:#*\s*\**)?DATABASES?\s*[:\n]\s*(.*?)' + section_end, 'databases'),
-            # 🆕 Pattern 21: "CLOUD" or "CLOUD PLATFORMS"
+            # 🏆• Pattern 21: "CLOUD" or "CLOUD PLATFORMS"
             (r'(?:^|\n)\s*(?:#*\s*\**)?CLOUD(?:\s+PLATFORMS?)?\s*[:\n]\s*(.*?)' + section_end, 'cloud'),
-            # 🆕 Pattern 22: "OPERATING SYSTEMS" or "OS"
+            # 🏆• Pattern 22: "OPERATING SYSTEMS" or "OS"
             (r'(?:^|\n)\s*(?:#*\s*\**)?(?:OPERATING\s+SYSTEMS?|OS)\s*[:\n]\s*(.*?)' + section_end, 'os'),
         ]
 
@@ -852,17 +1092,17 @@ Response must be valid JSON only."""
                         patterns_matched.append(pattern_name)
                         self.logger.debug(f"🎯 Found skills via '{pattern_name}': {len(captured)} chars")
             except re.error as e:
-                self.logger.warning(f"⚠️ Regex error in skills pattern '{pattern_name}': {e}")
+                self.logger.warning(f"⚠ Regex error in skills pattern '{pattern_name}': {e}")
                 continue
 
         # Combine all captured skills sections
         skills_text = "\n".join(all_skills_text)
 
         if not skills_text:
-            self.logger.warning("⚠️ No skills section found")
+            self.logger.warning("⚠ No skills section found")
             return {"hard_skills": [], "soft_skills": []}
 
-        self.logger.info(f"📊 Found skills via patterns: {patterns_matched}")
+        self.logger.info(f"📝Š Found skills via patterns: {patterns_matched}")
         
         # 🧹 CLEAN THE TEXT!
         # Remove markdown formatting (bold, italic, headers)
@@ -871,8 +1111,8 @@ Response must be valid JSON only."""
         skills_text = re.sub(r'^#+\s*', '', skills_text, flags=re.MULTILINE)  # # headers
         
         # Remove bullet characters
-        skills_text = re.sub(r'[•●○◦▪▫■□►▸‣⁃→·∙⋅▶▷◆◇★☆✓✔]', '\n', skills_text)
-        skills_text = re.sub(r'^\s*[-–—*]\s*', '\n', skills_text, flags=re.MULTILINE)
+        skills_text = re.sub(r'[•◗◗‹◗¦▪▫â– □►▸"£âƒ→·∙â‹…▶▷◗†◗‡â˜…☆âœ“✔]', '\n', skills_text)
+        skills_text = re.sub(r'^\s*[-–“"”*]\s*', '\n', skills_text, flags=re.MULTILINE)
 
         # 🎭 CMFAS CERTIFICATION EXPANSION - Singapore financial certifications
         skills_text = self._expand_cmfas_certifications(skills_text)
@@ -927,18 +1167,18 @@ Response must be valid JSON only."""
             
             # Skip if it contains date patterns (job entries bleeding in!)
             if re.search(r'(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}', cleaned, re.IGNORECASE):
-                self.logger.debug(f"⏭️ Skipping date-containing entry: {cleaned[:50]}")
+                self.logger.debug(f"â­ Skipping date-containing entry: {cleaned[:50]}")
                 continue
             
             # Skip if it contains company indicators
             company_indicators = ['pte ltd', 'pvt ltd', 'inc.', 'corp.', 'llc', 'company', 'consultancy']
             if any(ind in cleaned.lower() for ind in company_indicators):
-                self.logger.debug(f"⏭️ Skipping company-like entry: {cleaned[:50]}")
+                self.logger.debug(f"â­ Skipping company-like entry: {cleaned[:50]}")
                 continue
             
             # Skip if it looks like a job title + company combination
             if re.search(r'(?:Consultant|Manager|Engineer|Developer|Assistant|Executive|Officer),\s+[A-Z]', cleaned):
-                self.logger.debug(f"⏭️ Skipping job+company entry: {cleaned[:50]}")
+                self.logger.debug(f"â­ Skipping job+company entry: {cleaned[:50]}")
                 continue
             
             # Skip section headers that might have slipped through
@@ -972,7 +1212,14 @@ Response must be valid JSON only."""
         hard_skills = list(dict.fromkeys(hard_skills))
         soft_skills = list(dict.fromkeys(soft_skills))
 
-        self.logger.info(f"📊 Found {len(hard_skills)} hard skills, {len(soft_skills)} soft skills")
+        self.logger.info(f"📝Š Found {len(hard_skills)} hard skills, {len(soft_skills)} soft skills")
+
+        # 🏆• If we found very few skills, try nested category extraction
+        if len(hard_skills) + len(soft_skills) < 5:
+            self.logger.info("📝Š Few skills found, trying nested category extraction...")
+            nested_result = self._extract_skills_from_nested_categories(text)
+            if nested_result['hard_skills'] or nested_result['soft_skills']:
+                return nested_result
 
         return {
             "hard_skills": hard_skills,  # No limit - capture all!
@@ -1039,7 +1286,7 @@ Response must be valid JSON only."""
 
     def _is_technical_skill(self, skill_lower: str) -> bool:
         """
-        🔧 FAIRY CODEMOTHER'S TECHNICAL SKILL DETECTOR v6.0! 💻
+        📧 FAIRY CODEMOTHER'S TECHNICAL SKILL DETECTOR v6.0! 💻
         Covers ALL job types from Software to Safety!
         Enhanced for Singapore job market and modern tech!
         """
@@ -1213,7 +1460,7 @@ Response must be valid JSON only."""
 
     def _is_soft_skill(self, skill_lower: str) -> bool:
         """
-        💅 FAIRY CODEMOTHER'S SOFT SKILL DETECTOR v6.0! 🌟
+        💅 FAIRY CODEMOTHER'S SOFT SKILL DETECTOR v6.0! 🌐Ÿ
         The interpersonal MAGIC that makes careers SHINE!
         Enhanced for Singapore job market!
         """
@@ -1390,12 +1637,13 @@ Response must be valid JSON only."""
         
         # 🎭 FAIRY CODEMOTHER'S ENHANCED PATTERNS - Now with DD Mon YYYY support!
         dob_patterns = [
-            # 🆕 NEW PATTERN: DD Mon YYYY (e.g., "13 Oct 1989") - Singapore/UK style!
+            # 🏆• NEW PATTERN: DD Mon YYYY (e.g., "13 Oct 1989") - Singapore/UK style!
             (r'(?:DOB|D\.O\.B\.|Date of Birth|Birth Date|Born)[\s:]*(\d{1,2})\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{4})', 'dmy_written_labeled'),
             
-            # 🆕 NEW PATTERN: DD Mon YYYY without label (standalone)
+            # 🏆• NEW PATTERN: DD Mon YYYY without label (standalone)
             (r'\b(\d{1,2})\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{4})\b', 'dmy_written'),
             
+
             # With label: DOB: 01/15/1990
             (r'(?:DOB|D\.O\.B\.|Date of Birth|Birth Date|Born)[\s:]*(\d{1,2})[/-](\d{1,2})[/-](\d{4})', 'mdy_labeled'),
             # With label: DOB: 1990-01-15
@@ -1424,7 +1672,7 @@ Response must be valid JSON only."""
             matches = re.finditer(pattern, search_text, re.IGNORECASE)
             for match in matches:
                 try:
-                    # 🆕 Handle the new DD Mon YYYY formats!
+                    # 🏆• Handle the new DD Mon YYYY formats!
                     if date_format in ['dmy_written_labeled', 'dmy_written']:
                         day = int(match.group(1))
                         month_name = match.group(2).lower()
@@ -1456,7 +1704,7 @@ Response must be valid JSON only."""
                         # Validate date is real
                         dt = datetime.datetime(year, month, day)
                         formatted = dt.strftime('%Y-%m-%d')
-                        self.logger.info(f"✅ Found DOB: {formatted}")
+                        self.logger.info(f"âœ… Found DOB: {formatted}")
                         return formatted
                 
                 except (ValueError, OverflowError):
@@ -1477,7 +1725,9 @@ Response must be valid JSON only."""
         
         # 🎯 Pattern for date-first format
         # Matches: "Feb 2016 to Present    Financial Consultant, Prudential Assurance Company Singapore (Pte) Ltd"
-        date_first_pattern = r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4})\s+to\s+(Present|Current|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4})\s+([^\n]+)'
+        # 🎯 Pattern for date-first format - NOW WITH TAB SUPPORT! 💅
+        # Singapore resumes use TAB characters between date and role/company
+        date_first_pattern = r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4})[\s\t]+to[\s\t]+(Present|Current|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4})[\s\t]+([^\n]+)'
         
         # Find all matches
         matches = list(re.finditer(date_first_pattern, text, re.IGNORECASE | re.MULTILINE))
@@ -1506,7 +1756,7 @@ Response must be valid JSON only."""
             is_education = any(edu_kw in role_company_lower for edu_kw in education_keywords)
             
             if is_education:
-                self.logger.debug(f"⏭️ Skipping education entry in experience: {role_company[:50]}")
+                self.logger.debug(f"â­ Skipping education entry in experience: {role_company[:50]}")
                 continue
 
             # Parse role and company from "Role, Company Name"
@@ -1534,7 +1784,7 @@ Response must be valid JSON only."""
                     text[chunk_start:], 
                     re.IGNORECASE
                 )
-                chunk_end = chunk_start + (next_section.start() if next_section else 2000)  # 🆕 Increased from 1500!
+                chunk_end = chunk_start + (next_section.start() if next_section else 2000)  # 🏆• Increased from 1500!
 
             desc_chunk = text[chunk_start:chunk_end]
 
@@ -1587,7 +1837,7 @@ Response must be valid JSON only."""
                 # 🎯 CAPTURE CONDITIONS:
                 
                 # 1. Lines with bullet markers
-                is_bullet = line.startswith(('*', '-', '•', '·', '►', '➢', '○', '◦', '▪', '▸'))
+                is_bullet = line.startswith(('*', '-', '•', '·', '►', '➢', '◗‹', '◗¦', '▪', '▸'))
                 
                 # 2. Lines starting with action verbs (job responsibilities!)
                 first_word = line.split()[0].lower().rstrip('.,') if line.split() else ''
@@ -1595,7 +1845,7 @@ Response must be valid JSON only."""
                 
                 # Clean bullet markers if present
                 if is_bullet:
-                    cleaned = re.sub(r'^[\*\-•·►➢○◦▪▸]\s*', '', line).strip()
+                    cleaned = re.sub(r'^[\*\-•·►➢◗‹◗¦▪▸]\s*', '', line).strip()
                 else:
                     cleaned = line
                 
@@ -1611,7 +1861,7 @@ Response must be valid JSON only."""
 
            # 💎 Join with pipe delimiter + REMOVE DUPLICATES for beautiful formatting!
             if description_lines:
-                # Remove duplicate lines while preserving order 🌟
+                # Remove duplicate lines while preserving order 🌐Ÿ
                 seen = set()
                 unique_lines = []
                 for line in description_lines:
@@ -1670,7 +1920,7 @@ Response must be valid JSON only."""
                 # 🎯 CAPTURE CONDITIONS:
                 
                 # 1. Lines with bullet markers
-                is_bullet = line.startswith(('*', '-', '•', '·', '►', '➢', '○', '◦', '▪', '▸'))
+                is_bullet = line.startswith(('*', '-', '•', '·', '►', '➢', '◗‹', '◗¦', '▪', '▸'))
                 
                 # 2. Lines starting with action verbs (job responsibilities!)
                 first_word = line.split()[0].lower().rstrip('.,') if line.split() else ''
@@ -1678,7 +1928,7 @@ Response must be valid JSON only."""
                 
                 # Clean bullet markers if present
                 if is_bullet:
-                    cleaned = re.sub(r'^[\*\-•·►➢○◦▪▸]\s*', '', line).strip()
+                    cleaned = re.sub(r'^[\*\-•·►➢◗‹◗¦▪▸]\s*', '', line).strip()
                 else:
                     cleaned = line
                 
@@ -1701,7 +1951,7 @@ Response must be valid JSON only."""
                 "description": description  # No truncation - capture all!
             })
             
-            self.logger.info(f"✅ Extracted: {role[:40]} at {company[:40]}")
+            self.logger.info(f"âœ… Extracted: {role[:40]} at {company[:40]}")
         
         return jobs
     
@@ -1718,7 +1968,7 @@ Response must be valid JSON only."""
         text = self._clean_markdown(text)
         self.logger.info("🧹 Cleaned markdown formatting")
         
-        # 🆕 STEP 1.5: TRY DATE-FIRST FORMAT (Singapore/UK style)
+        # 🏆• STEP 1.5: TRY DATE-FIRST FORMAT (Singapore/UK style)
         # This catches resumes like "Feb 2016 to Present    Financial Consultant, Prudential..."
         date_first_jobs = self._extract_experience_date_first_format(text)
         if date_first_jobs and len(date_first_jobs) >= 2:
@@ -1780,7 +2030,7 @@ Response must be valid JSON only."""
                 self.logger.info(f"🎯 Found experience section via boundaries: chars {start}-{end}")
             else:
                 exp_text = text
-                self.logger.warning("⚠️ No clear experience section found - using full text")
+                self.logger.warning("⚠ No clear experience section found - using full text")
 
 
         # 🔍 STEP 2: FIND EXPERIENCE SECTION
@@ -1819,12 +2069,12 @@ Response must be valid JSON only."""
                     self.logger.info(f"💼 Found experience section ({len(exp_text)} chars) using pattern {pattern_used}")
                     break
             except re.error as e:
-                self.logger.warning(f"⚠️ Regex error in pattern {i+1}: {e}")
+                self.logger.warning(f"⚠ Regex error in pattern {i+1}: {e}")
                 continue
         
         # 🚨 FALLBACK: If no section header found, use full text
         if not exp_text or len(exp_text) < 100:
-            self.logger.warning("⚠️ No clear experience section - scanning full document")
+            self.logger.warning("⚠ No clear experience section - scanning full document")
             exp_text = text
         
         # 🎭 CRITICAL SAFETY CHECK: If exp_text is suspiciously short, USE FULL TEXT!
@@ -1833,15 +2083,15 @@ Response must be valid JSON only."""
         captured_len = len(exp_text)
         
         if captured_len < 500 and original_len > 1000:
-            self.logger.warning(f"⚠️ Experience section too short ({captured_len} chars vs {original_len} total)")
-            self.logger.warning("⚠️ Likely hit an embedded keyword like 'skills' - using full document!")
+            self.logger.warning(f"⚠ Experience section too short ({captured_len} chars vs {original_len} total)")
+            self.logger.warning("⚠ Likely hit an embedded keyword like 'skills' - using full document!")
             exp_text = text
         elif captured_len < original_len * 0.25:  # Less than 25% of original
-            self.logger.warning(f"⚠️ Experience section is only {captured_len}/{original_len} chars ({100*captured_len//original_len}%)")
-            self.logger.warning("⚠️ Using full document for safety")
+            self.logger.warning(f"⚠ Experience section is only {captured_len}/{original_len} chars ({100*captured_len//original_len}%)")
+            self.logger.warning("⚠ Using full document for safety")
             exp_text = text
         
-        # 🏢 STEP 3: FIND ALL COMPANIES
+        # 🏆 STEP 3: FIND ALL COMPANIES
         # 🎭 FAIRY CODEMOTHER'S PRECISION PATTERNS v6.0 - ENHANCED! 💅
         # Handles MULTIPLE resume formats: Indian, Singapore, US, UK, EU, Startups, Freelance!
         company_patterns = [
@@ -1851,16 +2101,16 @@ Response must be valid JSON only."""
             # ===== LEGAL SUFFIX PATTERNS (High confidence) =====
 
             # Pattern 1: Indian style - "Pvt. Ltd." or "Private Limited"
-            (r'^([A-Z][^\n]{3,60}?(?:Pvt\.?\s*Ltd\.?|Private\s+Limited))(?:\s*[-–][^\n]*)?$', 'pvt_ltd'),
+            (r'^([A-Z][^\n]{3,60}?(?:Pvt\.?\s*Ltd\.?|Private\s+Limited))(?:\s*[-–“][^\n]*)?$', 'pvt_ltd'),
 
             # Pattern 2: Singapore style - "Pte Ltd" or "Pte. Ltd."
-            (r'^([A-Z][^\n]{3,60}?(?:Pte\.?\s*Ltd\.?))(?:\s*[-–][^\n]*)?$', 'pte_ltd'),
+            (r'^([A-Z][^\n]{3,60}?(?:Pte\.?\s*Ltd\.?))(?:\s*[-–“][^\n]*)?$', 'pte_ltd'),
 
             # Pattern 3: US/International - "Ltd", "Inc", "Corp", "LLC", "LLP", "GmbH", "S.A.", etc.
-            (r'^([A-Z][^\n]{3,50}?(?:Ltd\.?|Inc\.?|Corp\.?|Corporation|LLC|LLP|LP|GmbH|S\.?A\.?|PLC|N\.?V\.?|B\.?V\.?|AG|SE|SARL|SRL|SpA|KG|OHG|UG))(?:\s*[-–][^\n]*)?$', 'legal_suffix'),
+            (r'^([A-Z][^\n]{3,50}?(?:Ltd\.?|Inc\.?|Corp\.?|Corporation|LLC|LLP|LP|GmbH|S\.?A\.?|PLC|N\.?V\.?|B\.?V\.?|AG|SE|SARL|SRL|SpA|KG|OHG|UG))(?:\s*[-–“][^\n]*)?$', 'legal_suffix'),
 
             # Pattern 4: Tech/Business keywords - "Technologies", "Solutions", "Software", etc.
-            (r'^([A-Z][^\n]{3,50}?(?:Technologies|Solutions|Services|Systems|Consulting|Enterprises|Software|Digital|Labs?|Studio|Agency|Media|Group|Partners|Holdings|Ventures|Capital|Networks|Logistics|Industries|Manufacturing|International|Global|Worldwide|Asia|Pacific))(?:\s+(?:Pvt\.?\s*Ltd\.?|Pte\.?\s*Ltd\.?|Inc\.?|LLC))?(?:\s*[-–][^\n]*)?$', 'tech_company'),
+            (r'^([A-Z][^\n]{3,50}?(?:Technologies|Solutions|Services|Systems|Consulting|Enterprises|Software|Digital|Labs?|Studio|Agency|Media|Group|Partners|Holdings|Ventures|Capital|Networks|Logistics|Industries|Manufacturing|International|Global|Worldwide|Asia|Pacific))(?:\s+(?:Pvt\.?\s*Ltd\.?|Pte\.?\s*Ltd\.?|Inc\.?|LLC))?(?:\s*[-–“][^\n]*)?$', 'tech_company'),
 
             # ===== CONTEXTUAL PATTERNS (Medium confidence) =====
 
@@ -1868,10 +2118,10 @@ Response must be valid JSON only."""
             (r'^([A-Z][A-Za-z0-9\s&\.,\'-]{5,50})\s*$(?=\s*\n\s*(?:Senior|Junior|Lead|Staff|Principal|Chief|Head|VP|Director|Manager|Engineer|Developer|Designer|Analyst|Consultant|Specialist|Architect|Administrator|Coordinator|Executive|Officer|Intern|Trainee|Associate|Representative))', 'before_job_title'),
 
             # Pattern 6: Company with date range on SAME LINE
-            (r"^([A-Z][A-Za-z0-9\s&\.,\'-]{5,50}?)(?:\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s*['\"]?\d{2,4}|\s+\d{4})\s*[-–]\s*(?:Present|Current|Now|Ongoing|\d{4}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec))", 'company_with_date'),
+            (r"^([A-Z][A-Za-z0-9\s&\.,\'-]{5,50}?)(?:\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s*['\"]?\d{2,4}|\s+\d{4})\s*[-–“]\s*(?:Present|Current|Now|Ongoing|\d{4}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec))", 'company_with_date'),
 
             # Pattern 7: Company followed by location
-            (r'^([A-Z][A-Za-z0-9\s&\'-]{5,40})\s*[-–,]\s*(?:[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?,?\s*(?:[A-Z]{2}|Singapore|India|USA|UK|Germany|France|Australia|Canada|Japan|China|Malaysia|Indonesia|Philippines|Vietnam|Thailand|Hong Kong|Taiwan))$', 'company_with_location'),
+            (r'^([A-Z][A-Za-z0-9\s&\'-]{5,40})\s*[-–“,]\s*(?:[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?,?\s*(?:[A-Z]{2}|Singapore|India|USA|UK|Germany|France|Australia|Canada|Japan|China|Malaysia|Indonesia|Philippines|Vietnam|Thailand|Hong Kong|Taiwan))$', 'company_with_location'),
 
             # ===== SPECIAL PATTERNS =====
 
@@ -1888,16 +2138,16 @@ Response must be valid JSON only."""
             (r'^((?:Google|Meta|Facebook|Amazon|Apple|Microsoft|Netflix|Uber|Airbnb|Stripe|Shopify|Twitter|LinkedIn|Oracle|IBM|Intel|Cisco|Adobe|Salesforce|SAP|VMware|Dell|HP|Accenture|Infosys|TCS|Wipro|HCL|Cognizant|Capgemini|Deloitte|EY|PwC|KPMG|McKinsey|BCG|Bain|Goldman|JPMorgan|Morgan Stanley|Citibank|HSBC|Standard Chartered|DBS|OCBC|UOB|Grab|Sea|Shopee|Lazada|ByteDance|TikTok|Alibaba|Tencent|Baidu|Huawei|Xiaomi|Samsung|Sony|Toyota|Honda|BMW|Mercedes|Tesla)[^\n]*)$', 'known_company'),
 
             # Pattern 12: Bank/Financial institution
-            (r'^([A-Z][^\n]{3,50}?(?:Bank|Finance|Financial|Insurance|Investment|Asset\s+Management|Securities|Capital|Credit|Trust))(?:\s*[-–][^\n]*)?$', 'financial'),
+            (r'^([A-Z][^\n]{3,50}?(?:Bank|Finance|Financial|Insurance|Investment|Asset\s+Management|Securities|Capital|Credit|Trust))(?:\s*[-–“][^\n]*)?$', 'financial'),
 
             # Pattern 13: Hospital/Healthcare
-            (r'^([A-Z][^\n]{3,50}?(?:Hospital|Medical|Healthcare|Health\s+Care|Clinic|Pharma|Pharmaceutical|Biotech|Life\s+Sciences))(?:\s*[-–][^\n]*)?$', 'healthcare'),
+            (r'^([A-Z][^\n]{3,50}?(?:Hospital|Medical|Healthcare|Health\s+Care|Clinic|Pharma|Pharmaceutical|Biotech|Life\s+Sciences))(?:\s*[-–“][^\n]*)?$', 'healthcare'),
 
             # Pattern 14: University/Institute/School
-            (r'^([A-Z][^\n]{3,50}?(?:University|Institute|College|School|Academy|Polytechnic))(?:\s*[-–][^\n]*)?$', 'education_org'),
+            (r'^([A-Z][^\n]{3,50}?(?:University|Institute|College|School|Academy|Polytechnic))(?:\s*[-–“][^\n]*)?$', 'education_org'),
 
             # Pattern 15: Government/Public sector
-            (r'^([A-Z][^\n]{3,50}?(?:Ministry|Department|Government|Authority|Agency|Council|Commission|Board|Bureau))(?:\s*[-–][^\n]*)?$', 'government'),
+            (r'^([A-Z][^\n]{3,50}?(?:Ministry|Department|Government|Authority|Agency|Council|Commission|Board|Bureau))(?:\s*[-–“][^\n]*)?$', 'government'),
 
             # ===== FALLBACK PATTERNS (Lower confidence but broad) =====
 
@@ -1913,19 +2163,19 @@ Response must be valid JSON only."""
             try:
                 matches = list(re.finditer(pattern, exp_text, re.MULTILINE | re.IGNORECASE))
                 if matches:
-                    self.logger.info(f"🏢 Found {len(matches)} companies using '{pattern_type}' pattern")
+                    self.logger.info(f"🏆 Found {len(matches)} companies using '{pattern_type}' pattern")
                     # 🎭 FAIRY CODEMOTHER'S DEBUG TIP: Log what we found!
                     for m in matches[:3]:  # Show first 3 matches for debugging
                         self.logger.debug(f"   → Match: '{m.group(1)[:50]}...' at pos {m.start()}")
                     all_matches.extend([(m, pattern_type) for m in matches])
             except re.error as regex_err:
                 # 🚨 Handle malformed regex gracefully - don't let one bad pattern crash everything!
-                self.logger.error(f"❌ Regex error in '{pattern_type}' pattern: {regex_err}")
+                self.logger.error(f"âŒ Regex error in '{pattern_type}' pattern: {regex_err}")
                 continue
         
         if not all_matches:
             # 🎭 ENHANCED ERROR HANDLING: Log sample of text for debugging
-            self.logger.warning("⚠️ No companies found with standard patterns, trying AGGRESSIVE fallback...")
+            self.logger.warning("⚠ No companies found with standard patterns, trying AGGRESSIVE fallback...")
             
             # 🚨 AGGRESSIVE FALLBACK: Look for ANY line that might be a company
             # This catches edge cases that slip through the patterns
@@ -1981,7 +2231,7 @@ Response must be valid JSON only."""
                 skip_patterns = [
                     r'^(education|skills?|experience|summary|objective|profile|contact|references?|projects?|certifications?|awards?|languages?|hobbies|interests)$',
                     r'^\d+',  # Starts with number
-                    r'^[-•●○▪]',  # Bullet points
+                    r'^[-•◗◗‹▪]',  # Bullet points
                     r'@',  # Email addresses
                     r'^\+?\d[\d\s\-()]+$',  # Phone numbers
                 ]
@@ -2015,8 +2265,8 @@ Response must be valid JSON only."""
             if fallback_matches:
                 all_matches = fallback_matches
             else:
-                self.logger.error("❌ No companies found in text!")
-                self.logger.debug(f"📄 Experience text sample (first 500 chars):\n{exp_text[:500]}")
+                self.logger.error("âŒ No companies found in text!")
+                self.logger.debug(f"📝„ Experience text sample (first 500 chars):\n{exp_text[:500]}")
                 return jobs
         
         # Remove duplicates based on position AND content (improved deduplication)
@@ -2041,7 +2291,7 @@ Response must be valid JSON only."""
         
         self.logger.info(f"💼 Processing {len(unique_matches)} unique job entries")
         
-        # 👔 STEP 4: EXTRACT DETAILS FOR EACH JOB
+        # 👓 STEP 4: EXTRACT DETAILS FOR EACH JOB
         for i, (company_match, pattern_type) in enumerate(unique_matches):
             company_name = company_match.group(1).strip()
             
@@ -2058,7 +2308,7 @@ Response must be valid JSON only."""
             
             job_chunk = exp_text[chunk_start:chunk_end]
             
-            # 👔 EXTRACT ROLE
+            # 👓 EXTRACT ROLE
             # 🎭 FAIRY CODEMOTHER'S ENHANCED ROLE PATTERNS v6.0!
             # These patterns are like a talent scout - they spot the job titles hiding in the crowd! 💅
             role_patterns = [
@@ -2097,7 +2347,7 @@ Response must be valid JSON only."""
                             role = potential_role
                             break
             
-            # 📅 EXTRACT DATES - Enhanced v6.0
+            # 📝… EXTRACT DATES - Enhanced v6.0
             date_patterns = [
                 # Pattern 1: Full/abbreviated month + year range (most common)
                 r"((?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\.?\s*['\"]?\d{2,4}\s*(?:[-\u2013\u2014]|to|till|until|through)\s*(?:(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\.?\s*['\"]?\d{2,4}|Present|Current|Now|Ongoing|Till\s+Date|To\s+Date|present|current|ongoing))",
@@ -2127,7 +2377,7 @@ Response must be valid JSON only."""
                 if date_match:
                     dates = date_match.group(1)
                     # Normalize date separators
-                    dates = dates.replace('–', ' - ').replace('—', ' - ')
+                    dates = dates.replace('"“', ' - ').replace('"”', ' - ')
                     dates = re.sub(r'\s+to\s+', ' - ', dates, flags=re.IGNORECASE)
                     dates = re.sub(r'\s+till\s+', ' - ', dates, flags=re.IGNORECASE)
                     dates = re.sub(r'\s+until\s+', ' - ', dates, flags=re.IGNORECASE)
@@ -2141,7 +2391,7 @@ Response must be valid JSON only."""
                     dates = re.sub(r'\s+', ' ', dates).strip()
                     break
             
-            # 📝 EXTRACT DESCRIPTION - Enhanced v6.0
+            # 📝 EXTRACT DESCRIPTION - Enhanced v6.0
             # Capture ALL job responsibilities without truncation!
             # Find where dates end
             if dates != "Dates not specified":
@@ -2155,7 +2405,7 @@ Response must be valid JSON only."""
 
             # 🎯 Enhanced bullet point detection patterns
             bullet_markers = [
-                r'^[\*\-•●○▪■►◆➢➤✓✔→]',  # Standard bullets
+                r'^[\*\-•◗◗‹▪â– ►◗†➢➤âœ“✔→]',  # Standard bullets
                 r'^\d+[\.\)]\s',            # Numbered lists (1. or 1))
                 r'^[a-z][\.\)]\s',          # Lettered lists (a. or a))
                 r'^(?:Key|Main|Core)\s+(?:Responsibilities|Duties|Tasks|Achievements)',  # Section headers
@@ -2198,7 +2448,7 @@ Response must be valid JSON only."""
                 is_bullet = any(re.match(pat, line) for pat in bullet_markers)
 
                 # Clean bullet markers from the line
-                cleaned_line = re.sub(r'^[\*\-•●○▪■►◆➢➤✓✔→]\s*', '', line)
+                cleaned_line = re.sub(r'^[\*\-•◗◗‹▪â– ►◗†➢➤âœ“✔→]\s*', '', line)
                 cleaned_line = re.sub(r'^\d+[\.\)]\s*', '', cleaned_line)
                 cleaned_line = re.sub(r'^[a-z][\.\)]\s*', '', cleaned_line)
                 cleaned_line = cleaned_line.strip()
@@ -2256,11 +2506,11 @@ Response must be valid JSON only."""
 
             company_lower = company_name.lower()
             if any(cert_kw in company_lower for cert_kw in certification_keywords):
-                self.logger.debug(f"⭐️ Skipping certification entry: {company_name[:50]}")
+                self.logger.debug(f"⭐ Skipping certification entry: {company_name[:50]}")
                 continue
 
             if any(company_name.lower().startswith(word) for word in skip_start_words):
-                self.logger.debug(f"⏭️ Skipping bullet point: {company_name[:50]}")
+                self.logger.debug(f"â­ Skipping bullet point: {company_name[:50]}")
                 continue
 
             # 🎭 NEW: Skip if the text contains phrases that indicate it's a job description
@@ -2270,13 +2520,13 @@ Response must be valid JSON only."""
                 'in order to', 'to ensure', 'to provide', 'to support', 'to maintain'
             ]
             if any(indicator in company_name.lower() for indicator in description_indicators):
-                self.logger.debug(f"⏭️ Skipping description phrase: {company_name[:50]}")
+                self.logger.debug(f"â­ Skipping description phrase: {company_name[:50]}")
                 continue
 
             # Skip if too many words (likely a description, not a company)
             # 🎭 Reduced from 12 to 8 for stricter filtering
             if company_name.count(' ') > 8:
-                self.logger.debug(f"⏭️ Skipping long phrase ({company_name.count(' ')+1} words): {company_name[:50]}")
+                self.logger.debug(f"â­ Skipping long phrase ({company_name.count(' ')+1} words): {company_name[:50]}")
                 continue
 
             # 🎭 NEW: Skip if it contains common non-company words
@@ -2286,7 +2536,7 @@ Response must be valid JSON only."""
             has_legal_suffix = any(suffix in company_name.lower() for suffix in ['ltd', 'inc', 'corp', 'llc', 'pte', 'pvt'])
             if word_count >= 4 and not has_legal_suffix:
                 if any(word in company_name.lower() for word in non_company_words):
-                    self.logger.debug(f"⏭️ Skipping non-company phrase: {company_name[:50]}")
+                    self.logger.debug(f"â­ Skipping non-company phrase: {company_name[:50]}")
                     continue
 
             # 🎯 STEP 5: ADD TO RESULTS - COMPREHENSIVE (capture all content)
@@ -2297,7 +2547,7 @@ Response must be valid JSON only."""
                 "description": description if description else "Description not available"  # No truncation!
             })
             
-            self.logger.info(f"✅ Extracted: {company_name[:40]} - {role[:40]}")
+            self.logger.info(f"âœ… Extracted: {company_name[:40]} - {role[:40]}")
         
         self.logger.info(f"💼 Total jobs extracted: {len(jobs)}")
         
@@ -2342,7 +2592,7 @@ Response must be valid JSON only."""
         ]
 
         # Pattern for date-first education entries
-        edu_pattern = r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{4})\s+(?:to|till|until|-|–)\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}|Present|Current)\s+([^\n]+)'
+        edu_pattern = r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{4})\s+(?:to|till|until|-|"“)\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}|Present|Current)\s+([^\n]+)'
 
         # Find education section first - expanded patterns
         edu_section_patterns = [
@@ -2385,7 +2635,7 @@ Response must be valid JSON only."""
 
             for line in chunk.split('\n'):
                 line = line.strip()
-                if not line or line.startswith(('Obtained', '*', '-', '•', '○', '●')):
+                if not line or line.startswith(('Obtained', '*', '-', '•', '◗‹', '◗')):
                     continue
 
                 # Check if it looks like a Singapore institution
@@ -2576,9 +2826,9 @@ Response must be valid JSON only."""
 
             # Extract DATES - more flexible patterns
             date_patterns = [
-                r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}\s*[-–—]\s*(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}|Present|Current))',
-                r'(\d{4}\s*[-–—]\s*(?:\d{4}|Present|Current))',
-                r'(\d{2}/\d{4}\s*[-–—]\s*(?:\d{2}/\d{4}|Present|Current))',
+                r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}\s*[-–“"”]\s*(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}|Present|Current))',
+                r'(\d{4}\s*[-–“"”]\s*(?:\d{4}|Present|Current))',
+                r'(\d{2}/\d{4}\s*[-–“"”]\s*(?:\d{2}/\d{4}|Present|Current))',
                 r'(?:Graduated|Completed|Awarded)\s*:?\s*(\d{4})',
                 r'(?:Class\s+of|Batch\s+of)\s*[\'"]?(\d{4})',
             ]
@@ -2588,7 +2838,7 @@ Response must be valid JSON only."""
                 date_match = re.search(date_pat, edu_chunk, re.IGNORECASE)
                 if date_match:
                     dates = date_match.group(1) if date_match.lastindex else date_match.group(0)
-                    dates = dates.replace('–', '-').replace('—', '-')
+                    dates = dates.replace('"“', '-').replace('"”', '-')
                     break
 
             education.append({
@@ -2646,7 +2896,7 @@ IMPORTANT: Use the EXACT wording from the original skills - do NOT paraphrase, r
         if parsed and isinstance(parsed.get('hard'), list) and isinstance(parsed.get('soft'), list):
             result['hard_skills'] = parsed['hard'][:30]
             result['soft_skills'] = parsed['soft'][:20]
-            self.logger.info("✅ AI re-categorized skills successfully")
+            self.logger.info("âœ… AI re-categorized skills successfully")
         
         return result
 
@@ -2675,7 +2925,7 @@ IMPORTANT: Use the EXACT wording from the original skills - do NOT paraphrase, r
             return response['message']['content']
 
         except Exception as e:
-            self.logger.error(f"❌ AI Call error: {e}")
+            self.logger.error(f"âŒ AI Call error: {e}")
             return ""
 
     def _call_ollama(self, prompt: str, is_deep: bool = False) -> Dict:
@@ -2690,7 +2940,7 @@ IMPORTANT: Use the EXACT wording from the original skills - do NOT paraphrase, r
             if is_deep:
                 options['num_predict'] = 3000  # More room for structured output
             
-            # 🌟 HERE'S WHERE THE MAGIC HAPPENS, SWEETIE! 🌟
+            # 🌐Ÿ HERE'S WHERE THE MAGIC HAPPENS, SWEETIE! 🌐Ÿ
             response = ollama.chat(
                 model=self.model_name,
                 messages=[
@@ -2713,19 +2963,19 @@ IMPORTANT: Use the EXACT wording from the original skills - do NOT paraphrase, r
             response_text = response['message']['content']
             parsed_data = self._parse_ai_response(response_text)
             
-            # 🌟 VALIDATION LAYER - Check if AI was lazy!
+            # 🌐Ÿ VALIDATION LAYER - Check if AI was lazy!
             if is_deep and parsed_data:
                 parsed_data = self._validate_deep_extraction(parsed_data, response_text)
             
             return parsed_data
             
         except Exception as e:
-            self.logger.error(f"❌ AI Call error: {e}")
+            self.logger.error(f"âŒ AI Call error: {e}")
             return {}
 
     def _parse_ai_response(self, response_text: str) -> Optional[Dict]:
         """
-        🔧 Parse JSON and clean text dumps.
+        📧 Parse JSON and clean text dumps.
         """
         # 1. Clean Markdown
         cleaned = re.sub(r'```json\s*|\s*```', '', response_text).strip()
@@ -2743,10 +2993,10 @@ IMPORTANT: Use the EXACT wording from the original skills - do NOT paraphrase, r
                     pass
         
         if not data:
-            self.logger.warning("⚠️ Could not parse JSON from AI response")
+            self.logger.warning("⚠ Could not parse JSON from AI response")
             return {}
 
-        # 2. 🛡️ SAFETY NET: Fix Malformed Lists
+        # 2. 🛡 SAFETY NET: Fix Malformed Lists
         # If the AI returned a bulleted string instead of a list, fix it now.
         data = self._fix_malformed_lists(data)
         
@@ -2755,19 +3005,19 @@ IMPORTANT: Use the EXACT wording from the original skills - do NOT paraphrase, r
     def _fix_malformed_lists(self, data: Dict) -> Dict:
         """
         🚑 EMERGENCY ROOM for Malformed Data!
-        This is like plastic surgery for badly extracted JSON, honey! 💉
+        This is like plastic surgery for badly extracted JSON, honey! 👪
         """
-        self.logger.info("🔧 Running malformed data repair...")
+        self.logger.info("📧 Running malformed data repair...")
         
         # ========== FIX SKILLS ==========
         for field in ['hard_skills', 'soft_skills', 'skills']:
             if field in data:
                 if isinstance(data[field], str):
-                    self.logger.warning(f"⚠️ {field} was a string - converting to list!")
+                    self.logger.warning(f"⚠ {field} was a string - converting to list!")
                     raw_text = data[field]
                     
                     # AGGRESSIVE CLEANING - Remove ALL bullet characters
-                    cleaned = re.sub(r'[•●○◦▪▫■□►▸‣⁃→·∙⋅▶▷◆◇★☆\-–—*]', '', raw_text)
+                    cleaned = re.sub(r'[•◗◗‹◗¦▪▫â– □►▸"£âƒ→·∙â‹…▶▷◗†◗‡â˜…☆\-"“"”*]', '', raw_text)
                     
                     # Split by newlines AND commas
                     items = re.split(r'[\n,;]+', cleaned)
@@ -2783,14 +3033,14 @@ IMPORTANT: Use the EXACT wording from the original skills - do NOT paraphrase, r
                             clean_list.append(cleaned_item)
                     
                     data[field] = clean_list
-                    self.logger.info(f"✅ Converted {field} to {len(clean_list)} items")
+                    self.logger.info(f"âœ… Converted {field} to {len(clean_list)} items")
                 
                 elif isinstance(data[field], list):
                     # Even if it's a list, clean each item
                     cleaned_items = []
                     for item in data[field]:
                         if isinstance(item, str):
-                            cleaned = item.strip().strip('•\-–—*◦▪▫')
+                            cleaned = item.strip().strip('•\-"“"”*◗¦▪▫')
                             cleaned = re.sub(r'^\d+\.?\s*', '', cleaned)
                             if cleaned and len(cleaned) > 2 and len(cleaned) < 100:
                                 cleaned_items.append(cleaned)
@@ -2800,7 +3050,7 @@ IMPORTANT: Use the EXACT wording from the original skills - do NOT paraphrase, r
         if 'working_experience' in data:
             if isinstance(data['working_experience'], str):
                 self.logger.error("🚨 MAJOR ISSUE: AI dumped experience as text!")
-                self.logger.warning("⚠️ Attempting emergency extraction...")
+                self.logger.warning("⚠ Attempting emergency extraction...")
                 
                 raw_text = data['working_experience']
                 
@@ -2820,7 +3070,7 @@ IMPORTANT: Use the EXACT wording from the original skills - do NOT paraphrase, r
                     company = lines[0].strip() if lines else "Unknown Company"
                     
                     # Look for date patterns
-                    date_match = re.search(r'(\w+\s+\d{4}\s*[-–]\s*(?:\w+\s+\d{4}|Present))', section)
+                    date_match = re.search(r'(\w+\s+\d{4}\s*[-–“]\s*(?:\w+\s+\d{4}|Present))', section)
                     dates = date_match.group(1) if date_match else "N/A"
                     
                     # Role is often the second line or has keywords
@@ -2847,7 +3097,7 @@ IMPORTANT: Use the EXACT wording from the original skills - do NOT paraphrase, r
                     "description": raw_text[:500]
                 }]
                 
-                self.logger.info(f"✅ Extracted {len(data['working_experience'])} jobs from text dump")
+                self.logger.info(f"âœ… Extracted {len(data['working_experience'])} jobs from text dump")
             
             elif isinstance(data['working_experience'], list):
                 # Validate each job object
@@ -2868,7 +3118,7 @@ IMPORTANT: Use the EXACT wording from the original skills - do NOT paraphrase, r
         # ========== FIX EDUCATION ==========
         if 'education' in data:
             if isinstance(data['education'], str):
-                self.logger.warning("⚠️ Education was a string - attempting to structure...")
+                self.logger.warning("⚠ Education was a string - attempting to structure...")
                 data['education'] = [{
                     "institution": "See Description",
                     "degree": "Multiple Degrees",
@@ -2903,7 +3153,7 @@ IMPORTANT: Use the EXACT wording from the original skills - do NOT paraphrase, r
                 elif isinstance(data[skill_field], list) and len(data[skill_field]) > 0:
                     # Check if first item looks like it has bullets
                     first_item = str(data[skill_field][0])
-                    if any(char in first_item for char in ['•', '\n', '–']):
+                    if any(char in first_item for char in ['•', '\n', '"“']):
                         issues_found.append(f"{skill_field} contains improperly formatted items")
         
         # Check 2: Is experience properly structured?
@@ -2925,10 +3175,10 @@ IMPORTANT: Use the EXACT wording from the original skills - do NOT paraphrase, r
         
         # Log issues
         if issues_found:
-            self.logger.warning(f"⚠️ VALIDATION ISSUES DETECTED:")
+            self.logger.warning(f"⚠ VALIDATION ISSUES DETECTED:")
             for issue in issues_found:
-                self.logger.warning(f"   ⚠️ {issue}")
-            self.logger.info("🔧 Applying aggressive cleanup...")
+                self.logger.warning(f"   ⚠ {issue}")
+            self.logger.info("📧 Applying aggressive cleanup...")
         
         # Always run cleanup regardless
         return self._fix_malformed_lists(data)
@@ -2952,6 +3202,9 @@ IMPORTANT: Use the EXACT wording from the original skills - do NOT paraphrase, r
         """
         if not self.available:
             return regex_results
+        
+        # 🧚‍♀️ NORMALIZE TEXT FIRST! This is THE key to consistent extraction!
+        text = self._normalize_text_for_extraction(text)
 
         final_results = regex_results.copy()
 
@@ -3047,12 +3300,12 @@ IMPORTANT: Use the EXACT wording from the original skills - do NOT paraphrase, r
         if not text:
             return ""
         
-        # 🆕 STEP 0: Normalize en-dash and em-dash to hyphen FIRST!
-        text = text.replace('–', '-')   # en-dash (U+2013)
-        text = text.replace('—', '-')   # em-dash (U+2014)
+        # 🏆• STEP 0: Normalize en-dash and em-dash to hyphen FIRST!
+        text = text.replace('"“', '-')   # en-dash (U+2013)
+        text = text.replace('"”', '-')   # em-dash (U+2014)
         
         # Remove markdown headers (##, ###, etc.) - must come first!
-        # 🆕 Also remove the ** around header text!
+        # 🏆• Also remove the ** around header text!
         text = re.sub(r'^#+\s*\**([^*\n]+)\**\s*$', r'\1', text, flags=re.MULTILINE)
         
         # Remove bold markers (**text** or __text__)
@@ -3064,11 +3317,11 @@ IMPORTANT: Use the EXACT wording from the original skills - do NOT paraphrase, r
         text = re.sub(r'(?<!\n)\*([^*\n]+)\*(?!\*)', r'\1', text)
         text = re.sub(r'(?<!\n)_([^_\n]+)_(?!_)', r'\1', text)
         
-        # 🆕 Handle bold+italic (***text***)
+        # 🏆• Handle bold+italic (***text***)
         text = re.sub(r'\*\*\*([^*]+)\*\*\*', r'\1', text)
         
         # Remove bullet point markers at line start, but KEEP the content!
-        text = re.sub(r'^\s*[-\*•▪►▸◦○◇]\s+', '', text, flags=re.MULTILINE)
+        text = re.sub(r'^\s*[-\*•▪►▸◗¦◗‹◗‡]\s+', '', text, flags=re.MULTILINE)
         
         # Normalize special quotes
         text = text.replace('"', '"').replace('"', '"')
@@ -3110,7 +3363,7 @@ IMPORTANT: Use the EXACT wording from the original skills - do NOT paraphrase, r
             match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
             if match:
                 found_sections.append((section_name, match.start(), match.end()))
-                self.logger.debug(f"📍 Found section '{section_name}' at position {match.start()}")
+                self.logger.debug(f"📝 Found section '{section_name}' at position {match.start()}")
         
         # Sort by position in document
         found_sections.sort(key=lambda x: x[1])
@@ -3127,6 +3380,6 @@ IMPORTANT: Use the EXACT wording from the original skills - do NOT paraphrase, r
                 end_pos = len(text)
             
             sections[section_name] = (content_start, end_pos)
-            self.logger.debug(f"📐 Section '{section_name}': chars {content_start}-{end_pos}")
+            self.logger.debug(f"📝 Section '{section_name}': chars {content_start}-{end_pos}")
         
         return sections

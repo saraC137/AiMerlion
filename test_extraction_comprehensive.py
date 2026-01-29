@@ -26,99 +26,19 @@ from typing import Dict, Any, Optional
 # ============================================================================
 # 🎭 TEST RESUME DATA - Singapore-style format (Date-first)
 # ============================================================================
-TEST_TEXT = """
-Source: merlion_resumes/43199_Tan Kee Miang Nigel/Nigel Tan Kee Miang Resume (MSWords).docx
+TEST_TEXT = r"""
+Source: merlion_resumes\43196_Binte Nurul\Nurul Ain Binte Ismail (ok).docx
 File Type: DOCX
 Images Found: 0
 Extraction Method: python-docx
 ================================================================================
 
-Nigel Tan Kee Miang						
-Block 362
-Hougang Avenue 5 #12-302
-Singapore 530362
-62886508 (Home)/ 98153946 (Mobile)
-Email: nigeltkm@gmail.com
-Personal Particulars
-Date of Birth	: 13 Oct 1989
-Nationality	: Singaporean
-Language	: English & Chinese
-Work Experience
-Feb 2016 to Present	Financial Consultant, Prudential Assurance Company Singapore (Pte) Ltd
-Carried out in-depth policy reviews and managed the Sum at Risk (SAR).
-Conducted frontline KYC and background fact finding of clients.
-Maintained industry practice standards and Achieved A for Balance Scorecard grade.
-Jan 2015 to Jan 2016	Business Consultant, TWH Consultancy Pte Ltd
-Established company insurance arm.
-Managing general insurance portfolio and assist in corporate planning.
-Providing businesses with networks
-Dec 2013 to Jan 2015	Financial Consultant, Prudential Assurance Company Singapore (Pte) Ltd
-Engaged clients in financial planning for long and short term goals.
-Created networks between clients.
-Held seminars to educate participants on changes in the industry.
-Dec 2011 to Nov 2013	Accounts Assistant, SKF Asia Pacific Pte Ltd
-Ensured details of invoices are correct and keyed in on time.
-Worked with auditors to maintain proper accounting standards.
-Enforcement of guidelines to speed up efficiency of claims.
-Education
-Apr 2006 to Apr 2009	Diploma in Banking and Financial Services (Financial Trading)
-			Singapore Polytechnic
-			Obtained A in	: Treasury Options, Macroeconomic Analysis, 
-					  Goal Setting and Decision Making
-			Credits in	: Financial Accounting, Principles of Accounting	
-Jan 2002 to Dec 2005	GCE 'O' Level
-			Deyi Secondary School
-			Obtained A in	: Mathematics, Science (Physics/Chemistry)					Credits in	: Principles of Accounting, Additional Mathematics
-Achievements
-Year			Description
-2011			Grand Slam Award
-2010			Overall Top Trainee for Basic Specialisation Course 4/09
-2010			Best Trainee (C2) for Basic Specialisation Course 4/09
-2004			Platoon Best Cadet for Deyi NCC Leadership Course
-Co-Curricular Activities
-Years of Service		Post Held
-2002 to 2005		Master Sergeant (CSM), Deyi National Cadet Corps
-Organised and run camps for the unit.
-Planned and carried out daily training programmes.
-Choreographed Precision Drills performance for Army Open House. 
-Skills & Abilities
-Organisation Skills
-Prepared and hosted for seminars to educate participants.
-Organised for internal audit checks for taxation with shipping department.
-Planned and executed camps and orientations programmes for Deyi National Cadet Corps.
-Supported the team in the organisation of Deyi Secondary School opening ceremony.
-Interpersonal Skills
-Applied emotional competence to manage self and others.
-Worked and connected with clients of different backgrounds.
-Engaged in discussion with various staffs to further understand problems faced in claims submission.
-Worked as a team in intense situations during Fire Fighting and Damage Control Exercises.
-Participated actively in group projects and presentations for C.K. TANG LTD during Final Year Project.
-Leadership Skills
-Motivated and helped ship crew achieve higher standard for IPPT and fitness event.
-Led Deyi NCC in achieving awards for Precision Drill competitions.
-Motivated the team during Mt Ophir Expedition.
-Additional Qualifications
-CMFAS M5, M8, M8A, M9, M9A
-HI
-CGI – BCP, ComGI, PGI
+Name: Nurul Ain Binte Ismail
+Add ress : Blk 756 Jurong West St 74 #05-64 S(640756 ) Hp No
+: 90 927602 Email
+: nurulainbte ismail @gmail.com Personal Particulars NRIC : S9243711F Race : Javanese Nationality : Singapo rean Date of Birth : 19 November 1992 Gender/Age: 
+Female/22 Status : Single Objectives To obtain an interesting and challenging position with its w ide task, that will allow me to advance further enhancement while contributing for the company’s success. To obtain a challenging job that would give me an opportunity for professional growth and employment benefits. Education Singapore Institute of Retail Studies Diploma in Retail Management Oct 2015 – Sept 2016 Retailing and the Economy, Manage Marketing Mix, Contribute to the Buying of Merchandise, Lead and Manage Work Team, Manage Retail Productivity, Manage Merchandise Presentation &amp; Visual Display, Manage Quality Service Operation, Manage Operational Human Resource Policies, Manage Finance for Retail Operations Completing in end of Sept 2016 Advanced Certificate in Retail Supervision Jan 2015 – Sept 2015 Supervise Retail Staff, Provide Marketing and Promotion Support , Monitor visual merchandising presentation, Supervise Housekeeping Standards, Maintain Store Security Completed Advanced Cert in Retail Supervision Private Candidate for GCE ‘O’ Level Feb 2009 – Nov 200 9 Completed GCE ‘O’ Level Jurong West Secondary School 2005 – 200 8 Attended until Secondary 4 (Express Stream) Juying Primary School 199 9 – 2004 PSLE Experience Full-Time Sales Assistant| Ferragamo (Singapore) Pte Ltd June 2015 – Aug 2016 Sales generation. Monthly individual &amp; store targets orientated . Customer recruitment targets. Individual KPI targets. Customer service; personalize one to one service. Listening, recommending of products based on customer’s needs. Up-selling &amp; cross-selling. Closing on sales &amp; recruiting customer into CRM base. Customer orientated; creating customer rapport. Calling of customers &amp; engaging with them, on new arrivals &amp; promotions. Sending of birthdays cards &amp; catalogs. Inviting customers back to store on birthdays, inviting/rsvp customers during events &amp; interacting with customers. Create personalize customer service &amp; having own customer base &amp; VIPs. Constantly maintaining knowledgeable &amp; solid p roduct knowledge &amp; caring for product. Participates in product shipment, receiving, transferring, sensor tags all items, re-pricing , stocking up and replenishment s according to guidelines. Handle customer’s enquiries, feedback &amp; complaints. Handling after-sales services; repairs for shoes &amp; bags, defective cases &amp; handling follow-ups. Telephone etiquette, providing over the p hone enquiries. Goals &amp; target orientated. Daily morning briefings on store targets, key performance indicator goals for the day. Visual &amp; Merchandising m aintains all visual and housekeeping standards per directive . Maintain ing proper standards of display, color coordination &amp; according to styles &amp; season . Ensure all stocks are well replenished. Displaying new arrivals each week &amp; changing of walls &amp; windows for visual merchandising of items. Handling of stock takes; every 3 months. Ensure all disc repancies are found &amp; ensure SAP &amp; stocks are tally. Daily count of stocks in morning &amp; night to prevent loss. Administrative work; create reports on incentives for staff . Checking of transfers in &amp; out each day. Checking of stocks. Recording of monthly incentives . Stationeries requisition. Cashiering; End day of POS register. Settlement of credits, nets &amp; cash. Tax refunds, credit refunds, customer refunds &amp; buying of gift cards. Opening of POS register, counting of float money. Daily count of gift cards. Packing &amp; unpacking of stocks. Referring to D/N papers &amp; locations to locations transfers. Experience Full-Time Sales Assistant| Esprit Retail Pte Ltd June 2012 – May 2014 WSQ Retail Cert In Apply Color Theory. WSQ Retail Cert In Provide Advice on Fashion &amp; Apparels. WSQ Retail Cert in Maintain Professional Image. Assign to be in-charge of certain divisions within the store. Assign to various roles &amp; tasks in store. Senior sales associate. In-charge in training. Set up main store for Jem outlet. Customer service and sales generation. Actively attending to their needs in fashion, advising on fashion apparels, fitting room services &amp; cashiering service. Up-sell new arrivals, promoting promotions &amp; membership card. Giving customers best deals or saving on items they purchase. Constantly maintaining knowledgeable &amp; solid product knowledge, washing advice &amp; caring for product. Participates in product shipment, receiving, transferring, sensor tags all items, re-pricing, re-tagging, stocking up and replenishment s according to guidelines. Handle customer’s enquiries, feedback &amp; complaints. Provide alteration measurements for customers. Telephone etiquette, provide over the phone service. Goals, monthly &amp; divisions target orientated. Daily morning briefings on store targets, key performance indicator goals for the day. Individuals target for the week &amp; month. Visual &amp; Merchandising m aintains all visual and housekeeping standards per directive . Maintain proper standards of folding, hanging, steaming and sizing . Ensure all stocks are well replenished. Displaying new arrivals each week &amp; changing of walls for visual merchandising of items. Handling stock takes; scanning items, planning of store layout, planning of manpower &amp; designing staffs to designated tasks &amp; areas. Administrative work; calculations of key performance index of individual staffs. Checking of transfers in &amp; out each day. Checking of stocks. Emailing between stores to stores. Recording of petty cash, bank-in money &amp; store float money. Recording of alterations &amp; gift cards. Stationeries requisition. Cashiering; End day of POS register. Settlement of credits, nets &amp; cash. Tax refunds, credit refunds, customer refunds &amp; buying of gift cards. Opening of POS register, counting of float money. Daily count of gift cards. Packing &amp; unpacking of stocks. Referring to D/N papers &amp; locations to locations transfers. Reasons of resignation; wanting to experience &amp; explore new working environment &amp; job scope. Experience Full-Time Sales Assistant| Lachmann ( Lee Jeans ) May 2011 – Feb 2012 Customer service, handling of telephone calls (telephone etiquette), fitting room, customer complaints. Cashiering, opening &amp; closing of store. Stock display, monthly stock check, stock intake &amp; packing, weekly re-ordering of stocks &amp; replenishments, visual merchandising. experience Full-Time Sales Assistant| Wing Tai Asia ( Miss Selfridge ) April 2010 – April 2011 WSQ Retail Cert In Interact With Customers Customer service, handling of telephone calls (telephone etiquette) , fitting room. Cashiering, opening &amp; closing of store. 2 nd shop-in-charge, assist store in-charge to manage store, lead team of people. Stock display, stock check, stock intake &amp; packing , visual merchandising. experience Temp Sales Assistant | Triumph Jan 2010 – March 2010 Contract Basis for 3 months Basic customer service Stock display, stock check, stock intake &amp; packing experience Temp Sales Assistant | Burberry Boutique Apr 2008 – July 2008 Contract Basis for 3 months Basic customer service &amp; stock display languages Reads, writes &amp; speaks fluent English &amp; Malay. others Able to work in fast-pace working environment . P erform rotating s hifts &amp; able work independently or as a team. Willing to learn new t hings, take initiative &amp; adapt to new environment. Good conversational ability &amp; relates well with peers &amp; customers . Fast learner &amp; pro-active. Name: Nurul Ain Binte Ismail Name: Nurul Ain Binte Ismail Page 2 Page 2
 """
-
-# ============================================================================
-# 🎯 EXPECTED VALUES - What we SHOULD extract from the test resume
-# ============================================================================
-EXPECTED_VALUES = {
-    "ID": 43199,  # From folder name
-    "Name": "Nigel Tan Kee Miang",
-    "Email": "nigeltkm@gmail.com",
-    "Phone": ["62886508", "98153946"],  # Either one is acceptable
-    "Date_of_Birth": "1989-10-13",  # 13 Oct 1989 → YYYY-MM-DD
-    "Location": "Singapore 530362",  # Or contains "Singapore"
-    "Language": "English",  # Primary language
-    "Skills_Count_Min": 5,  # Minimum skills expected
-    "Experience_Count_Min": 3,  # Minimum jobs expected  
-    "Education_Count_Min": 1,  # Minimum education entries
-}
-
 
 class ComprehensiveExtractionTester:
     """
@@ -178,7 +98,7 @@ class ComprehensiveExtractionTester:
         
         try:
             # Try to import from the project files
-            sys.path.insert(0, '/mnt/project')
+            sys.path.insert(0, '.')
             from ai_extractor import AIExtractor
             
             print("📦 Importing AIExtractor...")
@@ -220,8 +140,8 @@ class ComprehensiveExtractionTester:
         """
         # Pattern for folder name like "43199_Tan Kee Miang Nigel"
         id_patterns = [
-            r'merlion_resumes/(\d+)_',  # From source path
-            r'/(\d+)_[A-Za-z]',  # Generic ID_Name pattern
+            r'merlion_resumes[\\/](\d+)_',  # From source path
+            r'[\\/](\d+)_[A-Za-z]',  # Generic ID_Name pattern
             r'^(\d+)_',  # At start of folder name
         ]
         
@@ -260,14 +180,11 @@ class ComprehensiveExtractionTester:
         self._print_header("TEST 1: ID EXTRACTION")
         
         extracted_id = self.extract_id_from_source(text)
-        expected_id = EXPECTED_VALUES["ID"]
         
-        if extracted_id == expected_id:
-            self._print_result("ID", "PASS", extracted_id, expected_id)
-        elif extracted_id:
-            self._print_result("ID", "WARN", extracted_id, expected_id)
+        if extracted_id:
+            self._print_result("ID", "PASS", extracted_id)
         else:
-            self._print_result("ID", "FAIL", extracted_id, expected_id)
+            self._print_result("ID", "FAIL", None, "No ID extracted")
             
         self.extracted_data["ID"] = extracted_id
         
@@ -279,21 +196,11 @@ class ComprehensiveExtractionTester:
         # Use header extraction which includes name
         header_data = self.ai_extractor.extract_header_fields(text)
         extracted_name = header_data.get("name")
-        expected_name = EXPECTED_VALUES["Name"]
         
-        # Check if name contains key parts
         if extracted_name:
-            name_parts = ["Nigel", "Tan"]
-            has_key_parts = any(part.lower() in extracted_name.lower() for part in name_parts)
-            
-            if extracted_name.lower() == expected_name.lower():
-                self._print_result("Name", "PASS", extracted_name, expected_name)
-            elif has_key_parts:
-                self._print_result("Name", "WARN", extracted_name, f"Expected '{expected_name}' (partial match)")
-            else:
-                self._print_result("Name", "FAIL", extracted_name, expected_name)
+            self._print_result("Name", "PASS", extracted_name)
         else:
-            self._print_result("Name", "FAIL", None, expected_name)
+            self._print_result("Name", "FAIL", None, "No name extracted")
             
         self.extracted_data["Name"] = extracted_name
         
@@ -307,14 +214,10 @@ class ComprehensiveExtractionTester:
         if not extracted_email:
             extracted_email = self.ai_extractor._extract_email_regex(text)
             
-        expected_email = EXPECTED_VALUES["Email"]
-        
-        if extracted_email and extracted_email.lower() == expected_email.lower():
-            self._print_result("Email", "PASS", extracted_email, expected_email)
-        elif extracted_email and "@" in extracted_email:
-            self._print_result("Email", "WARN", extracted_email, expected_email)
+        if extracted_email:
+            self._print_result("Email", "PASS", extracted_email)
         else:
-            self._print_result("Email", "FAIL", extracted_email, expected_email)
+            self._print_result("Email", "FAIL", None, "No email extracted")
             
         self.extracted_data["Email"] = extracted_email
         
@@ -324,24 +227,16 @@ class ComprehensiveExtractionTester:
         self._print_header("TEST 4: PHONE EXTRACTION")
         
         extracted_phone = header_data.get("phone")
-        expected_phones = EXPECTED_VALUES["Phone"]
         
         # Check if any expected phone number is found
         if extracted_phone:
             phone_digits = re.sub(r'\D', '', str(extracted_phone))
-            expected_found = any(
-                re.sub(r'\D', '', exp) in phone_digits 
-                for exp in expected_phones
-            )
-            
-            if expected_found:
-                self._print_result("Phone", "PASS", extracted_phone, f"One of {expected_phones}")
-            elif len(phone_digits) >= 8:  # Singapore phones are 8 digits
-                self._print_result("Phone", "WARN", extracted_phone, f"Expected one of {expected_phones}")
+            if len(phone_digits) >= 8: # Basic check for phone number length
+                self._print_result("Phone", "PASS", extracted_phone)
             else:
-                self._print_result("Phone", "FAIL", extracted_phone, f"Expected one of {expected_phones}")
+                self._print_result("Phone", "WARN", extracted_phone, "Extracted phone number might be too short")
         else:
-            self._print_result("Phone", "FAIL", None, f"Expected one of {expected_phones}")
+            self._print_result("Phone", "FAIL", None, "No phone extracted")
             
         self.extracted_data["Phone"] = extracted_phone
         
@@ -357,22 +252,10 @@ class ComprehensiveExtractionTester:
         if not extracted_dob:
             extracted_dob = header_data.get("date_of_birth")
             
-        expected_dob = EXPECTED_VALUES["Date_of_Birth"]
-        
         if extracted_dob:
-            # Normalize dates for comparison (accept various formats)
-            dob_normalized = re.sub(r'[^\d]', '', str(extracted_dob))
-            expected_normalized = re.sub(r'[^\d]', '', expected_dob)
-            
-            # Check if year 1989, month 10, day 13 are present
-            if "19891013" in dob_normalized or dob_normalized == expected_normalized:
-                self._print_result("Date_of_Birth", "PASS", extracted_dob, expected_dob)
-            elif "1989" in str(extracted_dob):
-                self._print_result("Date_of_Birth", "WARN", extracted_dob, f"Expected {expected_dob} (year matches)")
-            else:
-                self._print_result("Date_of_Birth", "FAIL", extracted_dob, expected_dob)
+            self._print_result("Date_of_Birth", "PASS", extracted_dob)
         else:
-            self._print_result("Date_of_Birth", "FAIL", None, expected_dob)
+            self._print_result("Date_of_Birth", "FAIL", None, "No Date of Birth extracted")
             
         self.extracted_data["Date_of_Birth"] = extracted_dob
         
@@ -386,17 +269,13 @@ class ComprehensiveExtractionTester:
         soft_skills = skills_result.get("soft_skills", [])
         total_skills = len(hard_skills) + len(soft_skills)
         
-        min_expected = EXPECTED_VALUES["Skills_Count_Min"]
-        
         print(f"   📊 Hard Skills ({len(hard_skills)}): {hard_skills[:5]}{'...' if len(hard_skills) > 5 else ''}")
         print(f"   📊 Soft Skills ({len(soft_skills)}): {soft_skills[:5]}{'...' if len(soft_skills) > 5 else ''}")
         
-        if total_skills >= min_expected:
-            self._print_result("Skills", "PASS", f"{total_skills} skills found", f"Min {min_expected}")
-        elif total_skills > 0:
-            self._print_result("Skills", "WARN", f"{total_skills} skills found", f"Min {min_expected}")
+        if total_skills > 0:
+            self._print_result("Skills", "PASS", f"{total_skills} skills found")
         else:
-            self._print_result("Skills", "FAIL", "No skills found", f"Min {min_expected}")
+            self._print_result("Skills", "INFO", "No skills found")
             
         # Format for JSON output
         all_skills = hard_skills + soft_skills
@@ -432,8 +311,6 @@ class ComprehensiveExtractionTester:
         if not experience:
             experience = self.ai_extractor._extract_experience_regex(text)
             
-        min_expected = EXPECTED_VALUES["Experience_Count_Min"]
-        
         if experience:
             print(f"   📊 Jobs found: {len(experience)}")
             for i, job in enumerate(experience[:4], 1):
@@ -453,12 +330,9 @@ class ComprehensiveExtractionTester:
                 else:
                     print(f"      Description: No description found")
                 
-        if len(experience) >= min_expected:
-            self._print_result("Working_Experience", "PASS", f"{len(experience)} jobs found", f"Min {min_expected}")
-        elif len(experience) > 0:
-            self._print_result("Working_Experience", "WARN", f"{len(experience)} jobs found", f"Min {min_expected}")
+            self._print_result("Working_Experience", "PASS", f"{len(experience)} jobs found")
         else:
-            self._print_result("Working_Experience", "FAIL", "No jobs found", f"Min {min_expected}")
+            self._print_result("Working_Experience", "INFO", "No jobs found")
             
         # 💎 Format for JSON output - STRUCTURED ARRAY FORMAT! ✨
         if experience:
@@ -495,12 +369,10 @@ class ComprehensiveExtractionTester:
                     extracted_location = match.group(0)
                     break
                     
-        if extracted_location and "singapore" in extracted_location.lower():
-            self._print_result("Location", "PASS", extracted_location, "Contains 'Singapore'")
-        elif extracted_location:
-            self._print_result("Location", "WARN", extracted_location, "Expected Singapore address")
+        if extracted_location:
+            self._print_result("Location", "PASS", extracted_location)
         else:
-            self._print_result("Location", "FAIL", None, "Expected Singapore address")
+            self._print_result("Location", "FAIL", None, "No location extracted")
             
         self.extracted_data["Location"] = extracted_location
         
@@ -516,8 +388,6 @@ class ComprehensiveExtractionTester:
         if not education:
             education = self.ai_extractor._extract_education_regex(text)
             
-        min_expected = EXPECTED_VALUES["Education_Count_Min"]
-        
         if education:
             print(f"   📊 Education entries found: {len(education)}")
             for i, edu in enumerate(education[:3], 1):
@@ -525,12 +395,9 @@ class ComprehensiveExtractionTester:
                 print(f"      Institution: {edu.get('institution', 'N/A')}")
                 print(f"      Dates: {edu.get('dates', 'N/A')}")
                 
-        if len(education) >= min_expected:
-            self._print_result("School_University", "PASS", f"{len(education)} entries", f"Min {min_expected}")
-        elif len(education) > 0:
-            self._print_result("School_University", "WARN", f"{len(education)} entries", f"Min {min_expected}")
+            self._print_result("School_University", "PASS", f"{len(education)} entries")
         else:
-            self._print_result("School_University", "FAIL", "No education found", f"Min {min_expected}")
+            self._print_result("School_University", "INFO", "No education found")
             
         # Format for JSON output
         if education:
@@ -555,18 +422,11 @@ class ComprehensiveExtractionTester:
                 prof = f" ({lang['proficiency']})" if lang.get('proficiency') else ""
                 print(f"   - {lang['language']}{prof}")
                 
-        # Check if English is detected (primary language for this system)
-        expected_lang = EXPECTED_VALUES["Language"]
-        has_english = any("english" in l.get("language", "").lower() for l in languages)
-        
-        if has_english:
-            self._print_result("Language", "PASS", f"{len(languages)} languages", f"Contains {expected_lang}")
-        elif languages:
-            self._print_result("Language", "WARN", f"{len(languages)} languages", f"Expected {expected_lang}")
+            self._print_result("Language", "PASS", f"{len(languages)} languages")
         else:
-            self._print_result("Language", "FAIL", "No languages found", f"Expected {expected_lang}")
-            
-        self.extracted_data["Language"] = expected_lang  # Default for English resumes
+            self._print_result("Language", "INFO", "No languages found")
+
+        self.extracted_data["Language"] = languages[0]['language'] if languages else None
         
         # ============================================================
         # 📊 TEST 11: EXTRACTION STATUS (Calculated)

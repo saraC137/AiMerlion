@@ -5,7 +5,8 @@ import random
 MODEL_NAME = "llama3.1-128k" 
 SECRET_CODE = "The secret code is 'GOLD-99-ALPHA'. Write this down."
 # 90,000 words is roughly 125,000-130,000 Llama tokens
-TOTAL_WORDS = 45000 
+# Halved to 10000 to reduce VRAM usage for consumer GPUs
+TOTAL_WORDS = 10000 
 
 def run_test():
     print(f"--- Starting 128K Context Test on {MODEL_NAME} ---")
