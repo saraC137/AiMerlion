@@ -85,3 +85,7 @@ TESSERACT_CONFIG = "--oem 3 --psm 6"  # OEM 3 = default, PSM 6 = uniform block o
 
 # --- Supported File Extensions ---
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".doc"}
+
+# --- Database Settings ---
+DATABASE_FILE = "resume_extractions.db"       # SQLite database file path
+DATABASE_ENABLED = True                        # Toggle DB storage on/off

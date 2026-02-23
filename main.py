@@ -42,6 +42,9 @@ import unicodedata
 import json
 import config
 from utils import display_menu, save_checkpoint, load_checkpoint, get_checkpoint_info, clear_checkpoint, print_batch_table, FeedbackLoopSystem, InteractiveCorrectionSystem, PatternLearningSystem, PerformanceMonitor, standardize_phone_number, standardize_date
+# 🗄️ Database Manager for raw + structured storage
+if config.DATABASE_ENABLED:
+    from db_manager import DatabaseManager
 from ai_validator import AIValidator
 from marker_extractor import get_marker_extractor
 from document_parser import DocumentParser
@@ -628,7 +631,33 @@ class UltimateResumeExtractor:
     def _format_phone_international(self, raw: str, phone_type: str, digits: str) -> str:
         """📱 Format phone number based on detected country"""
         # Remove label prefix if present
-        cleaned = re.sub(r'^(?:phone|tel|mobile|cell|contact|hp|h/p|handphone|no\.?\s*(?:tel|hp))[\s.:]*', '', raw, flags=re.IGNORECASE).strip()
+        # 🧹 Remove ALL label prefix variations - comprehensive cleanup!
+        # This prevents "HP: 91234567" from being returned as "HP: 91234567"
+        cleaned = re.sub(
+            r'^(?:'
+            r'phone\s*(?:no|number|num)?\.?|'
+            r'tel(?:ephone)?\.?|'
+            r'mobile\s*(?:no|number|phone)?\.?|'
+            r'cell(?:\s*phone)?\.?|'
+            r'contact\s*(?:no|number)?\.?|'
+            r'h/?p\s*(?:no)?\.?|'
+            r'hand\s*phone\.?|'
+            r'no\.?\s*(?:tel|hp|phone|mobile)|'
+            r'portable\.?|'
+            r'whatsapp\.?'
+            r')[\s.:)\-]*',
+            '', raw, flags=re.IGNORECASE
+        ).strip()
+        
+        # 🛡️ Safety check: if cleanup failed and result still has letters,
+        # fall back to extracting just the digits
+        if cleaned and re.search(r'[a-zA-Z]{3,}', cleaned):
+            # Still has words — extract phone-like digits only
+            digit_match = re.search(r'[\+]?[\d][\d\s\-\.\(\)]{6,18}[\d]', cleaned)
+            if digit_match:
+                cleaned = digit_match.group(0).strip()
+            else:
+                cleaned = re.sub(r'[^\d+\-\s()]', '', cleaned).strip()
         
         # Singapore
         if phone_type.startswith('SG'):
@@ -692,32 +721,72 @@ class UltimateResumeExtractor:
         
         # DOB patterns for English resumes
         dob_patterns = [
-            # With label: DOB: 01/15/1990
-            (r'(?:DOB|D\.O\.B\.|Date of Birth|Birth Date|Born)[\s:]*(\d{1,2})[/-](\d{1,2})[/-](\d{4})', 'mdy_labeled'),
-            # With label: DOB: 1990-01-15
-            (r'(?:DOB|D\.O\.B\.|Date of Birth|Birth Date|Born)[\s:]*(\d{4})[/-](\d{1,2})[/-](\d{1,2})', 'ymd_labeled'),
-            # Written: January 15, 1990
-            (r'\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(\d{4})\b', 'written'),
-            # ISO format: 1990-01-15
+            # ========== LABELED PATTERNS (highest priority!) ==========
+            # "DOB: 01/15/1990" or "Date of Birth: 15-03-1990"
+            (r'(?:DOB|D\.O\.B\.?|Date\s*of\s*Birth|Birth\s*Date|Born|Birthday)[\s:]*(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})', 'mdy_labeled'),
+            # "DOB: 1990-01-15"
+            (r'(?:DOB|D\.O\.B\.?|Date\s*of\s*Birth|Birth\s*Date|Born|Birthday)[\s:]*(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})', 'ymd_labeled'),
+            # "DOB: 15 March 1990" or "Born: 15 Jun 1990"
+            (r'(?:DOB|D\.O\.B\.?|Date\s*of\s*Birth|Birth\s*Date|Born|Birthday)[\s:]*(\d{1,2})(?:st|nd|rd|th)?\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{4})', 'dmy_written_labeled'),
+            # "DOB: March 15, 1990"
+            (r'(?:DOB|D\.O\.B\.?|Date\s*of\s*Birth|Birth\s*Date|Born|Birthday)[\s:]*(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})', 'mdy_written_labeled'),
+
+            # ========== UNLABELED PATTERNS (search contact area only) ==========
+            # "15 March 1990" or "15th Jun 1990" (DD Month YYYY — very common in SG!)
+            (r'\b(\d{1,2})(?:st|nd|rd|th)?\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{4})\b', 'dmy_written'),
+            # "January 15, 1990" (Month DD, YYYY)
+            (r'\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\b', 'mdy_written'),
+            # "1990-01-15" (ISO format)
             (r'\b(\d{4})-(\d{1,2})-(\d{1,2})\b', 'ymd'),
-            # US format: 01/15/1990
-            (r'\b(\d{1,2})/(\d{1,2})/(\d{4})\b', 'mdy'),
+            # "01/15/1990" or "15.03.1990" (with dots!)
+            (r'\b(\d{1,2})[/.](\d{1,2})[/.](\d{4})\b', 'mdy'),
         ]
         
         for pattern, date_format in dob_patterns:
             matches = re.finditer(pattern, search_text, re.IGNORECASE)
             for match in matches:
                 try:
-                    if date_format == 'written':
-                        month_name, day, year = match.groups()
-                        month = datetime.datetime.strptime(month_name, '%B').month
-                        year, day = int(year), int(day)
-                    
+                    # 📅 Map month abbreviations to numbers
+                    month_map = {
+                        'jan': 1, 'january': 1, 'feb': 2, 'february': 2,
+                        'mar': 3, 'march': 3, 'apr': 4, 'april': 4,
+                        'may': 5, 'jun': 6, 'june': 6, 'jul': 7, 'july': 7,
+                        'aug': 8, 'august': 8, 'sep': 9, 'sept': 9, 'september': 9,
+                        'oct': 10, 'october': 10, 'nov': 11, 'november': 11,
+                        'dec': 12, 'december': 12,
+                    }
+
+                    if date_format in ['dmy_written', 'dmy_written_labeled']:
+                        # (day, month_name, year)
+                        day_str, month_name, year_str = match.groups()
+                        day = int(day_str)
+                        month = month_map.get(month_name.lower().rstrip('.'), 0)
+                        year = int(year_str)
+
+                    elif date_format in ['mdy_written', 'mdy_written_labeled', 'written']:
+                        # (month_name, day, year)
+                        month_name, day_str, year_str = match.groups()
+                        month = month_map.get(month_name.lower().rstrip('.'), 0)
+                        day = int(day_str)
+                        year = int(year_str)
+
                     elif date_format in ['mdy_labeled', 'mdy']:
-                        month, day, year = map(int, match.groups())
-                    
+                        g1, g2, g3 = map(int, match.groups())
+                        # 🧠 Smart DD/MM vs MM/DD detection for SG resumes
+                        # If first number > 12, it MUST be the day (DD/MM/YYYY)
+                        if g1 > 12:
+                            day, month, year = g1, g2, g3
+                        elif g2 > 12:
+                            month, day, year = g1, g2, g3
+                        else:
+                            # Ambiguous — default to DD/MM/YYYY (SG/UK convention)
+                            day, month, year = g1, g2, g3
+
                     elif date_format in ['ymd_labeled', 'ymd']:
                         year, month, day = map(int, match.groups())
+                    
+                    else:
+                        continue
                     
                     # Validate year range
                     if min_birth_year <= year <= max_birth_year:
@@ -735,24 +804,38 @@ class UltimateResumeExtractor:
     def _find_contact_area(self, text: str) -> Optional[str]:
         """
         🔍 Find the contact information section
+        Expanded search radius for SG-style resumes with separated sections!
         """
-        # Look for email as anchor
+        # 🎯 Strategy 1: Look for explicit DOB/personal details labels
+        # These are often in a separate "Personal Particulars" section in SG resumes
+        personal_match = re.search(
+            r'(?:PERSONAL\s+(?:PARTICULARS|DETAILS|INFORMATION|DATA)|BIODATA|BIO\s*DATA)',
+            text, re.IGNORECASE
+        )
+        if personal_match:
+            pos = personal_match.start()
+            # Personal details section — grab a generous chunk after it
+            return text[pos:min(len(text), pos + 1500)]
+
+        # 🎯 Strategy 2: Look for email as anchor (expanded radius!)
         email_match = re.search(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text)
         if email_match:
             pos = email_match.start()
-            start = max(0, pos - 500)
-            end = min(len(text), pos + 500)
+            start = max(0, pos - 800)
+            end = min(len(text), pos + 800)
             return text[start:end]
-        
-        # Look for phone as anchor
-        phone_match = re.search(r'\b\d{3}[-\.\s]\d{3}[-\.\s]\d{4}\b', text)
+
+        # 🎯 Strategy 3: Look for phone as anchor
+        phone_match = re.search(r'[\+]?\d[\d\s\-\.]{6,15}\d', text)
         if phone_match:
             pos = phone_match.start()
-            start = max(0, pos - 500)
-            end = min(len(text), pos + 500)
+            start = max(0, pos - 800)
+            end = min(len(text), pos + 800)
             return text[start:end]
-        
-        return None
+
+        # 🎯 Strategy 4: Just use the first 3000 chars as fallback
+        # Most resumes put contact info at the top anyway
+        return text[:3000] if len(text) > 3000 else text
 
     def _extract_phone(self, text: str, email: Optional[str]) -> Optional[str]:
         """
@@ -1074,7 +1157,13 @@ class UltimateResumeExtractor:
             'qualifications', 'achievements', 'certifications', 'projects',
             'engineer', 'developer', 'manager', 'designer', 'analyst',
             'coordinator', 'specialist', 'consultant', 'director', 'senior',
-            'junior', 'lead', 'head', 'chief', 'vice', 'assistant'
+            'junior', 'lead', 'head', 'chief', 'vice', 'assistant',
+            # Resume labels & section headers
+            'email', 'address', 'phone', 'mobile', 'tel', 'details',
+            'particulars', 'information', 'data', 'career', 'goal',
+            'objectives', 'key', 'attributes', 'competencies', 'languages',
+            'language', 'written', 'spoken', 'salary', 'expectation',
+            'availability', 'commencement', 'immediate', 'singapore',
         }
         
         # Strategy 1: Look for explicit name headers
@@ -1156,7 +1245,55 @@ class UltimateResumeExtractor:
         # Should not be all caps (unless 2-3 letters)
         if name.isupper() and len(name) > 5:
             return False
-        
+
+        return True
+
+    def _is_valid_extracted_name(self, name: str, email: str = None) -> bool:
+        """
+        Validate a name AFTER extraction to catch garbage like email usernames,
+        email aliases, resume labels, etc.
+        Returns False if the name is clearly not a real person name.
+        """
+        if not name or len(name.strip()) < 2:
+            return False
+
+        name = name.strip()
+
+        # Contains digits → likely email username like "Sanker22"
+        if re.search(r'\d', name):
+            return False
+
+        # Single word → likely username or label, not a full name
+        if len(name.split()) < 2:
+            return False
+
+        # Contains @ or looks like email
+        if '@' in name or '.com' in name.lower():
+            return False
+
+        # Common resume labels that AI might return as names
+        label_words = {
+            'email', 'address', 'phone', 'mobile', 'tel', 'personal',
+            'details', 'particulars', 'data', 'contact', 'information',
+            'objective', 'career', 'goal', 'summary', 'profile',
+            'curriculum', 'vitae', 'resume', 'nil', 'n/a', 'none',
+            'not', 'available', 'confidential', 'private',
+        }
+        name_words_lower = {w.lower() for w in name.split()}
+        if name_words_lower & label_words:
+            return False
+
+        # Check if name was derived from email address
+        # e.g., "Bee Happy" from "bee.happy.house@gmail.com"
+        if email:
+            email_local = email.split('@')[0].lower() if '@' in email else ''
+            if email_local:
+                # Split email local part by common separators
+                email_parts = set(re.split(r'[._\-+]', email_local))
+                # If ALL name words appear in email local part, name is from email
+                if name_words_lower and name_words_lower.issubset(email_parts):
+                    return False
+
         return True
 
     def _is_definitely_a_name(self, text: str, not_names: set) -> bool:
@@ -1541,9 +1678,8 @@ class UltimateResumeExtractor:
                 content = re.sub(r'\s+', ' ', content)  # Normalize whitespace
                 content = re.sub(r'[•●○▪■►]', '|', content)  # Replace bullets with |
 
-                # Limit to reasonable length for CSV
                 if len(content) > 50:
-                    return content[:2000] if len(content) > 2000 else content
+                    return content
 
         return None
 
@@ -1595,7 +1731,24 @@ class UltimateResumeExtractor:
                     company = job.get('company', 'Unknown')
                     role = job.get('role', 'N/A')
                     dates = job.get('dates', 'N/A')
-                    job_summaries.append(f"{company} - {role} ({dates})")
+                    description = job.get('description', '').strip()
+
+                    # 💅 Build the job entry with description included!
+                    # Skip placeholder descriptions that add no value
+                    skip_descriptions = {
+                        '', 'description not available', 'n/a', 'none',
+                        'see description', 'no description'
+                    }
+
+                    if description and description.lower() not in skip_descriptions:
+                        # Include the full job description after the header
+                        job_summaries.append(
+                            f"{company} - {role} ({dates}): {description}"
+                        )
+                    else:
+                        # No valid description — just header info
+                        job_summaries.append(f"{company} - {role} ({dates})")
+
             if job_summaries:
                 return " || ".join(job_summaries)
 
@@ -1627,7 +1780,14 @@ class UltimateResumeExtractor:
                     institution = edu.get('institution', 'Unknown')
                     degree = edu.get('degree', 'N/A')
                     dates = edu.get('dates', 'N/A')
-                    edu_summaries.append(f"{degree} from {institution} ({dates})")
+                    description = edu.get('description', '').strip()
+
+                    if description and description.lower() not in {'', 'n/a', 'none'}:
+                        edu_summaries.append(
+                            f"{degree} from {institution} ({dates}): {description}"
+                        )
+                    else:
+                        edu_summaries.append(f"{degree} from {institution} ({dates})")
             if edu_summaries:
                 return " || ".join(edu_summaries)
 
@@ -1643,38 +1803,34 @@ class UltimateResumeExtractor:
 
     def _extract_name_from_folder(self, folder_path: str) -> Optional[str]:
         """
-        💡 Extract name from folder name like "108_Mr ATWAL Prateek"
+        Extract name from folder name like "43228_Suhana Binte Salim" or "108_Mr ATWAL Prateek"
         """
         folder_name = os.path.basename(folder_path)
-        
-        # Pattern for folders like "108_Mr ATWAL Prateek" or "109_LEE Edna"
-        patterns = [
-            r'^\d+_(?:Mr|Ms|Mrs|Dr)?\s*([A-Z][A-Z]+)\s+([A-Za-z]+)',  # 108_Mr ATWAL Prateek
-            r'^\d+_([A-Z][A-Z]+)\s+([A-Za-z]+)',  # 109_LEE Edna
-            r'^\d+_([A-Za-z]+)\s+([A-Za-z]+)',  # For mixed case
-        ]
-        
-        for pattern in patterns:
-            match = re.match(pattern, folder_name)
-            if match:
-                # Typically Japanese style: LAST FIRST
-                last_name = match.group(1)
-                first_name = match.group(2) if match.lastindex >= 2 else ""
-                
-                # Format the name properly
-                full_name = f"{first_name} {last_name}".strip()
-                if full_name:
-                    logger.info(f"📛 Extracted name from folder: {full_name}")
-                    return full_name
-        
-        # Fallback: just remove the ID and clean up
-        name_part = re.sub(r'^\d+_', '', folder_name)
-        name_part = re.sub(r'(Mr|Ms|Mrs|Dr)\s+', '', name_part)
-        name_part = re.sub(r'別名.*', '', name_part).strip()
-        
+
+        # Remove the numeric ID prefix (e.g., "43228_")
+        name_part = re.sub(r'^\d+_', '', folder_name).strip()
+
+        if not name_part or len(name_part) < 2:
+            return None
+
+        # Remove titles
+        name_part = re.sub(r'^(?:Mr|Ms|Mrs|Dr|Prof)\.?\s+', '', name_part, flags=re.IGNORECASE).strip()
+
+        # Remove D/O, S/O markers (common in Singapore)
+        # But keep them as part of name for now — they're cultural identifiers
+
+        # Filter out non-name words that sometimes appear in folder names
+        skip_words = {'temp', 'school', 'admin', 'ok', 'raw', 'kiv', 'sent'}
+        cleaned_words = []
+        for word in name_part.split():
+            if word.lower().strip('()') not in skip_words:
+                cleaned_words.append(word)
+        name_part = ' '.join(cleaned_words).strip()
+
         if name_part and len(name_part) > 2:
+            logger.info(f"📛 Extracted name from folder: {name_part}")
             return name_part
-        
+
         return None
 
     def process_candidate_folder(self, folder_path: str) -> Dict:
@@ -1699,6 +1855,7 @@ class UltimateResumeExtractor:
             return {}
         
         # Initialize result
+        # ✨ FIXED: Initialize result with ALL fields (including previously missing ones!)
         result = {
             "ID": None,
             "Name": None,
@@ -1709,7 +1866,17 @@ class UltimateResumeExtractor:
             "Working_Experience": None,
             "Location": None,
             "School_University": None,
-            "Language": "English",  # ✨ Always English now!
+            
+            # 🆕 NEW FIELDS - Previously extracted but not saved!
+            "Summary": None,
+            "Certifications": None,
+            "Languages": None,
+            "Projects": None,
+            "Achievements": None,
+            "References": None,
+            "Hobbies": None,
+            
+            "Language": "English",  # Resume language
             "Extraction_Status": "Failed",
             "Notes": "",
             "AI_Assisted": False,
@@ -1741,16 +1908,95 @@ class UltimateResumeExtractor:
             logger.info(f"   Skills: {extracted_data.get('Skills', 'NOT FOUND')[:100] if extracted_data.get('Skills') else 'NOT FOUND'}...")
             logger.info(f"   Experience: {extracted_data.get('Working_Experience', 'NOT FOUND')[:100] if extracted_data.get('Working_Experience') else 'NOT FOUND'}...")
             
+            # 🆕 NEW: Debug for additional fields
+            logger.info(f"   Summary: {extracted_data.get('Summary', 'NOT FOUND')[:100] if extracted_data.get('Summary') else 'NOT FOUND'}...")
+            logger.info(f"   Certifications: {extracted_data.get('Certifications', 'NOT FOUND')}")
+            logger.info(f"   Projects: {extracted_data.get('Projects', 'NOT FOUND')}")
+            
             if ai_used:
                 result["AI_Assisted"] = True
             
 
-            # Update result - now with PROPER field mapping!
-            for field in ["Name", "Email", "Phone", "Date_of_Birth", "Skills",
-                        "Working_Experience", "Location", "School_University"]:
+            # ✨ FIXED: Update result with ALL fields (including new ones!)
+            # Basic contact fields
+            for field in ["Name", "Email", "Phone", "Date_of_Birth", "Location"]:
                 if extracted_data.get(field):
                     result[field] = extracted_data[field]
                     logger.debug(f"✅ Updated {field}: {str(extracted_data[field])[:100]}...")
+
+            # Validate extracted name — catch garbage like email usernames or labels
+            extracted_email = result.get("Email", "")
+            if result.get("Name") and not self._is_valid_extracted_name(result["Name"], extracted_email):
+                logger.warning(f"⚠️ Extracted name looks invalid: '{result['Name']}' — trying fallbacks")
+                result["Name"] = None
+
+            # Fallback chain for missing/invalid name
+            if not result.get("Name"):
+                # Try folder name first
+                folder_name_candidate = self._extract_name_from_folder(folder_path)
+
+                # If folder name is multi-word (2+), use it directly
+                if folder_name_candidate and len(folder_name_candidate.split()) >= 2:
+                    result["Name"] = folder_name_candidate
+                    logger.info(f"📛 Name from folder: {folder_name_candidate}")
+                else:
+                    # Folder name is single-word or unavailable — try filenames
+                    for file_path in resume_files:
+                        fn_candidate = self._extract_name_from_filename(os.path.basename(file_path))
+                        if fn_candidate and self._is_valid_extracted_name(fn_candidate):
+                            result["Name"] = fn_candidate
+                            logger.info(f"📛 Name from filename: {fn_candidate}")
+                            break
+
+                    # If filename didn't work either, use the single-word folder name
+                    if not result.get("Name") and folder_name_candidate:
+                        result["Name"] = folder_name_candidate
+                        logger.info(f"📛 Name from folder (partial): {folder_name_candidate}")
+            
+            # 🆕 NEW: Update skills (already formatted as string)
+            if extracted_data.get('Skills'):
+                result['Skills'] = extracted_data['Skills']
+                logger.debug(f"✅ Updated Skills: {str(extracted_data['Skills'])[:100]}...")
+            
+            # 🆕 NEW: Update experience (already formatted as string)
+            if extracted_data.get('Working_Experience'):
+                result['Working_Experience'] = extracted_data['Working_Experience']
+                logger.debug(f"✅ Updated Working_Experience: {str(extracted_data['Working_Experience'])[:100]}...")
+            
+            # 🆕 NEW: Update education (already formatted as string)
+            if extracted_data.get('School_University'):
+                result['School_University'] = extracted_data['School_University']
+                logger.debug(f"✅ Updated School_University: {str(extracted_data['School_University'])[:100]}...")
+            
+            # 🆕 NEW: Update additional text fields
+            if extracted_data.get('Summary'):
+                result['Summary'] = extracted_data['Summary']
+                logger.debug(f"✅ Updated Summary: {str(extracted_data['Summary'])[:100]}...")
+            
+            # 🆕 NEW: Update list fields (convert to readable format)
+            if extracted_data.get('Certifications'):
+                result['Certifications'] = self._format_list_field(extracted_data['Certifications'])
+                logger.debug(f"✅ Updated Certifications: {result['Certifications']}")
+            
+            if extracted_data.get('Languages'):
+                result['Languages'] = self._format_list_field(extracted_data['Languages'])
+                logger.debug(f"✅ Updated Languages: {result['Languages']}")
+            
+            if extracted_data.get('Projects'):
+                result['Projects'] = self._format_list_field(extracted_data['Projects'])
+                logger.debug(f"✅ Updated Projects: {result['Projects']}")
+            
+            if extracted_data.get('Achievements'):
+                result['Achievements'] = self._format_list_field(extracted_data['Achievements'])
+                logger.debug(f"✅ Updated Achievements: {result['Achievements']}")
+            
+            if extracted_data.get('References'):
+                result['References'] = self._format_list_field(extracted_data['References'])
+                logger.debug(f"✅ Updated References: {result['References']}")
+            
+            if extracted_data.get('Hobbies'):
+                result['Hobbies'] = self._format_list_field(extracted_data['Hobbies'])
+                logger.debug(f"✅ Updated Hobbies: {result['Hobbies']}")
 
             # Set status after ALL fields are updated
             self._set_extraction_status(result, combined_text)
@@ -1763,9 +2009,49 @@ class UltimateResumeExtractor:
             result["Notes"] += "⚠️ Text extraction failed or returned minimal content. "
             result["Extraction_Status"] = "Failed"
             return result
+    
+    def _format_list_field(self, field_data) -> Optional[str]:
+        """
+        🆕 NEW: Format list fields for CSV export
+        Handles both lists and strings intelligently
+        """
+        if not field_data:
+            return None
+        
+        # If already a string, return it
+        if isinstance(field_data, str):
+            return field_data
+        
+        # If it's a list
+        if isinstance(field_data, list):
+            # If list is empty, return None
+            if not field_data:
+                return None
+            
+            # If list contains dictionaries (structured data)
+            if field_data and isinstance(field_data[0], dict):
+                formatted_items = []
+                for item in field_data:
+                    # Extract key fields from dict
+                    parts = []
+                    for key in ['name', 'title', 'description', 'institution', 'organization', 'date', 'dates']:
+                        if key in item and item[key]:
+                            parts.append(str(item[key]))
+                    if parts:
+                        formatted_items.append(" - ".join(parts))
+                return " | ".join(formatted_items) if formatted_items else None
+            
+            # If list contains simple strings
+            else:
+                return " | ".join([str(item) for item in field_data if item])
+        
+        # Fallback: convert to string
+        return str(field_data)
 
     def _extract_name_from_filename(self, file_name: str) -> Optional[str]:
         filename_without_ext = os.path.splitext(file_name)[0]
+
+        # Standard space-separated patterns
         filename_patterns = [
             r'^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})(?:[\s*-_])',
             r'^(?:CV[-_])?([A-Z][a-z]+\s+[A-Z]+)(?:\s+\d|$)',
@@ -1780,6 +2066,34 @@ class UltimateResumeExtractor:
                 potential_name = ' '.join(words)
                 if self._is_valid_name_strict(potential_name):
                     return potential_name
+
+        # Underscore-separated format: "Yen_Beng_Lim_Singapore_12.00_yrs"
+        # Extract consecutive capitalized word parts from underscored filename
+        parts = filename_without_ext.split('_')
+        name_parts = []
+        for part in parts:
+            # Stop at non-name parts (country names, numbers, common suffixes)
+            if re.match(r'^\d', part) or part.lower() in {
+                'singapore', 'malaysia', 'india', 'china', 'philippines',
+                'yrs', 'years', 'resume', 'cv', 'raw', 'ok', 'temp',
+                'sent', 'kiv', 'school', 'admin',
+            }:
+                break
+            if part and part[0].isupper() and len(part) >= 2:
+                name_parts.append(part)
+        if len(name_parts) >= 2:
+            potential_name = ' '.join(name_parts)
+            if self._is_valid_name_strict(potential_name):
+                return potential_name
+
+        # "Sent - DATE - Name - Title" format
+        # e.g., "Sent - 070916 - Shivasanker S - Ex-Jurong Ports..."
+        sent_match = re.match(r'^Sent\s*-\s*\d+\s*-\s*([^-]+)', filename_without_ext)
+        if sent_match:
+            potential_name = sent_match.group(1).strip()
+            if potential_name and self._is_valid_name_strict(potential_name):
+                return potential_name
+
         return None
 
     def _set_extraction_status(self, result: Dict, text: str):
@@ -1879,13 +2193,18 @@ class UltimateResumeExtractor:
         return is_asc or is_desc
 
     def _extract_from_table_format(self, text: str) -> Dict[str, Optional[str]]:
+        """
+        📊 Extract data from table/structured resume formats.
+        Optimized for Singapore English resumes! 🇸🇬
+        """
         logger.debug("📊 Attempting table format extraction!")
         data = {}
+        # 🇸🇬 Singapore English patterns only
         patterns = {
-            'name': r'(?:Name|名前|氏名)[\s|│:]\s*([^|│\n]+)',
-            'email': r'(?:Email|メール|电子邮件)[\s|│:]\s*([^|│\n]+)',
-            'phone': r'(?:Phone|電話|Tel|Mobile)[\s|│:]\s*([^|│\n]+)',
-            'date_of_birth': r'(?:DOB|生年月日|Date of Birth)[\s|│:]\s*([^|│\n]+)',
+            'name': r'(?:Name|Full\s*Name|Candidate\s*Name)[\s|│:]\s*([^|│\n]+)',
+            'email': r'(?:Email|E-mail|Email\s*Address)[\s|│:]\s*([^|│\n]+)',
+            'phone': r'(?:Phone|Tel|Mobile|HP|H/P|Handphone|Hand\s*Phone|Contact\s*(?:No|Number)?)[\s|│:]\s*([^|│\n]+)',
+            'date_of_birth': r'(?:DOB|D\.O\.B|Date\s*of\s*Birth|Birth\s*Date|Birthday)[\s|│:]\s*([^|│\n]+)',
         }
         for key, pattern in patterns.items():
             match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
@@ -1893,6 +2212,22 @@ class UltimateResumeExtractor:
                 value = match.group(1).strip()
                 if key == 'email':
                     data[key] = value.lower()
+                elif key == 'phone':
+                    # 🛡️ VALIDATE: Phone must contain at least 7 digits!
+                    # Prevents capturing "NIL", "Available upon request", etc.
+                    digits = re.sub(r'\D', '', value)
+                    if len(digits) >= 7 and len(digits) <= 15:
+                        data[key] = value
+                    else:
+                        logger.debug(f"⚠️ Table phone rejected (not enough digits): '{value}'")
+                elif key == 'date_of_birth':
+                    # 🛡️ VALIDATE: DOB must contain digits that look like a date
+                    if re.search(r'\d{1,2}[/\-.\s]\d{1,2}[/\-.\s]\d{2,4}', value) or \
+                       re.search(r'(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)', value, re.IGNORECASE) or \
+                       re.search(r'\d{4}[/\-]\d{1,2}[/\-]\d{1,2}', value):
+                        data[key] = value
+                    else:
+                        logger.debug(f"⚠️ Table DOB rejected (not a date): '{value}'")
                 else:
                     data[key] = value
         return data
@@ -2054,6 +2389,14 @@ def process_resumes(extractor, folder_list, processed_folders, batch_size, exist
     start_time = time.time()
     interrupted = False
 
+    # 🗄️ Initialize database manager
+    db_manager = None
+    if config.DATABASE_ENABLED:
+        try:
+            db_manager = DatabaseManager(config.DATABASE_FILE)
+        except Exception as e:
+            logger.warning(f"⚠️ Database init failed (continuing without DB): {e}")
+
     performance_monitor = PerformanceMonitor(FeedbackLoopSystem())
 
     # Process each candidate folder
@@ -2066,11 +2409,33 @@ def process_resumes(extractor, folder_list, processed_folders, batch_size, exist
                 pbar.update(1)
                 continue
 
+
             # Process this candidate's folder
             result = extractor.process_candidate_folder(candidate_folder_path)
             if result and result.get("ID"):  # Only add if we got a valid result with ID
                 results.append(result)
                 total_processed_resumes += 1
+
+                # 🗄️ NEW: Save to database alongside CSV/JSON!
+                if config.DATABASE_ENABLED and db_manager:
+                    try:
+                        # Get raw text for DB storage (re-extract from files)
+                        raw_text = ""
+                        for fname in os.listdir(candidate_folder_path):
+                            if fname.lower().endswith(('.pdf', '.docx')) and not fname.startswith('~$'):
+                                file_text = extractor.get_text_from_file(
+                                    os.path.join(candidate_folder_path, fname)
+                                )
+                                if file_text:
+                                    raw_text += file_text + "\n\n"
+
+                        db_manager.save_extraction(
+                            result=result,
+                            raw_text=raw_text,
+                            folder_path=candidate_folder_path
+                        )
+                    except Exception as e:
+                        logger.warning(f"⚠️ DB save failed (non-fatal): {e}")
 
             processed_folders.append(candidate_folder_path)
             # Save checkpoint with results included
@@ -2113,6 +2478,11 @@ def process_resumes(extractor, folder_list, processed_folders, batch_size, exist
         logger.info(f"⏱️ Processing interrupted after {total_duration:.2f} seconds.")
         logger.info(f"📊 Candidates processed before interruption: {total_processed_resumes}")
 
+        # 🗄️ Close database connection
+        if db_manager:
+            db_manager.print_stats_report()
+            db_manager.close()
+
         # Return results so caller can still use them if needed
         return results
 
@@ -2125,6 +2495,12 @@ def process_resumes(extractor, folder_list, processed_folders, batch_size, exist
     logger.info(f"📊 Total candidates processed: {total_processed_resumes}")
 
     performance_monitor.generate_performance_report()
+
+    # 🗄️ Close database connection
+    if db_manager:
+        db_manager.print_stats_report()
+        db_manager.close()
+
     return results
 
 def generate_reports(results: List[Dict], empty_folders: List[str]):
@@ -2213,6 +2589,29 @@ def generate_reports(results: List[Dict], empty_folders: List[str]):
     print(f"🚨 Resumes with missing fields: {len(missing_report)}")
     print(f"📁 Empty candidate folders: {len(empty_folders)}")
     
+    # 🗄️ NEW: Database quality report
+    if config.DATABASE_ENABLED:
+        try:
+            db = DatabaseManager(config.DATABASE_FILE)
+            db.print_stats_report()
+
+            # Show wrong-field suspects
+            suspects = db.get_wrong_field_suspects()
+            if suspects:
+                print(f"\n🕵️ WRONG FIELD SUSPECTS ({len(suspects)}):")
+                for s in suspects[:10]:
+                    print(f"   ID {s['candidate_id']}: {', '.join(s['issues'])}")
+
+            # Show reprocessing candidates
+            failed = db.get_candidates_for_reprocessing(status_filter='Failed')
+            if failed:
+                print(f"\n🔄 Candidates needing re-extraction: {len(failed)}")
+                print(f"   IDs: {failed[:20]}{'...' if len(failed) > 20 else ''}")
+
+            db.close()
+        except Exception as e:
+            logger.warning(f"⚠️ DB report failed: {e}")
+
     # 🌟 AI Assistance Report (OPTIONAL BUT FABULOUS!) 🌟
     if ai_assisted_count > 0:
         ai_report = []
