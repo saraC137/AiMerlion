@@ -2500,6 +2500,19 @@ def process_resumes(extractor, folder_list, processed_folders, batch_size, exist
     if db_manager:
         db_manager.print_stats_report()
         db_manager.close()
+    
+     # 🧠 ML: Auto-train models after batch processing
+    if config.ML_ENABLED and hasattr(config, 'ML_AUTO_TRAIN_AFTER_BATCH') and config.ML_AUTO_TRAIN_AFTER_BATCH:
+        try:
+            from ml_engine import MLEngine
+            logger.info("🧠 Auto-training ML models on latest data...")
+            engine = MLEngine(db_path=config.DATABASE_FILE)
+            train_results = engine.train_all()
+            logger.info(f"✅ ML training complete: {train_results}")
+        except ImportError:
+            logger.info("ℹ️ ML engine not installed — skipping auto-train")
+        except Exception as e:
+            logger.warning(f"⚠️ ML auto-train failed (non-critical): {e}")
 
     return results
 

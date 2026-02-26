@@ -41,6 +41,21 @@ from flask import (
 )
 from markupsafe import escape
 
+# Logging setup (must be before any logger usage)
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s - 🎭 %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
+
+# 🧠 ML Engine integration (graceful degradation if not available)
+try:
+    from ml_engine import MLEngine
+    ML_AVAILABLE = True
+except ImportError:
+    ML_AVAILABLE = False
+    logger.warning("⚠️ ml_engine not found — ML features disabled")
+
+
+
 # =============================================================================
 # 🔧 APP CONFIGURATION
 # =============================================================================
@@ -88,9 +103,19 @@ CRITICAL_FIELDS = {"name", "email", "phone", "skills_raw", "experience_raw", "ed
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "fairy-codemother-sparkle-2026")
 
+
+# 🧠 Initialize ML Engine (if available)
+ml_engine = None
+if ML_AVAILABLE:
+    try:
+        ml_engine = MLEngine(db_path=DATABASE_PATH)
+        logger.info("🧠 ML Engine initialized for dashboard")
+    except Exception as e:
+        logger.warning(f"⚠️ ML Engine init failed: {e}")
+        ml_engine = None
+
+
 # Logging setup
-logging.basicConfig(level=logging.INFO,
-                    format="%(asctime)s - 🎭 %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -890,6 +915,71 @@ def api_search_raw_text():
     return jsonify({"matches": len(positions), "positions": positions})
 
 
+@app.route("/api/ml-score/<int:candidate_id>")
+def api_ml_score(candidate_id):
+    """
+    🧠 API: Get ML confidence score and anomaly flags for a candidate.
+    Called via fetch() from the detail page JavaScript.
+    """
+    if not ml_engine:
+        return jsonify({"error": "ML engine not available"}), 503
+    
+    cid = validate_candidate_id(candidate_id)
+    result = ml_engine.score_candidate(cid)
+    return jsonify(result)
+
+
+@app.route("/api/ml-suggestions/<int:candidate_id>")
+def api_ml_suggestions(candidate_id):
+    """
+    💡 API: Get auto-correction suggestions for all fields of a candidate.
+    """
+    if not ml_engine:
+        return jsonify({}), 503
+    
+    cid = validate_candidate_id(candidate_id)
+    suggestions = ml_engine.get_field_suggestions_for_candidate(cid)
+    return jsonify(suggestions)
+
+
+@app.route("/review-queue")
+def review_queue():
+    """
+    🏆 ML-Powered Review Queue — Candidates ranked by urgency!
+    """
+    if not ml_engine:
+        flash("ML engine not available — showing standard list")
+        return redirect(url_for("index", review="unreviewed"))
+    
+    limit = request.args.get("limit", 50, type=int)
+    queue = ml_engine.get_review_queue(limit=limit)
+    
+    return render_template_string(QUEUE_TEMPLATE, queue=queue, limit=limit)
+
+
+@app.route("/api/ml-train", methods=["POST"])
+def api_ml_train():
+    """
+    🏋️ API: Trigger ML model retraining from the dashboard.
+    """
+    if not ml_engine:
+        return jsonify({"error": "ML engine not available"}), 503
+    
+    results = ml_engine.train_all()
+    return jsonify({"success": True, "results": results})
+
+
+@app.route("/ml-status")
+def ml_status():
+    """
+    📊 ML model status and training metrics.
+    """
+    if not ml_engine:
+        return jsonify({"error": "ML engine not available"})
+    
+    return jsonify(ml_engine.get_training_status())
+
+
 # =============================================================================
 # 🎨 HTML TEMPLATES — The Stage Design! 🎭
 # =============================================================================
@@ -1583,6 +1673,105 @@ body {
 }
 """
 
+# ---- Review Queue Template (ML-powered prioritization) ----
+QUEUE_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ML Review Queue ✨</title>
+    <style>""" + SHARED_CSS + """</style>
+</head>
+<body>
+
+<header class="dashboard-header">
+    <div class="header-inner">
+        <h1 class="header-title">🧠 ML Review <span>Queue</span></h1>
+        <a href="/" class="back-link" style="color:var(--text-secondary);">← Back to Dashboard</a>
+    </div>
+</header>
+
+<div class="table-container" style="margin-top:20px;">
+    <p style="color:var(--text-secondary); font-size:0.88rem; margin-bottom:16px;">
+        Candidates ranked by extraction confidence, anomaly flags, and completeness.
+        Review high-priority items first to maximize data quality! 🎯
+    </p>
+    
+    {% if queue %}
+    <table class="candidate-table">
+        <thead>
+            <tr>
+                <th>Priority</th>
+                <th>Candidate</th>
+                <th>Confidence</th>
+                <th>Flags</th>
+                <th>Completeness</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in queue %}
+            <tr>
+                <td>
+                    {% set priority = item.priority_label or 'medium' %}
+                    {% if priority == 'critical' %}
+                        <span class="badge badge-danger">🔴 Critical</span>
+                    {% elif priority == 'high' %}
+                        <span class="badge badge-warning">🟠 High</span>
+                    {% elif priority == 'medium' %}
+                        <span class="badge badge-info">🟡 Medium</span>
+                    {% else %}
+                        <span class="badge badge-success">🟢 Low</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <a class="candidate-name-link" href="/candidate/{{ item.candidate_id }}">
+                        {{ item.name or 'Unknown' }}
+                    </a>
+                    <br><span style="font-size:0.75rem; color:var(--text-muted);">#{{ item.candidate_id }}</span>
+                </td>
+                <td>
+                    {% set conf = (item.confidence or 0) * 100 %}
+                    <span style="font-family:'DM Mono',monospace; font-weight:600;">{{ "%.0f"|format(conf) }}%</span>
+                </td>
+                <td>
+                    {% if item.anomaly_count and item.anomaly_count > 0 %}
+                        <span class="badge badge-danger">⚠️ {{ item.anomaly_count }}</span>
+                    {% else %}
+                        <span class="badge badge-success">✓</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% set complete = item.completeness_score or 0 %}
+                    <span class="completeness-bar">
+                        <span class="completeness-fill" style="width:{{ (complete / 6 * 100)|int }}%; background:var(--accent-success);"></span>
+                    </span>
+                </td>
+                <td>
+                    <a href="/candidate/{{ item.candidate_id }}" class="btn" style="background:var(--bg-elevated); color:var(--text-secondary); text-decoration:none; font-size:0.78rem; padding:6px 14px;">
+                        Review →
+                    </a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div style="text-align:center; padding:60px 20px; color:var(--text-secondary);">
+        <div style="font-size:2rem; margin-bottom:12px;">✨</div>
+        <div style="font-size:1.1rem;">Queue is empty!</div>
+        <div style="font-size:0.88rem; color:var(--text-muted); margin-top:6px;">
+            All candidates have been reviewed or ML engine is unavailable.
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+</body>
+</html>
+"""
+
 # ---- Index (List) Template ----
 INDEX_TEMPLATE = """
 <!DOCTYPE html>
@@ -1599,6 +1788,15 @@ INDEX_TEMPLATE = """
 <header class="dashboard-header">
     <div class="header-inner">
         <h1 class="header-title">✨ Resume Review <span>Dashboard</span></h1>
+        <div style="display:flex; gap:8px;">
+            <a href="/review-queue" class="filter-btn" style="text-decoration:none; font-size:0.82rem;">
+                🏆 ML Review Queue
+            </a>
+            <button class="filter-btn secondary" style="font-size:0.82rem;"
+                    onclick="fetch('/api/ml-train',{method:'POST'}).then(r=>r.json()).then(d=>alert(JSON.stringify(d,null,2)))">
+                🏋️ Train ML
+            </button>
+        </div>
         <div class="stats-row">
             <div class="stat-card">
                 <div class="stat-number" style="color: var(--accent-primary)">{{ stats.total }}</div>
@@ -1790,6 +1988,8 @@ DETAIL_TEMPLATE = """
     <style>""" + SHARED_CSS + """</style>
 </head>
 <body>
+
+
 
 <!-- Toast notification container -->
 <div class="toast-container" id="toastContainer"></div>
@@ -2249,12 +2449,81 @@ document.addEventListener('keydown', (e) => {
         });
     }
 });
+
+(async function loadMLScore() {
+    try {
+        const resp = await fetch(`/api/ml-score/${CANDIDATE_ID}`);
+        if (!resp.ok) return; // ML not available, silently skip
+        
+        const data = await resp.json();
+        if (data.error) return;
+        
+        // Create ML badge in the header
+        const header = document.querySelector('.header-inner > div:first-child');
+        if (header && data.priority_label) {
+            const badge = document.createElement('span');
+            badge.className = 'badge';
+            badge.style.cssText = 'padding:4px 12px; font-size:0.78rem;';
+            
+            if (data.confidence >= 0.7) {
+                badge.classList.add('badge-success');
+            } else if (data.confidence >= 0.4) {
+                badge.classList.add('badge-warning');
+            } else {
+                badge.classList.add('badge-danger');
+            }
+            badge.textContent = `ML: ${(data.confidence * 100).toFixed(0)}% confidence`;
+            header.appendChild(badge);
+        }
+        
+        // Show anomaly flags if any
+        const flags = data.anomaly?.rule_flags || [];
+        if (flags.length > 0) {
+            flags.forEach(flag => {
+                const group = document.getElementById(`fieldGroup_${flag.field}`);
+                if (group) {
+                    const label = group.querySelector('.field-label span');
+                    if (label) {
+                        const alertSpan = document.createElement('span');
+                        alertSpan.style.cssText = 'font-size:0.68rem; margin-left:8px;';
+                        alertSpan.style.color = flag.severity === 'critical' 
+                            ? 'var(--accent-danger)' : 'var(--accent-warning)';
+                        alertSpan.textContent = `⚠️ ${flag.issue}`;
+                        label.appendChild(alertSpan);
+                    }
+                }
+            });
+        }
+        
+        // Load field suggestions
+        const sugResp = await fetch(`/api/ml-suggestions/${CANDIDATE_ID}`);
+        if (sugResp.ok) {
+            const suggestions = await sugResp.json();
+            for (const [field, suggs] of Object.entries(suggestions)) {
+                const editArea = document.getElementById(`edit_${field}`);
+                if (editArea && suggs.length > 0) {
+                    const sugDiv = document.createElement('div');
+                    sugDiv.style.cssText = 'margin-top:6px; font-size:0.78rem; color:var(--accent-info);';
+                    sugDiv.innerHTML = '💡 Suggestion: ' + suggs.map(s => 
+                        `<a href="#" onclick="document.getElementById(\'textarea_${field}\').value=\'${s.suggestion.replace(/'/g, "\\\\'")}\'` +
+                        `;return false;" style="color:var(--accent-secondary);text-decoration:underline;cursor:pointer;">` +
+                        `${s.suggestion}</a> (${(s.confidence*100).toFixed(0)}%)`
+                    ).join(', ');
+                    editArea.appendChild(sugDiv);
+                }
+            }
+        }
+    } catch (err) {
+        // ML features are optional — fail silently
+        console.debug('ML scoring unavailable:', err);
+    }
+})();
+
 </script>
 
 </body>
 </html>
 """
-
 
 # =============================================================================
 # 🚀 APP STARTUP

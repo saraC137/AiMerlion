@@ -89,3 +89,10 @@ SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".doc"}
 # --- Database Settings ---
 DATABASE_FILE = "resume_extractions.db"       # SQLite database file path
 DATABASE_ENABLED = True                        # Toggle DB storage on/off
+
+# --- Machine Learning Settings ---
+ML_ENABLED = True                              # Toggle ML features on/off
+ML_MODEL_DIR = "ml_models"                     # Directory for saved models
+ML_AUTO_TRAIN_AFTER_BATCH = True               # Auto-train after processing batch
+ML_MIN_TRAINING_SAMPLES = 20                   # Minimum samples before ML kicks in
+ML_RETRAIN_AFTER_CORRECTIONS = 10              # Retrain after N corrections
