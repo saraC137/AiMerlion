@@ -1825,6 +1825,125 @@ tr:hover { background: var(--bg-hover); }
     color: var(--accent-red);
     font-size: 0.88rem;
 }
+
+/* =============================================================
+ * 📦 EXPORT MODAL — FULL GLAM EDITION ✨
+ * Bigger, cleaner, luxurious, no more mess!
+ * ============================================================= */
+
+.export-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.85);
+    z-index: 700;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+    backdrop-filter: blur(8px);
+}
+.export-overlay.open { display: flex; }
+
+.export-modal {
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    width: 100%;
+    max-width: 560px;
+    box-shadow: 0 30px 90px rgba(0,0,0,0.8);
+    overflow: hidden;
+    animation: modalSlideIn 0.35s cubic-bezier(0.34,1.56,0.64,1);
+}
+
+.export-modal-header {
+    background: linear-gradient(135deg, #161b22, #1c2333);
+    padding: 22px 28px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+}
+.export-modal-header h3 {
+    font-family: var(--font-display);
+    font-size: 1.35rem;
+    font-weight: 800;
+    letter-spacing: -0.6px;
+    color: var(--accent-cyan);
+    margin: 0;
+}
+
+.export-close {
+    width: 38px; height: 38px;
+    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    border-radius: 10px;
+    font-size: 1.1rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+.export-close:hover {
+    background: var(--accent-red);
+    color: white;
+    border-color: var(--accent-red);
+    transform: rotate(90deg);
+}
+
+.export-modal-body {
+    padding: 32px 28px;
+    background: var(--bg-primary);
+}
+
+.export-field {
+    margin-bottom: 24px;
+}
+.export-field label {
+    display: block;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    font-weight: 700;
+    margin-bottom: 8px;
+}
+.export-field select {
+    width: 100%;
+    background: var(--bg-deep);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text-primary);
+    padding: 12px 16px;
+    font-size: 0.95rem;
+    outline: none;
+    transition: all 0.25s;
+}
+.export-field select:focus {
+    border-color: var(--accent-cyan);
+    box-shadow: 0 0 0 4px rgba(126,232,250,0.15);
+}
+
+.export-hint {
+    font-size: 0.78rem;
+    line-height: 1.5;
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+    padding: 14px 18px;
+    border-radius: 10px;
+    border-left: 5px solid var(--accent-cyan);
+}
+
+.export-modal-footer {
+    padding: 20px 28px;
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+}
+
 """
 
 
@@ -2004,23 +2123,35 @@ INDEX_TEMPLATE = """
 </div>
 
 <!-- ================================================================
-     📦 EXPORT OPTIONS MODAL — No more prompt() drama! 💅
+     📦 EXPORT MODAL — Now serving PURE GLAM ✨
      ================================================================ -->
-<div class="export-overlay" id="exportOverlay" onclick="if(event.target===this)closeExportModal()">
-  <div class="export-modal" role="dialog" aria-modal="true">
-    <div class="export-modal-header">
-      <h3 id="exportModalTitle">📦 Export Options</h3>
-      <button class="preview-close" onclick="closeExportModal()" title="Cancel">✕</button>
+    <div class="export-overlay" id="exportOverlay" onclick="if(event.target===this)closeExportModal()">
+    <div class="export-modal">
+
+        <!-- Header -->
+        <div class="export-modal-header">
+        <div style="display:flex; align-items:center; gap:10px;">
+            <span style="font-size:1.6rem;">📦</span>
+            <h3 id="exportModalTitle" style="margin:0; font-size:1.25rem; color:var(--accent-cyan);">Export Options</h3>
+        </div>
+        <button class="export-close" onclick="closeExportModal()" title="Cancel">✕</button>
+        </div>
+
+        <!-- Body -->
+        <div class="export-modal-body" id="exportModalBody">
+        <!-- JS will fill this -->
+        </div>
+
+        <!-- Footer -->
+        <div class="export-modal-footer">
+        <button class="btn" onclick="closeExportModal()">Cancel</button>
+        <button class="btn btn-primary" id="exportConfirmBtn" onclick="confirmExport()">
+            📤 Export Now
+        </button>
+        </div>
+
     </div>
-    <div class="export-modal-body" id="exportModalBody">
-      <!-- Dynamically filled by JS -->
     </div>
-    <div class="export-modal-footer">
-      <button class="btn" onclick="closeExportModal()">Cancel</button>
-      <button class="btn btn-primary" id="exportConfirmBtn" onclick="confirmExport()">📤 Export</button>
-    </div>
-  </div>
-</div>
 
 <script>
 // ================================================================
@@ -3968,6 +4099,38 @@ ANNOTATE_TEMPLATE = """
         font-weight: 600;
         margin: 2px;
     }
+
+   <!-- ================================================================
+     📦 EXPORT MODAL — FULL GLAM EDITION ✨
+     ================================================================ -->
+<div class="export-overlay" id="exportOverlay" onclick="if(event.target===this)closeExportModal()">
+  <div class="export-modal">
+
+    <!-- Header -->
+    <div class="export-modal-header">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span style="font-size:1.6rem;">📦</span>
+        <h3 id="exportModalTitle" style="margin:0; font-size:1.25rem; color:var(--accent-cyan);">Export Options</h3>
+      </div>
+      <button class="export-close" onclick="closeExportModal()" title="Cancel">✕</button>
+    </div>
+
+    <!-- Body -->
+    <div class="export-modal-body" id="exportModalBody">
+      <!-- JS will fill this -->
+    </div>
+
+    <!-- Footer -->
+    <div class="export-modal-footer">
+      <button class="btn" onclick="closeExportModal()">Cancel</button>
+      <button class="btn btn-primary" id="exportConfirmBtn" onclick="confirmExport()">
+        📤 Export Now
+      </button>
+    </div>
+
+  </div>
+</div>
+
     </style>
 </head>
 <body>
@@ -5780,28 +5943,27 @@ function saveAnnotations(status = 'in_progress') {
     })
     .then(res => res.json())
     .then(data => {
-        if (data.success) {
-            // Two different celebrations for two different moments!
-            // Draft = warm encouraging nod. Complete = curtain call! 🏆
-            if (status === 'completed') {
-                showToast(
-                    '🏆 Marked Complete! Candidate is officially runway-ready! ✨',
-                    'success',
-                    6000
-                );
-                showCompletionCelebration();
-            } else {
-                showToast(
-                    '💾 Draft Saved! Progress secured — come back anytime! ✨',
-                    'success',
-                    4000
-                );
-            }
-            updateStatusBadge(status);
+    if (data.success) {
+        if (status === 'completed') {
+            showToast(
+                '🏆 Marked Complete! Candidate is officially runway-ready! ✨',
+                'success',
+                6000
+            );
+            showCompletionCelebration();   // ← Big glamorous finale only for Complete
         } else {
-            showToast('❌ Save failed: ' + (data.error || 'Unknown error'), 'error', 6000);
+            showToast(
+                '💾 Draft Saved! Progress secured — come back anytime! ✨',
+                'success',
+                4000
+            );
+            showDraftSavedCelebration();   // ← Tiny cute party ONLY for drafts
         }
-    })
+        updateStatusBadge(status);
+    } else {
+        showToast('❌ Save failed: ' + (data.error || 'Unknown error'), 'error', 6000);
+    }
+})
     .catch(err => {
         showToast('❌ Network error: ' + err, 'error', 6000);
     });
@@ -6233,6 +6395,61 @@ function showToast(msg, type = 'success', duration = 4000) {
     // Auto-dismiss after duration
     toast._timer = setTimeout(() => toast._dismiss(), duration);
 }
+
+/**
+ * showDraftSavedCelebration()
+ * 
+ * The cute little sister to the big completion party!
+ * Quick, fabulous, and gone before you blink — perfect for draft saves.
+ * Like the makeup artist giving you a mirror check backstage: "Slay, queen!"
+ */
+function showDraftSavedCelebration() {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = `
+        position:fixed; inset:0; pointer-events:none; z-index:9999;
+        display:flex; align-items:center; justify-content:center;
+        animation: draftFade 2s ease forwards;
+    `;
+
+    // Tiny confetti (just 8 pieces, soft pastel colors)
+    let confetti = '';
+    const colors = ['#7ee8fa', '#eeb8ff', '#56d364', '#f778ba', '#e3b341'];
+    for (let i = 0; i < 8; i++) {
+        const c = colors[i % colors.length];
+        const left = 30 + Math.random() * 40;
+        confetti += `<div style="position:absolute; width:8px; height:8px; border-radius:50%; 
+            background:${c}; left:${left}%; top:-20px; 
+            animation: miniConfetti ${1.2 + Math.random()}s linear forwards;"></div>`;
+    }
+
+    overlay.innerHTML = `
+        <div style="background:rgba(14,17,23,0.95); border:2px solid #7ee8fa; border-radius:9999px;
+            padding:14px 32px; display:flex; align-items:center; gap:12px; box-shadow:0 0 30px #7ee8fa80;">
+            ${confetti}
+            <span style="font-size:2rem;">💾</span>
+            <div>
+                <div style="color:#7ee8fa; font-family:'Syne',sans-serif; font-size:1.1rem; font-weight:700;">
+                    DRAFT SAVED, BITCH! ✨
+                </div>
+                <div style="color:#8b949e; font-size:0.82rem;">Your work is locked & loaded, honey</div>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    // Auto-dismiss + click anywhere to dismiss
+    setTimeout(() => overlay.remove(), 2200);
+    overlay.addEventListener('click', () => overlay.remove(), {once: true});
+}
+
+// Add these keyframes once (put this inside your <style> or right after the other @keyframes)
+const draftStyle = document.createElement('style');
+draftStyle.textContent = `
+    @keyframes draftFade { 0% {opacity:1; transform:scale(0.9)} 80% {opacity:1} 100% {opacity:0; transform:scale(1.05)} }
+    @keyframes miniConfetti { to { transform:translateY(180px) rotate(720deg); opacity:0; } }
+`;
+document.head.appendChild(draftStyle);
 
 /**
  * showCompletionCelebration()
