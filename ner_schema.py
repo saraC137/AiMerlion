@@ -681,8 +681,8 @@ class EntitySchema:
                 "EXCLUDE: The bullet character itself."
             ),
             color="#8b949e",
-            allows_nesting=True,
-            nested_children=["SKILL", "ORGANIZATION", "METRIC"]
+            allows_nesting=True,  # 🆕 Allow children inside!
+            nested_children=["SKILL", "SOFT_SKILL", "ORGANIZATION", "METRIC", "CERTIFICATION"]
         ))
 
         self._add(EntityType(
@@ -2374,6 +2374,252 @@ class TrainingExporter:
             f.write(content)
         
         logger.info(f"📤 Exported {len(documents)} docs to CoNLL: {output_path}")
+        
+         # =================================================================
+    # 🧠 CLASSIFICATION TRAINING EXPORT
+    # Exports human-corrected Function/Industry labels for
+    # training a text classification model to REPLACE the
+    # keyword-based ResumeClassifier.
+    #
+    # Drama analogy: This is the diploma mill — it takes all the
+    # lessons the human annotators taught and packages them into
+    # a curriculum the ML model can study from! 🎓📦
+    # =================================================================
+
+    def to_classification_jsonl(
+        self,
+        db_path: str,
+        output_path: str,
+        min_text_length: int = 50,
+        include_features: bool = True
+    ) -> Dict[str, Any]:
+        """
+        📤 Export classification training data as JSONL.
+
+        Reads human-corrected Function & Industry labels from the
+        database and pairs them with resume text + extracted features.
+
+        Each line is a JSON object:
+        {
+            "text":            "Full resume text...",
+            "function_label":  "IT",
+            "industry_label":  "Banking & Finance",
+            "features": {              # Optional enrichment
+                "job_titles":   ["Software Engineer", "Tech Lead"],
+                "companies":    ["DBS Bank", "Grab"],
+                "skills":       ["Python", "Java", "AWS"],
+                "institutions": ["NUS"],
+                "degrees":      ["Bachelor of Computing"]
+            }
+        }
+
+        Why JSONL instead of plain JSON?
+        ─────────────────────────────────
+        JSONL (one JSON object per line) is the standard for ML training
+        because it's streamable — you can load one record at a time
+        without parsing the entire file into memory. HuggingFace
+        datasets, PyTorch DataLoader, and pandas all read JSONL natively.
+        Think of it as a buffet line vs a sit-down dinner — you grab
+        one plate at a time! 🍽️
+
+        Args:
+            db_path:          Path to resume_extractions.db
+            output_path:      Where to write the .jsonl file
+            min_text_length:  Skip resumes shorter than this (noise filter)
+            include_features: Whether to include extracted entity features
+
+        Returns:
+            Dict with export stats (total, skipped, label distribution)
+        """
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+
+        # ── Query: Join ner_documents (has human labels) with
+        #    structured_extractions (has text + entity data)
+        #    LEFT JOIN candidates to get raw_text if available ──────
+        query = """
+            SELECT
+                nd.doc_id,
+                nd.candidate_id,
+                nd.function,
+                nd.industry,
+                se.name,
+                se.experience_raw,
+                se.education_raw,
+                se.skills_raw,
+                se.skills_json,
+                se.experience_json,
+                se.education_json,
+                se.summary,
+                c.raw_text
+            FROM ner_documents nd
+            JOIN structured_extractions se
+                ON nd.candidate_id = se.candidate_id
+            LEFT JOIN candidates c
+                ON nd.candidate_id = c.id
+            WHERE nd.function IS NOT NULL
+              AND nd.function != ''
+              AND nd.industry IS NOT NULL
+              AND nd.industry != ''
+        """
+
+        try:
+            rows = conn.execute(query).fetchall()
+        except sqlite3.OperationalError as e:
+            # ── Handle missing columns gracefully ─────────────────
+            # If the candidates table doesn't have raw_text, or
+            # ner_documents doesn't have function/industry yet,
+            # degrade gracefully instead of crashing the export.
+            logger.warning(f"⚠️ Classification export query failed: {e}")
+            logger.warning("Trying fallback query without raw_text...")
+            fallback_query = """
+                SELECT
+                    nd.doc_id,
+                    nd.candidate_id,
+                    nd.function,
+                    nd.industry,
+                    se.name,
+                    se.experience_raw,
+                    se.education_raw,
+                    se.skills_raw,
+                    se.skills_json,
+                    se.experience_json,
+                    se.education_json,
+                    se.summary,
+                    '' as raw_text
+                FROM ner_documents nd
+                JOIN structured_extractions se
+                    ON nd.candidate_id = se.candidate_id
+                WHERE nd.function IS NOT NULL
+                  AND nd.function != ''
+                  AND nd.industry IS NOT NULL
+                  AND nd.industry != ''
+            """
+            rows = conn.execute(fallback_query).fetchall()
+        finally:
+            conn.close()
+
+        # ── Build training records ────────────────────────────────
+        records = []
+        skipped = 0
+        func_dist = defaultdict(int)   # Track label distribution
+        ind_dist = defaultdict(int)
+
+        for row in rows:
+            # Build the full text from available sources
+            # Priority: raw_text (complete) > reconstructed from fields
+            text_parts = []
+            if row["raw_text"]:
+                text_parts.append(row["raw_text"])
+            else:
+                # Fallback: reconstruct from structured fields
+                # This still gives the classifier enough signal!
+                for field in ["summary", "experience_raw", "education_raw", "skills_raw"]:
+                    if row[field]:
+                        text_parts.append(str(row[field]))
+
+            full_text = "\n".join(text_parts).strip()
+
+            # ── Skip if text is too short ─────────────────────────
+            # Resumes under 50 chars are usually parsing failures,
+            # empty records, or test entries. Don't poison the
+            # training data with garbage! 🗑️
+            if len(full_text) < min_text_length:
+                skipped += 1
+                continue
+
+            func_label = row["function"].strip()
+            ind_label = row["industry"].strip()
+
+            # ── Skip "others"/"Others" if desired ─────────────────
+            # These are low-signal labels that can hurt classifier
+            # performance. For now, we include them but log a warning.
+            if func_label.lower() == "others" and ind_label.lower() == "others":
+                logger.debug(
+                    f"⚠️ Both function and industry are 'others' for "
+                    f"candidate {row['candidate_id']} — including anyway"
+                )
+
+            record = {
+                "text": full_text,
+                "function_label": func_label,
+                "industry_label": ind_label,
+            }
+
+            # ── Optional: add entity-based features ───────────────
+            # These features let the classifier use STRUCTURED info
+            # alongside raw text — like giving it reading glasses! 🤓
+            if include_features:
+                features = {}
+
+                # Parse JSON fields safely
+                def safe_json(raw, default):
+                    if not raw:
+                        return default
+                    try:
+                        return json.loads(raw)
+                    except (json.JSONDecodeError, TypeError):
+                        return default
+
+                # Extract job titles & companies from experience_json
+                exp = safe_json(row["experience_json"], [])
+                if isinstance(exp, list):
+                    features["job_titles"] = [
+                        e.get("title", "") for e in exp
+                        if isinstance(e, dict) and e.get("title")
+                    ]
+                    features["companies"] = [
+                        e.get("company", "") for e in exp
+                        if isinstance(e, dict) and e.get("company")
+                    ]
+                else:
+                    features["job_titles"] = []
+                    features["companies"] = []
+
+                # Extract skills
+                skills = safe_json(row["skills_json"], [])
+                features["skills"] = skills if isinstance(skills, list) else []
+
+                # Extract education
+                edu = safe_json(row["education_json"], [])
+                if isinstance(edu, list):
+                    features["institutions"] = [
+                        e.get("institution", "") for e in edu
+                        if isinstance(e, dict) and e.get("institution")
+                    ]
+                    features["degrees"] = [
+                        e.get("degree", "") for e in edu
+                        if isinstance(e, dict) and e.get("degree")
+                    ]
+                else:
+                    features["institutions"] = []
+                    features["degrees"] = []
+
+                record["features"] = features
+
+            records.append(record)
+            func_dist[func_label] += 1
+            ind_dist[ind_label] += 1
+
+        # ── Write JSONL ──────────────────────────────────────────
+        with open(output_path, "w", encoding="utf-8") as f:
+            for rec in records:
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+        stats = {
+            "total_exported": len(records),
+            "skipped": skipped,
+            "function_distribution": dict(func_dist),
+            "industry_distribution": dict(ind_dist),
+        }
+
+        logger.info(
+            f"📤 Classification export: {len(records)} records → {output_path} | "
+            f"Skipped: {skipped} | Functions: {len(func_dist)} | Industries: {len(ind_dist)}"
+        )
+
+        return stats
+        
         return output_path
     
     def to_spacy_json(
@@ -2457,32 +2703,42 @@ class TrainingExporter:
         """
         🧩 Group work-related annotations into individual job blocks.
 
-        The challenge: annotations are just character spans — we have no
-        explicit "this JOB_TITLE belongs to this ORGANIZATION" signal.
-        So we use PROXIMITY in the text as our grouping signal.
+        IMPROVED VERSION — Uses STRUCTURAL BOUNDARY detection! 🎯
 
-        Think of it like seating guests at a wedding — people who are
-        standing close together probably arrived together! 💒
+        The old version used only character-gap distance, which fails
+        when resumes have dense formatting (Job 1's last bullet is
+        only 50 chars away from Job 2's header).
 
-        Strategy:
+        New strategy:
           1. Collect all work-related annotations sorted by char_start.
-          2. Walk through them in order. When the gap between consecutive
-             annotations exceeds `gap_threshold` characters, start a new
-             job block.
-          3. Within each block, pick the first value of each entity type
-             (JOB_TITLE, ORGANIZATION, WORK_DATE) and collect ALL
-             JOB_DESCRIPTION spans as the responsibility list.
+          2. Walk through them in text order.
+          3. Start a NEW block when EITHER:
+             a) A JOB_TITLE or ORGANIZATION appears AND the current
+                block already has a JOB_TITLE or ORGANIZATION
+                (= structural boundary — new job header detected!)
+             b) The character gap exceeds gap_threshold AND we've
+                seen at least one header entity (= physical gap)
+          4. Within each block, pick first JOB_TITLE, ORGANIZATION,
+             WORK_DATE, WORK_LOCATION and collect ALL JOB_DESCRIPTIONs.
+
+        Think of it like reading a play script 🎭 — when you see a
+        new character name in bold (JOB_TITLE), that's a new SCENE,
+        even if the previous scene's dialogue (JOB_DESCRIPTION) was
+        on the very line above! The character name IS the boundary!
 
         Args:
             annotations:    All annotations from the document (all types).
-            gap_threshold:  Character gap that signals a new job block.
-                            400 chars ≈ ~3–5 resume lines, a safe separator.
+            gap_threshold:  Character gap that signals a new job block
+                            (used as SECONDARY signal after structural
+                            boundaries). 400 chars ≈ ~3–5 resume lines.
 
         Returns:
             List of job dicts matching the target export schema.
         """
         # ── Collect only work-relevant entity types ──────────────────────
         WORK_TYPES = {"JOB_TITLE", "ORGANIZATION", "WORK_DATE", "JOB_DESCRIPTION", "WORK_LOCATION"}
+        HEADER_TYPES = {"JOB_TITLE", "ORGANIZATION", "WORK_DATE"}
+        
         work_anns = sorted(
             [a for a in annotations if a.entity_type in WORK_TYPES and a.layer == 0],
             key=lambda a: a.char_start
@@ -2491,21 +2747,62 @@ class TrainingExporter:
         if not work_anns:
             return []
 
-        # ── Split into blocks by gap ─────────────────────────────────────
+        # ── Split into blocks using STRUCTURAL + GAP detection ───────────
+        # Key insight: A new JOB_TITLE or ORGANIZATION after we've already
+        # seen one = DEFINITE new job block boundary! 🎯
         blocks: List[List] = []
         current_block: List = [work_anns[0]]
 
+        # Track what entity types the current block already contains
+        current_block_types = {work_anns[0].entity_type}
+
         for ann in work_anns[1:]:
-            # Calculate gap from the END of the previous annotation
             prev_end = current_block[-1].char_end
             gap = ann.char_start - prev_end
 
-            if gap > gap_threshold:
-                # Big gap → new job block
+            # ── STRUCTURAL BOUNDARY DETECTION ─────────────────────
+            # If we see a new JOB_TITLE or ORGANIZATION, and the
+            # current block already HAS a JOB_TITLE or ORGANIZATION,
+            # this MUST be a new job — regardless of gap distance!
+            #
+            # But we're smart about it: if a JOB_TITLE and ORGANIZATION
+            # appear right next to each other at the START of a block,
+            # they're part of the SAME header. We only split when
+            # we've already seen descriptions in this block.
+            is_header = ann.entity_type in HEADER_TYPES
+            block_has_header = bool(current_block_types & HEADER_TYPES)
+            block_has_descriptions = "JOB_DESCRIPTION" in current_block_types
+
+            # Condition 1: New header entity AFTER descriptions seen
+            # = definite structural boundary
+            structural_boundary = (
+                is_header
+                and block_has_header
+                and block_has_descriptions
+            )
+
+            # Condition 2: New JOB_TITLE or ORG when current block
+            # already has BOTH title and org (even without descriptions)
+            # = two headers back-to-back = new job with no bullets yet
+            double_header = (
+                ann.entity_type in {"JOB_TITLE", "ORGANIZATION"}
+                and "JOB_TITLE" in current_block_types
+                and "ORGANIZATION" in current_block_types
+                and ann.entity_type in current_block_types
+            )
+
+            # Condition 3: Character gap exceeds threshold
+            # (fallback for unusual formatting)
+            gap_boundary = gap > gap_threshold
+
+            if structural_boundary or double_header or gap_boundary:
+                # Start new block! 🆕
                 blocks.append(current_block)
                 current_block = [ann]
+                current_block_types = {ann.entity_type}
             else:
                 current_block.append(ann)
+                current_block_types.add(ann.entity_type)
 
         blocks.append(current_block)  # Don't forget the last block!
 
@@ -2845,26 +3142,44 @@ class TrainingExporter:
         # ══════════════════════════════════════════════════════════════════
 
         exp_data = parse_json(fb.get("experience_json"), None)
-        if isinstance(exp_data, dict) and exp_data.get("positions"):
-            positions     = exp_data["positions"]
-            descriptions  = exp_data.get("descriptions", [])
-            work_experience = []
-            for i, pos in enumerate(positions):
-                if not isinstance(pos, dict):
-                    continue
-                # Map structured_extractions keys → profile keys
-                work_experience.append({
-                    "company":          pos.get("organization", ""),
-                    "title":            pos.get("title",        ""),
-                    "dates":            pos.get("date",         ""),
-                    "location":         pos.get("location",     ""),
-                    # Spread job descriptions evenly across positions as best-effort
-                    "responsibilities": [descriptions[i]] if i < len(descriptions) else [],
-                })
+        if isinstance(exp_data, dict):
+            # NEW: Use positions_with_responsibilities if available
+            # (saved by the fixed update_structured_extraction)
+            pwr = exp_data.get("positions_with_responsibilities")
+            if pwr and isinstance(pwr, list):
+                # 🎯 Best path: responsibilities are already grouped per job!
+                work_experience = []
+                for pos in pwr:
+                    if not isinstance(pos, dict):
+                        continue
+                    work_experience.append({
+                        "company":          pos.get("organization", ""),
+                        "title":            pos.get("title",        ""),
+                        "dates":            pos.get("date",         ""),
+                        "location":         pos.get("location",     ""),
+                        "responsibilities": pos.get("responsibilities", []),
+                    })
+            elif exp_data.get("positions"):
+                # FALLBACK: Old format — positions + flat descriptions
+                # Use proximity matching as best-effort
+                positions     = exp_data["positions"]
+                descriptions  = exp_data.get("descriptions", [])
+                work_experience = []
+                for i, pos in enumerate(positions):
+                    if not isinstance(pos, dict):
+                        continue
+                    work_experience.append({
+                        "company":          pos.get("organization", ""),
+                        "title":            pos.get("title",        ""),
+                        "dates":            pos.get("date",         ""),
+                        "location":         pos.get("location",     ""),
+                        "responsibilities": [descriptions[i]] if i < len(descriptions) else [],
+                    })
+            else:
+                work_experience = self._group_work_experience(anns)
         else:
             # Fallback: derive from ner_annotations grouping
             work_experience = self._group_work_experience(anns)
-
         # ══════════════════════════════════════════════════════════════════
         # EDUCATION — parse education_json; fallback to annotation groups
         #
@@ -3784,62 +4099,154 @@ class AnnotationStorage:
         skills_raw = ' | '.join(all_skills) if all_skills else ""
         skills_json_str = json.dumps(all_skills, ensure_ascii=False) if all_skills else "[]"
 
-        # ══════════════════════════════════════════════════════════════
+         # ══════════════════════════════════════════════════════════════
         # 💼 EXPERIENCE — Build structured work history
         #
-        # The structured_extractions table stores experience as:
-        #   experience_raw: "Company - Title (Date) || Company2 - Title2 (Date2)"
-        #   experience_json: JSON array of work entry objects
+        # IMPROVED: Position-aware grouping! 🎯
         #
-        # We have individual entity arrays that need to be ZIPPED together.
-        # Like assembling outfits — each piece (title, company, date) gets
-        # paired up into complete looks! 👔👗
+        # The old approach used naive parallel-zipping of entity arrays:
+        #   job_titles[0] + organizations[0] → Job 1
+        #   job_titles[1] + organizations[1] → Job 2
+        #   descriptions stored as flat array
+        #
+        # This FAILED because descriptions weren't associated with
+        # their parent job. Now we use char_start positions to group
+        # annotations into job blocks using structural boundaries.
+        #
+        # Think of it like organising a filing cabinet — each folder
+        # (job block) gets ALL its documents (descriptions) inside it,
+        # not randomly distributed across folders! 📁💅
         # ══════════════════════════════════════════════════════════════
-        job_titles = all_vals('JOB_TITLE')
-        organizations = all_vals('ORGANIZATION')
-        work_dates = all_vals('WORK_DATE')
-        work_locations = all_vals('WORK_LOCATION')
-        job_descriptions = all_vals('JOB_DESCRIPTION')
-        metrics = all_vals('METRIC')
 
-        # Build structured experience entries by zipping parallel arrays
-        # Use max length so we don't lose any entries from longer arrays
-        exp_count = max(len(job_titles), len(organizations), len(work_dates), 1)
+        # Step 1: Collect work annotations WITH positions
+        WORK_TYPES = {"JOB_TITLE", "ORGANIZATION", "WORK_DATE", "JOB_DESCRIPTION", "WORK_LOCATION"}
+        HEADER_TYPES = {"JOB_TITLE", "ORGANIZATION", "WORK_DATE"}
+        
+        work_anns = sorted(
+            [
+                a for a in annotations_list
+                if a.get("entity_type", "") in WORK_TYPES
+                and a.get("text", "").strip()
+                and a.get("layer", 0) == 0
+            ],
+            key=lambda a: a.get("char_start", 0)
+        )
+
+        # Step 2: Group into job blocks using structural boundaries
         experience_entries = []
         experience_raw_parts = []
 
-        for i in range(exp_count):
-            title = job_titles[i] if i < len(job_titles) else ""
-            org = organizations[i] if i < len(organizations) else ""
-            date = work_dates[i] if i < len(work_dates) else ""
-            loc = work_locations[i] if i < len(work_locations) else ""
+        if work_anns:
+            blocks = []
+            current_block = [work_anns[0]]
+            current_block_types = {work_anns[0].get("entity_type", "")}
 
-            if not title and not org:
-                continue  # Skip empty entries
+            for ann in work_anns[1:]:
+                etype = ann.get("entity_type", "")
+                prev_end = current_block[-1].get("char_end", 0)
+                gap = ann.get("char_start", 0) - prev_end
 
-            entry = {
-                "title": title,
-                "organization": org,
-                "date": date,
-                "location": loc,
-            }
-            experience_entries.append(entry)
+                is_header = etype in HEADER_TYPES
+                block_has_header = bool(current_block_types & HEADER_TYPES)
+                block_has_descriptions = "JOB_DESCRIPTION" in current_block_types
 
-            # Build raw string: "Company - Title (Date)"
-            raw_part = f"{org} - {title}" if org and title else (org or title)
-            if date:
-                raw_part += f" ({date})"
-            experience_raw_parts.append(raw_part)
+                # Structural boundary: new header after descriptions
+                structural_boundary = (
+                    is_header
+                    and block_has_header
+                    and block_has_descriptions
+                )
 
-        # Attach job descriptions and metrics as separate arrays in JSON
-        # (they don't pair 1:1 with jobs — one job can have many bullets)
+                # Double header: same header type already in block
+                # (e.g. two JOB_TITLEs = definitely two different jobs)
+                double_header = (
+                    etype in {"JOB_TITLE", "ORGANIZATION"}
+                    and "JOB_TITLE" in current_block_types
+                    and "ORGANIZATION" in current_block_types
+                    and etype in current_block_types
+                )
+
+                # Gap boundary: fallback for unusual formatting
+                gap_boundary = gap > 400
+
+                if structural_boundary or double_header or gap_boundary:
+                    blocks.append(current_block)
+                    current_block = [ann]
+                    current_block_types = {etype}
+                else:
+                    current_block.append(ann)
+                    current_block_types.add(etype)
+
+            blocks.append(current_block)
+
+            # Step 3: Convert each block into structured format
+            for block in blocks:
+                title = ""
+                org = ""
+                date = ""
+                loc = ""
+                descriptions = []
+
+                for ann in block:
+                    etype = ann.get("entity_type", "")
+                    text = ann.get("text", "").strip()
+
+                    if etype == "JOB_TITLE" and not title:
+                        title = text
+                    elif etype == "ORGANIZATION" and not org:
+                        org = text
+                    elif etype == "WORK_DATE" and not date:
+                        date = text
+                    elif etype == "WORK_LOCATION" and not loc:
+                        loc = text
+                    elif etype == "JOB_DESCRIPTION":
+                        if text:
+                            descriptions.append(text)
+
+                if not title and not org:
+                    continue  # Skip orphaned description-only blocks
+
+                entry = {
+                    "title": title,
+                    "organization": org,
+                    "date": date,
+                    "location": loc,
+                    "responsibilities": descriptions,
+                }
+                experience_entries.append(entry)
+
+                # Build raw string for display
+                raw_part = f"{org} - {title}" if org and title else (org or title)
+                if date:
+                    raw_part += f" ({date})"
+                experience_raw_parts.append(raw_part)
+
+        # Build the final JSON structure
+        # NOTE: New format includes responsibilities PER position!
+        # Old format had flat "descriptions" array — new format
+        # nests them correctly inside each position.
         experience_obj = {
-            "positions": experience_entries,
-            "descriptions": job_descriptions,
-            "metrics": metrics,
+            "positions": [
+                {
+                    "title": e["title"],
+                    "organization": e["organization"],
+                    "date": e["date"],
+                    "location": e["location"],
+                }
+                for e in experience_entries
+            ],
+            "descriptions": [
+                desc
+                for e in experience_entries
+                for desc in e.get("responsibilities", [])
+            ],
+            "metrics": all_vals('METRIC'),
+            # NEW: Per-position responsibility grouping for accurate export
+            "positions_with_responsibilities": experience_entries,
         }
         experience_raw = ' || '.join(experience_raw_parts) if experience_raw_parts else ""
         experience_json_str = json.dumps(experience_obj, ensure_ascii=False)
+
 
         # ══════════════════════════════════════════════════════════════
         # 🎓 EDUCATION — Build structured education history

@@ -4850,6 +4850,8 @@ document.getElementById('textPanel').addEventListener('mouseup', (e) => {
     const charStart = getTextOffset(container, range.startContainer, range.startOffset);
     const charEnd   = getTextOffset(container, range.endContainer,   range.endOffset);
 
+    
+
     if (charStart === null || charEnd === null || charStart >= charEnd) {
         selection.removeAllRanges();
         return;
@@ -4867,25 +4869,48 @@ document.getElementById('textPanel').addEventListener('mouseup', (e) => {
     const trimStart = charStart + (rawSlice.length - rawSlice.trimStart().length);
     const trimEnd   = charEnd   - (rawSlice.length - rawSlice.trimEnd().length);
 
-    // ── Overlap check: warn if this span overlaps an existing annotation
-    //    (nested annotations are stored on layer > 0, so we only check layer 0)
-    const overlaps = annotations.some(a =>
+    // ══════════════════════════════════════════════════════════════════
+    // 🧬 NESTED ENTITY HANDLING — The Fabulous Layer Cake! 🎂
+    // ══════════════════════════════════════════════════════════════════
+    // Check if this span overlaps an existing annotation.
+    // If the parent allows nesting for this entity type, use layer 1!
+    // Otherwise, block the overlap as before.
+    
+    let targetLayer = 0;
+    const overlappingParent = annotations.find(a =>
         a.layer === 0 &&
         !(trimEnd <= a.char_start || trimStart >= a.char_end)
     );
-    if (overlaps) {
-        showToast('⚠️ Overlapping annotation! Use a different layer or delete the existing one.', 'warning');
-        selection.removeAllRanges();
-        return;
+    
+    if (overlappingParent) {
+        // Check if parent entity allows this child to nest inside
+        const parentDef = SCHEMA.entities[overlappingParent.entity_type];
+        const allowsNesting = parentDef?.allows_nesting === true;
+        const allowedChildren = parentDef?.nested_children || [];
+        
+        if (allowsNesting && allowedChildren.includes(activeEntityType)) {
+            // ✅ Nesting allowed! Use layer 1 for the child annotation
+            targetLayer = 1;
+            console.log(`🧬 Nesting ${activeEntityType} inside ${overlappingParent.entity_type} on layer 1`);
+        } else {
+            // ❌ Nesting NOT allowed for this combination
+            showToast(
+                `⚠️ Cannot nest ${activeEntityType} inside ${overlappingParent.entity_type}. ` +
+                `Delete the parent annotation first, or this entity type is not allowed as a child.`,
+                'warning'
+            );
+            selection.removeAllRanges();
+            return;
+        }
     }
 
-    // Create the new annotation object
+    // Create the new annotation object (now with smart layer!)
     annotations.push({
         entity_type: activeEntityType,
         char_start:  trimStart,
         char_end:    trimEnd,
         text:        RAW_TEXT.substring(trimStart, trimEnd),
-        layer:       0,
+        layer:       targetLayer,  // 🆕 Dynamic layer based on nesting!
         confidence:  1.0,
         annotator:   'human'
     });
