@@ -243,6 +243,10 @@ def index():
 @app.route("/annotate/<int:candidate_id>")
 def annotate(candidate_id: int):
     """🎨 Main annotation interface for a single candidate."""
+    # Capture the queue page/status the user came from so "Back" returns there
+    back_page = request.args.get("page", 1, type=int)
+    back_status = request.args.get("status", "all")
+
     raw_text = get_raw_text_for_candidate(candidate_id)
     if not raw_text:
         flash(f"No raw text found for candidate {candidate_id}")
@@ -258,6 +262,9 @@ def annotate(candidate_id: int):
         ann_status = existing_doc.status
         stored_function = existing_doc.metadata.get("function", "")
         stored_industry = existing_doc.metadata.get("industry", "")
+        stored_hard_skills = existing_doc.metadata.get("hard_skills", [])
+        stored_soft_skills = existing_doc.metadata.get("soft_skills", [])
+        stored_tags = existing_doc.metadata.get("tags", [])
     else:
         # Auto pre-annotate for first visit
         annotations = pre_annotator.pre_annotate(raw_text, confidence_threshold=0.6)
@@ -266,6 +273,9 @@ def annotate(candidate_id: int):
         pred = ResumeClassifier.classify(raw_text, annotations)
         stored_function = pred["Function"]
         stored_industry = pred["Industry"]
+        stored_hard_skills = pred.get("HardSkills", [])
+        stored_soft_skills = pred.get("SoftSkills", [])
+        stored_tags = pred.get("Tags", [])
 
     # Serialize annotations for JavaScript
     annotations_json = json.dumps([
@@ -299,6 +309,11 @@ def annotate(candidate_id: int):
         doc_id=doc_id,
         stored_function=stored_function,
         stored_industry=stored_industry,
+        stored_hard_skills=stored_hard_skills,
+        stored_soft_skills=stored_soft_skills,
+        stored_tags=stored_tags,
+        back_page=back_page,
+        back_status=back_status,
     )
 
 
@@ -311,6 +326,9 @@ def save_annotations():
         status = data.get('status', 'in_progress')
         func = data.get('function', '')
         ind = data.get('industry', '')
+        hard_skills = data.get('hard_skills', [])
+        soft_skills = data.get('soft_skills', [])
+        tags = data.get('tags', [])
 
         if not doc_id:
             return jsonify({"success": False, "error": "No doc_id"}), 400
@@ -322,7 +340,8 @@ def save_annotations():
         # Like installing a security camera backstage! 📹✨
         logger.info(f"💾 SAVE REQUEST for {doc_id} | status={status} | "
                      f"func={func} | ind={ind} | "
-                     f"annotations={len(annotations_list)}")
+                     f"hard_skills={len(hard_skills)} | soft_skills={len(soft_skills)} | "
+                     f"tags={len(tags)} | annotations={len(annotations_list)}")
 
         # Log a summary of what entity types + texts we received
         type_summary = {}
@@ -338,7 +357,10 @@ def save_annotations():
             logger.info(f"   📋 {etype}: {texts}")
 
         # Save classification and status
-        storage.update_document_metadata(doc_id, status, func, ind)
+        storage.update_document_metadata(doc_id, status, func, ind,
+                                         hard_skills=hard_skills,
+                                         soft_skills=soft_skills,
+                                         tags=tags)
 
         # Save the actual entity spans
         storage.save_annotations(doc_id, annotations_list)
@@ -657,16 +679,30 @@ def api_preview_before_save(candidate_id: int):
     # ── Load current Function / Industry classification ─────────
     # Check ner_documents for a saved value first; if none, classify on the fly
     doc_id = f"doc_{candidate_id}"
-    classification = {"function": "", "industry": ""}
+    classification = {"function": "", "industry": "",
+                      "hard_skills": [], "soft_skills": [], "tags": []}
     conn = get_db()
     try:
         row = conn.execute(
-            "SELECT function, industry FROM ner_documents WHERE doc_id = ?",
+            "SELECT function, industry, hard_skills, soft_skills, tags FROM ner_documents WHERE doc_id = ?",
             (doc_id,)
         ).fetchone()
         if row and (row["function"] or row["industry"]):
             classification["function"] = row["function"] or ""
             classification["industry"] = row["industry"] or ""
+            # 🆕 Load skills & tags (JSON arrays, with graceful fallback)
+            try:
+                classification["hard_skills"] = json.loads(row["hard_skills"] or "[]")
+            except (KeyError, json.JSONDecodeError):
+                classification["hard_skills"] = []
+            try:
+                classification["soft_skills"] = json.loads(row["soft_skills"] or "[]")
+            except (KeyError, json.JSONDecodeError):
+                classification["soft_skills"] = []
+            try:
+                classification["tags"] = json.loads(row["tags"] or "[]")
+            except (KeyError, json.JSONDecodeError):
+                classification["tags"] = []
         else:
             # No saved classification — predict from raw text + current annotations
             raw_text = get_raw_text_for_candidate(candidate_id)
@@ -684,6 +720,9 @@ def api_preview_before_save(candidate_id: int):
                 pred = ResumeClassifier.classify(raw_text, span_anns)
                 classification["function"] = pred.get("Function", "")
                 classification["industry"] = pred.get("Industry", "")
+                classification["hard_skills"] = pred.get("HardSkills", [])
+                classification["soft_skills"] = pred.get("SoftSkills", [])
+                classification["tags"] = pred.get("Tags", [])
     except sqlite3.OperationalError:
         pass  # Table might not exist yet — degrade gracefully
     finally:
@@ -770,6 +809,36 @@ def api_export():
         path = exporter.to_spacy_json(documents, f"ner_exports/train_{timestamp}.json")
     elif fmt == "huggingface":
         path = exporter.to_huggingface(documents, f"ner_exports/train_{timestamp}.jsonl")
+    elif fmt == "classification":
+        # ── 🧠 Classification JSONL — Function & Industry training ────
+        # This is a DIFFERENT beast from NER exports! Instead of
+        # token-level BIO tags, it exports the WHOLE resume text
+        # paired with document-level Function/Industry labels.
+        # Think: NER = "what is each WORD?" vs Classification = "what
+        # category is this whole RESUME?" 🏷️ vs 🧠
+        output_path = f"ner_exports/classify_{timestamp}.jsonl"
+        try:
+            stats = exporter.to_classification_jsonl(
+                db_path=DATABASE_PATH,
+                output_path=output_path,
+                min_text_length=50,
+                include_features=True
+            )
+            return jsonify({
+                "success": True,
+                "path": output_path,
+                "documents": stats.get("total_exported", 0),
+                "format": fmt,
+                "skipped": stats.get("skipped", 0),
+                "function_classes": len(stats.get("function_distribution", {})),
+                "industry_classes": len(stats.get("industry_distribution", {})),
+            })
+        except Exception as e:
+            logger.error(f"❌ Classification export failed: {e}")
+            return jsonify({
+                "error": f"Classification export failed: {str(e)}. "
+                         f"Make sure Function & Industry are set in the Classify tab!"
+            }), 500
     else:
         path = exporter.to_custom_json(documents, f"ner_exports/train_{timestamp}.json")
 
@@ -1143,17 +1212,46 @@ def api_edge_case_check():
 # 🎯 NEW ROUTES FOR FUNCTION/INDUSTRY CLASSIFICATION
 # =============================================================================
 
-@app.route("/api/classify/<int:candidate_id>")
+@app.route("/api/classify/<int:candidate_id>", methods=["GET", "POST"])
 def api_classify(candidate_id: int):
-    """Predict Function and Industry for a candidate."""
+    """
+    Predict Function, Industry, Hard Skills, Soft Skills, and Tags.
+
+    🐛 BUG FIX: Previously a GET that loaded annotations from the DATABASE
+    (the last SAVED state). If the user added new SKILL annotations but
+    hadn't saved yet, re-run would classify from stale data — like reading
+    yesterday's script instead of today's! 📜
+
+    Now accepts POST with current in-memory annotations from the frontend,
+    so re-run always classifies from the LIVE working state. Falls back
+    to DB annotations for GET requests (backward compat).
+    """
     raw_text = get_raw_text_for_candidate(candidate_id)
     if not raw_text:
         return jsonify({"error": "No text found"}), 404
 
-    # Optionally load existing annotations to improve classification
-    doc_id = f"doc_{candidate_id}"
-    doc = storage.load_document(doc_id)
-    entities = doc.annotations if doc else []
+    entities = []
+
+    if request.method == "POST":
+        # 🆕 Use CURRENT annotations from frontend (not stale DB data!)
+        data = request.get_json() or {}
+        annotations_list = data.get("annotations", [])
+        entities = [
+            SpanAnnotation(
+                entity_type=a.get("entity_type", ""),
+                char_start=a.get("char_start", 0),
+                char_end=a.get("char_end", 0),
+                text=a.get("text", ""),
+                layer=a.get("layer", 0),
+            )
+            for a in annotations_list
+            if a.get("entity_type") and a.get("text", "").strip()
+        ]
+    else:
+        # Fallback: load from DB (backward compat for GET requests)
+        doc_id = f"doc_{candidate_id}"
+        doc = storage.load_document(doc_id)
+        entities = doc.annotations if doc else []
 
     pred = ResumeClassifier.classify(raw_text, entities)
     return jsonify(pred)
@@ -1161,11 +1259,14 @@ def api_classify(candidate_id: int):
 
 @app.route("/api/save-classification", methods=["POST"])
 def api_save_classification():
-    """Save corrected Function/Industry for a candidate."""
+    """Save corrected Function/Industry/Skills/Tags for a candidate."""
     data = request.get_json()
     candidate_id = data.get("candidate_id")
     function = data.get("function", "")
     industry = data.get("industry", "")
+    hard_skills = data.get("hard_skills", [])
+    soft_skills = data.get("soft_skills", [])
+    tags = data.get("tags", [])
 
     if not candidate_id:
         return jsonify({"error": "Missing candidate_id"}), 400
@@ -1173,21 +1274,39 @@ def api_save_classification():
     doc_id = f"doc_{candidate_id}"
     conn = get_db()
     try:
+        # Ensure hard_skills/soft_skills/tags columns exist (migration safety)
+        for col in ['hard_skills', 'soft_skills', 'tags']:
+            try:
+                conn.execute(f"ALTER TABLE ner_documents ADD COLUMN {col} TEXT DEFAULT '[]'")
+            except sqlite3.OperationalError:
+                pass  # column already exists
+
         # First, try to UPDATE an existing row
         cursor = conn.execute("""
             UPDATE ner_documents
-            SET function = ?, industry = ?, updated_at = CURRENT_TIMESTAMP
+            SET function = ?, industry = ?,
+                hard_skills = ?, soft_skills = ?, tags = ?,
+                updated_at = CURRENT_TIMESTAMP
             WHERE doc_id = ?
-        """, (function, industry, doc_id))
+        """, (function, industry,
+              json.dumps(hard_skills, ensure_ascii=False),
+              json.dumps(soft_skills, ensure_ascii=False),
+              json.dumps(tags, ensure_ascii=False),
+              doc_id))
 
         # If no row existed (first visit, annotations not saved yet),
         # INSERT a new row so the classification isn't lost! 💅
         # Like reserving a seat before the show starts — always be prepared! 🎭
         if cursor.rowcount == 0:
             conn.execute("""
-                INSERT INTO ner_documents (doc_id, candidate_id, status, function, industry)
-                VALUES (?, ?, 'pending', ?, ?)
-            """, (doc_id, candidate_id, function, industry))
+                INSERT INTO ner_documents
+                    (doc_id, candidate_id, status, function, industry,
+                     hard_skills, soft_skills, tags)
+                VALUES (?, ?, 'pending', ?, ?, ?, ?, ?)
+            """, (doc_id, candidate_id, function, industry,
+                  json.dumps(hard_skills, ensure_ascii=False),
+                  json.dumps(soft_skills, ensure_ascii=False),
+                  json.dumps(tags, ensure_ascii=False)))
 
         conn.commit()
     except sqlite3.Error as e:
@@ -2032,7 +2151,7 @@ INDEX_TEMPLATE = """
         </thead>
         <tbody>
             {% for c in candidates %}
-            <tr>
+            <tr id="row-{{ c.candidate_id }}">
                 <td style="font-family:var(--font-mono); color:var(--text-muted)">{{ c.candidate_id }}</td>
                 <td><strong>{{ c.name or '—' }}</strong></td>
                 <td style="color:var(--text-secondary)">{{ c.email or '—' }}</td>
@@ -2057,7 +2176,7 @@ INDEX_TEMPLATE = """
                     {% endif %}
                 </td>
                 <td>
-                    <a href="/annotate/{{ c.candidate_id }}" class="btn btn-sm btn-primary">
+                    <a href="/annotate/{{ c.candidate_id }}?page={{ page }}&status={{ status_filter }}" class="btn btn-sm btn-primary">
                         🏷️ Annotate
                     </a>
                 </td>
@@ -2154,6 +2273,27 @@ INDEX_TEMPLATE = """
     </div>
 
 <script>
+// ── Scroll to & highlight the row the user came from ──
+(function() {
+    const hash = window.location.hash;
+    if (hash && hash.startsWith('#row-')) {
+        // Remove hash immediately to prevent browser's native anchor jump
+        history.replaceState(null, '', window.location.pathname + window.location.search);
+        // Wait for layout, then scroll manually with header offset
+        requestAnimationFrame(() => {
+            const row = document.querySelector(hash);
+            if (!row) return;
+            const header = document.querySelector('.header');
+            const headerH = header ? header.offsetHeight : 0;
+            const rowTop = row.getBoundingClientRect().top + window.scrollY;
+            window.scrollTo({ top: rowTop - headerH - 16, behavior: 'smooth' });
+            row.style.transition = 'background 0.4s';
+            row.style.background = 'rgba(99, 102, 241, 0.15)';
+            setTimeout(() => { row.style.background = ''; }, 2000);
+        });
+    }
+})();
+
 // ================================================================
 // 📦 EXPORT OPTIONS MODAL — Replaces prompt() calls
 // ================================================================
@@ -2208,11 +2348,16 @@ function openExportModal(mode) {
         body.innerHTML = `
             <div class="export-field">
                 <label>Export format</label>
-                <select id="exportFormatSelect">
-                    <option value="conll" selected>📄 CoNLL-2003 — most compatible</option>
-                    <option value="spacy">🐍 spaCy v3 JSON</option>
-                    <option value="huggingface">🤗 HuggingFace JSONL</option>
-                    <option value="custom">📋 Full metadata JSON</option>
+                <select id="exportFormatSelect" onchange="updateExportHint()">
+                    <optgroup label="🏷️ NER Training (token-level)">
+                        <option value="conll" selected>📄 CoNLL-2003 — most compatible</option>
+                        <option value="spacy">🐍 spaCy v3 JSON</option>
+                        <option value="huggingface">🤗 HuggingFace JSONL</option>
+                        <option value="custom">📋 Full metadata JSON</option>
+                    </optgroup>
+                    <optgroup label="🧠 Classification Training (document-level)">
+                        <option value="classification">🧠 Classification JSONL — Function &amp; Industry</option>
+                    </optgroup>
                 </select>
             </div>
             <div class="export-field">
@@ -2223,8 +2368,8 @@ function openExportModal(mode) {
                     <option value="all">📋 All documents</option>
                 </select>
             </div>
-            <div class="export-hint">
-                💡 NER model training formats — for machine learning use only, not the talent database.
+            <div class="export-hint" id="exportHintText">
+                💡 NER model training formats — teaches the model to identify entities word-by-word.
             </div>
         `;
     }
@@ -2367,6 +2512,29 @@ function exportProfiles(format) {
 function exportTrainingData() {
     openExportModal('training');
 }
+
+/**
+ * updateExportHint()
+ *
+ * Dynamically updates the hint text in the export modal based on
+ * the selected format. Because NER and Classification are VERY
+ * different beasts, and we want the user to know which is which! 🧠🏷️
+ */
+function updateExportHint() {
+    const fmt = document.getElementById('exportFormatSelect').value;
+    const hint = document.getElementById('exportHintText');
+    if (!hint) return;
+
+    if (fmt === 'classification') {
+        hint.innerHTML = '🧠 <strong>Classification training</strong> — exports whole resume text + Function/Industry labels. ' +
+            'Teaches the model to predict which <em>department</em> and <em>industry</em> a candidate belongs to. ' +
+            'Requires Function &amp; Industry set in the Classify tab.';
+    } else {
+        hint.innerHTML = '💡 <strong>NER training formats</strong> — exports token-level BIO tags. ' +
+            'Teaches the model to identify entities (Name, Phone, Skills, etc.) word-by-word.';
+    }
+}
+
 
 // ================================================================
 // 📊 STATS MODAL — Open / Close / Render
@@ -3830,6 +3998,13 @@ ANNOTATE_TEMPLATE = """
         flex: 1;
     }
 
+    /* 🆕 Wider modal variant for Classification & Skills popup */
+    .classify-modal-wide {
+        width: 620px;
+        max-width: 90vw;
+        max-height: 85vh;
+    }
+
     /* Badge on buttons to show annotation count */
     .tab-badge {
         display: inline-block;
@@ -3887,6 +4062,106 @@ ANNOTATE_TEMPLATE = """
     }
     .classify-select:hover { border-color: var(--accent-cyan); }
     .classify-select:focus { outline: none; border-color: var(--accent-cyan); }
+
+    /* 🆕 Skill/Tag chip containers and chips */
+    .skill-tags-container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        min-height: 24px;
+        padding: 4px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+    }
+    .skill-tags-container:empty::before {
+        content: 'No items yet — use Re-run or add manually';
+        color: var(--text-muted);
+        font-size: 0.58rem;
+        font-style: italic;
+        padding: 2px 4px;
+    }
+    .skill-tag-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        font-size: 0.62rem;
+        padding: 2px 7px;
+        border-radius: 12px;
+        background: rgba(126, 232, 250, 0.12);
+        color: var(--accent-cyan);
+        border: 1px solid rgba(126, 232, 250, 0.25);
+        line-height: 1.4;
+        max-width: 100%;
+        word-break: break-word;
+    }
+    .skill-tag-chip.soft {
+        background: rgba(238, 184, 255, 0.12);
+        color: var(--accent-purple);
+        border-color: rgba(238, 184, 255, 0.25);
+    }
+    .skill-tag-chip.ai-tag {
+        background: rgba(86, 211, 100, 0.12);
+        color: var(--accent-green);
+        border-color: rgba(86, 211, 100, 0.25);
+    }
+    .skill-tag-chip .tag-remove {
+        cursor: pointer;
+        font-size: 0.55rem;
+        opacity: 0.6;
+        transition: opacity 0.15s;
+        margin-left: 2px;
+    }
+    .skill-tag-chip .tag-remove:hover {
+        opacity: 1;
+        color: var(--accent-red);
+    }
+    .skill-tag-input {
+        flex: 1;
+        min-width: 80px;
+        font-size: 0.62rem;
+        padding: 3px 6px;
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        border: 1px dashed var(--border);
+        border-radius: var(--radius);
+        font-family: var(--font-body);
+    }
+    .skill-tag-input:focus {
+        outline: none;
+        border-color: var(--accent-cyan);
+        border-style: solid;
+    }
+
+    /* ── Quick-pick palette ─────────────────────────────────────── */
+    .palette-group-label {
+        font-size: 0.58rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-muted);
+        margin: 8px 0 4px;
+    }
+    .palette-group-label:first-child { margin-top: 0; }
+    .palette-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 2px; }
+    .palette-chip {
+        font-size: 0.6rem;
+        padding: 2px 8px;
+        border-radius: 20px;
+        cursor: pointer;
+        border: 1px solid rgba(86,211,100,0.35);
+        color: var(--text-muted);
+        background: transparent;
+        transition: all 0.15s ease;
+        user-select: none;
+    }
+    .palette-chip:hover { border-color: var(--accent-green); color: var(--accent-green); }
+    .palette-chip.active {
+        background: rgba(86,211,100,0.18);
+        border-color: var(--accent-green);
+        color: var(--accent-green);
+        font-weight: 600;
+    }
 
     /* Annotation list items */
     .anno-list-empty {
@@ -4144,7 +4419,7 @@ ANNOTATE_TEMPLATE = """
     <!-- Row 1: Navigation + Title + Save Actions -->
     <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 24px;">
         <div style="display:flex; align-items:center; gap:12px;">
-            <a href="/" class="btn btn-sm" style="font-size:0.72rem; padding:4px 10px;">← Back</a>
+            <a href="/?page={{ back_page }}&status={{ back_status }}#row-{{ candidate_id }}" class="btn btn-sm" style="font-size:0.72rem; padding:4px 10px;">← Back</a>
             <h1 style="font-size:1.1rem;">🏷️ <span>#{{ candidate_id }}</span>
                 {% if structured.name %}<span style="font-weight:400; color:var(--text-secondary); font-size:0.82rem; margin-left:4px;">{{ structured.name }}</span>{% endif %}
             </h1>
@@ -4175,6 +4450,10 @@ ANNOTATE_TEMPLATE = """
             </button>
             <button class="btn btn-sm" onclick="openBIOModal()" title="Preview BIO tags">🏷️ BIO</button>
             <button class="btn btn-sm" onclick="openEdgeModal()" title="Edge case scan">🧩 Edge</button>
+            <button class="btn btn-sm" onclick="openClassifyModal()" title="Classification & Skills"
+                    style="border-color:var(--accent-purple); color:var(--accent-purple);">
+                🧠 Classify
+            </button>
             <!-- 📋 Annotations popup button — clicks open the full Labels inspector modal 
                  (the same rich popup that openLabelsModal() builds). The badge counter
                  is updated live by updateAnnoList() whenever annotations change. 🎭 -->
@@ -4215,42 +4494,14 @@ ANNOTATE_TEMPLATE = """
         </div>
 
         <!-- 
-            🧠 CLASSIFICATION — Function & Industry
-            Pinned at the BOTTOM of the flex column with flex-shrink:0
-            so it never gets squashed and the palette fills everything above. 💅
+            🧠 CLASSIFICATION — Moved to popup modal!
+            Just a quick-access button here to open it. 💅
         -->
-        <div style="padding:12px 14px; border-top:1px solid var(--border); flex-shrink:0;">
-            <!-- Section heading — matches palette heading style -->
-            <h3 style="font-size:0.65rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">
-                🧠 Classification
-            </h3>
-
-            <!-- Two-column grid for Function + Industry dropdowns -->
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
-                <div>
-                    <label style="font-size:0.6rem; color:var(--text-muted); display:block; margin-bottom:3px;">Function</label>
-                    <!-- .classify-select = display:block + width:100% + box-sizing:border-box
-                         This guarantees the select fills its grid cell with zero overflow.
-                         Never use class="btn" on a select — it breaks width:100%. 🎯 -->
-                    <select id="functionSelect" class="classify-select">
-                        <!-- options populated by populateClassification() in JS -->
-                    </select>
-                </div>
-                <div>
-                    <label style="font-size:0.6rem; color:var(--text-muted); display:block; margin-bottom:3px;">Industry</label>
-                    <select id="industrySelect" class="classify-select">
-                        <!-- options populated by populateClassification() in JS -->
-                    </select>
-                </div>
-            </div>
-
-            <!-- Action row: Re-run prediction | Save manually -->
-            <div style="display:flex; gap:6px;">
-                <button class="btn btn-sm" onclick="reclassify()" style="flex:1; font-size:0.68rem;">🔄 Re‑run</button>
-                <button class="btn btn-sm btn-primary" onclick="saveClassification()" style="flex:1; font-size:0.68rem;">💾 Save</button>
-            </div>
-            <!-- Status feedback message (set by reclassify() / saveClassification()) -->
-            <div id="classifyStatus" style="font-size:0.62rem; margin-top:5px; color:var(--text-muted); min-height:1em;"></div>
+        <div style="padding:8px 14px; border-top:1px solid var(--border); flex-shrink:0;">
+            <button class="btn btn-sm" onclick="openClassifyModal()" 
+                    style="width:100%; font-size:0.68rem; border-color:var(--accent-purple); color:var(--accent-purple);">
+                🧠 Classification & Skills
+            </button>
         </div>
 
     </div><!-- end side-panel -->
@@ -4485,6 +4736,126 @@ ANNOTATE_TEMPLATE = """
               Click Scan to detect tricky annotation patterns. 🧩
           </div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================================================================
+     🧠 CLASSIFICATION & SKILLS MODAL
+     
+     The grand Classification popup! Contains Function, Industry,
+     Hard Skills, Soft Skills, and AI-generated Tags. 
+     Opens via the 🧠 Classify toolbar button or sidebar button.
+     
+     Uses the inspector-overlay pattern (same as Labels/BIO/Edge)
+     but wider to fit the skills chip layout. Think of it as 
+     opening a full talent dossier — the whole story on one page! 💅✨
+     ================================================================ -->
+<div class="inspector-overlay" id="classifyOverlay" onclick="if(event.target===this)closeInspector('classify')">
+  <div class="inspector-modal classify-modal-wide" role="dialog" aria-modal="true">
+    <div class="inspector-header" style="border-bottom-color:var(--accent-purple);">
+      <h3>🧠 Classification & Skills</h3>
+      <button class="preview-close" onclick="closeInspector('classify')" title="Close (Escape)">✕</button>
+    </div>
+    <div class="inspector-body" style="padding:20px 24px;">
+
+      <!-- Function + Industry dropdowns — two-column -->
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px;">
+        <div>
+          <label style="font-size:0.7rem; color:var(--text-muted); display:block; margin-bottom:4px; font-weight:600;">
+            🧠 Function / Department
+          </label>
+          <select id="functionSelect" class="classify-select">
+            <!-- options populated by populateClassification() in JS -->
+          </select>
+        </div>
+        <div>
+          <label style="font-size:0.7rem; color:var(--text-muted); display:block; margin-bottom:4px; font-weight:600;">
+            🏢 Industry Sector
+          </label>
+          <select id="industrySelect" class="classify-select">
+            <!-- options populated by populateClassification() in JS -->
+          </select>
+        </div>
+      </div>
+
+      <!-- Hard Skills -->
+      <div style="margin-bottom:14px;">
+        <label style="font-size:0.7rem; color:var(--accent-cyan); display:block; margin-bottom:4px; font-weight:600;">
+          🔧 Hard Skills <small style="opacity:0.5; color:var(--text-muted);">(technical skills from resume)</small>
+        </label>
+        <div id="hardSkillsContainer" class="skill-tags-container"></div>
+        <div style="display:flex; gap:4px; margin-top:5px;">
+          <input id="hardSkillInput" type="text" class="skill-tag-input"
+                 placeholder="Add hard skill…" 
+                 onkeydown="if(event.key==='Enter'){addSkillTag('hard');event.preventDefault();}">
+          <button class="btn btn-sm" onclick="addSkillTag('hard')" 
+                  style="font-size:0.65rem; padding:3px 10px; flex-shrink:0;">+ Add</button>
+        </div>
+      </div>
+
+      <!-- Soft Skills -->
+      <div style="margin-bottom:14px;">
+        <label style="font-size:0.7rem; color:var(--accent-purple); display:block; margin-bottom:4px; font-weight:600;">
+          💬 Soft Skills <small style="opacity:0.5; color:var(--text-muted);">(interpersonal skills from resume)</small>
+        </label>
+        <div id="softSkillsContainer" class="skill-tags-container"></div>
+        <div style="display:flex; gap:4px; margin-top:5px;">
+          <input id="softSkillInput" type="text" class="skill-tag-input"
+                 placeholder="Add soft skill…"
+                 onkeydown="if(event.key==='Enter'){addSkillTag('soft');event.preventDefault();}">
+          <button class="btn btn-sm" onclick="addSkillTag('soft')" 
+                  style="font-size:0.65rem; padding:3px 10px; flex-shrink:0;">+ Add</button>
+        </div>
+      </div>
+
+      <!-- Tags -->
+      <div style="margin-bottom:16px;">
+        <label style="font-size:0.7rem; color:var(--accent-green); display:block; margin-bottom:4px; font-weight:600;">
+          🏷️ Tags <small style="opacity:0.5; color:var(--text-muted);">(customizable keywords for organizing, filtering &amp; searching)</small>
+        </label>
+
+        <!-- Active tag chips -->
+        <div id="tagsContainer" class="skill-tags-container tags-ai"></div>
+
+        <!-- Manual input row -->
+        <div style="display:flex; gap:4px; margin-top:5px;">
+          <input id="tagInput" type="text" class="skill-tag-input"
+                 placeholder="Type a custom tag…"
+                 onkeydown="if(event.key==='Enter'){addSkillTag('tag');event.preventDefault();}">
+          <button class="btn btn-sm" onclick="addSkillTag('tag')"
+                  style="font-size:0.65rem; padding:3px 10px; flex-shrink:0;">+ Add</button>
+          <button class="btn btn-sm" id="paletteToggleBtn"
+                  onclick="toggleTagPalette()"
+                  style="font-size:0.65rem; padding:3px 10px; flex-shrink:0; opacity:0.75;"
+                  title="Quick-pick common tags">⚡ Quick Pick</button>
+        </div>
+
+        <!-- ── Quick-pick palette ──────────────────────────────── -->
+        <div id="tagPalette" style="display:none; margin-top:10px;
+             border:1px solid rgba(86,211,100,0.2); border-radius:8px;
+             padding:10px 12px; background:rgba(86,211,100,0.04);">
+
+          <div style="font-size:0.62rem; color:var(--text-muted);
+               margin-bottom:8px; letter-spacing:0.04em; text-transform:uppercase;">
+            Click to add · Click again to remove
+          </div>
+
+          <div id="tagPaletteGroups"></div>
+        </div>
+      </div>
+
+      <!-- Action row + Status -->
+      <div style="display:flex; gap:8px; align-items:center;">
+        <button class="btn btn-sm" onclick="reclassify()" style="font-size:0.72rem; padding:6px 16px;">
+          🔄 Re‑run AI Classification
+        </button>
+        <button class="btn btn-sm btn-primary" onclick="saveClassification()" style="font-size:0.72rem; padding:6px 16px;">
+          💾 Save Classification
+        </button>
+        <div id="classifyStatus" style="font-size:0.65rem; color:var(--text-muted); margin-left:8px;"></div>
+      </div>
+
     </div>
   </div>
 </div>
@@ -5239,9 +5610,10 @@ function renderPreviewContent(data, status) {
         }
     }
 
-    // ── 4. CLASSIFICATION (Function / Industry) ───────────────────────
+    // ── 4. CLASSIFICATION (Function / Industry / Skills / Tags) ─────────
     // These two get dropdown selects, not plain text inputs,
     // because they map to a controlled vocabulary list. 💅
+    // 🆕 Skills & Tags shown as read-only chip displays in preview.
     const cls      = data.classification || {};
     const funcVal  = cls.function || '';
     const indVal   = cls.industry  || '';
@@ -5252,6 +5624,23 @@ function renderPreviewContent(data, status) {
     const indOptions = INDUSTRY_OPTIONS.map(i =>
         `<option value="${escapeHtml(i)}" ${i === indVal ? 'selected' : ''}>${escapeHtml(i)}</option>`
     ).join('');
+
+    // 🆕 Build chip HTML for skills & tags in preview
+    const previewHardSkills = cls.hard_skills || currentHardSkills || [];
+    const previewSoftSkills = cls.soft_skills || currentSoftSkills || [];
+    const previewTags = cls.tags || currentTags || [];
+
+    const hardChips = previewHardSkills.map(s =>
+        `<span class="skill-tag-chip">${escapeHtml(s)}</span>`
+    ).join('') || '<span style="color:var(--text-muted);font-size:0.6rem;font-style:italic;">None</span>';
+
+    const softChips = previewSoftSkills.map(s =>
+        `<span class="skill-tag-chip soft">${escapeHtml(s)}</span>`
+    ).join('') || '<span style="color:var(--text-muted);font-size:0.6rem;font-style:italic;">None</span>';
+
+    const tagChips = previewTags.map(s =>
+        `<span class="skill-tag-chip ai-tag">${escapeHtml(s)}</span>`
+    ).join('') || '<span style="color:var(--text-muted);font-size:0.6rem;font-style:italic;">None</span>';
 
     html += `<div class="pf-classify">
         <div class="pf-classify-field">
@@ -5268,6 +5657,14 @@ function renderPreviewContent(data, status) {
                 ${indOptions}
             </select>
         </div>
+    </div>
+    <div style="margin-top:8px;">
+        <label style="font-size:0.62rem;color:var(--text-muted);display:block;margin-bottom:3px;">🔧 Hard Skills</label>
+        <div style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:6px;">${hardChips}</div>
+        <label style="font-size:0.62rem;color:var(--text-muted);display:block;margin-bottom:3px;">💬 Soft Skills</label>
+        <div style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:6px;">${softChips}</div>
+        <label style="font-size:0.62rem;color:var(--text-muted);display:block;margin-bottom:3px;">🏷️ Tags (AI)</label>
+        <div style="display:flex;flex-wrap:wrap;gap:3px;">${tagChips}</div>
     </div>`;
 
     // ── 5. THE COMPLETE ENTITY FORM ───────────────────────────────────
@@ -5958,6 +6355,9 @@ function saveAnnotations(status = 'in_progress') {
         status: status,
         function: document.getElementById('functionSelect').value,
         industry: document.getElementById('industrySelect').value,
+        hard_skills: currentHardSkills,
+        soft_skills: currentSoftSkills,
+        tags: currentTags,
         annotations: annotations
     };
 
@@ -6171,7 +6571,7 @@ function checkEdgeCases() {
 }
 
 // =================================================================
-// 🧠 FUNCTION/INDUSTRY CLASSIFICATION
+// 🧠 FUNCTION/INDUSTRY/SKILLS/TAGS CLASSIFICATION
 // =================================================================
 
 // Hardcoded options from the schema
@@ -6192,7 +6592,235 @@ const INDUSTRY_OPTIONS = [
     "Supply Chain Mgt & Logistics", "Telco", "Trading", "Others"
 ];
 
-function populateClassification(functionVal, industryVal) {
+// 🆕 In-memory arrays for skills & tags (synced with chip UI)
+let currentHardSkills = [];
+let currentSoftSkills = [];
+let currentTags = [];
+
+/**
+ * renderSkillChips(containerId, items, chipClass, arrayRef)
+ *
+ * Renders an array of skill/tag strings as clickable chip elements
+ * inside the given container. Each chip has a ✕ button to remove it.
+ *
+ * Think of it like pinning nametags on a board — each one removable
+ * with a single click! 📌✨
+ *
+ * @param {string} containerId - DOM id of the container div
+ * @param {string[]} items - Array of skill/tag strings
+ * @param {string} chipClass - CSS class for chip styling ('hard'|'soft'|'ai-tag')
+ * @param {string} arrayName - Which array to modify ('hard'|'soft'|'tag')
+ */
+function renderSkillChips(containerId, items, chipClass, arrayName) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = '';
+
+    items.forEach((item, idx) => {
+        const chip = document.createElement('span');
+        chip.className = `skill-tag-chip ${chipClass}`;
+        chip.innerHTML = `${escapeHtml(item)}<span class="tag-remove" onclick="removeSkillTag('${arrayName}', ${idx})">✕</span>`;
+        container.appendChild(chip);
+    });
+}
+
+/**
+ * addSkillTag(type)
+ *
+ * Reads the corresponding input field, adds the value to the
+ * in-memory array, re-renders chips, and clears the input.
+ * Deduplicates automatically — no double outfits, darling! 👗
+ *
+ * @param {string} type - 'hard' | 'soft' | 'tag'
+ */
+function addSkillTag(type) {
+    let input, arr, containerId, chipClass;
+
+    if (type === 'hard') {
+        input = document.getElementById('hardSkillInput');
+        arr = currentHardSkills;
+        containerId = 'hardSkillsContainer';
+        chipClass = '';
+    } else if (type === 'soft') {
+        input = document.getElementById('softSkillInput');
+        arr = currentSoftSkills;
+        containerId = 'softSkillsContainer';
+        chipClass = 'soft';
+    } else {
+        input = document.getElementById('tagInput');
+        arr = currentTags;
+        containerId = 'tagsContainer';
+        chipClass = 'ai-tag';
+    }
+
+    if (!input) return;
+    const val = input.value.trim();
+    if (!val) return;
+
+    // Deduplicate (case-insensitive check)
+    if (!arr.some(s => s.toLowerCase() === val.toLowerCase())) {
+        arr.push(val);
+    }
+
+    renderSkillChips(containerId, arr, chipClass, type);
+    input.value = '';
+    input.focus();
+}
+
+/**
+ * removeSkillTag(type, index)
+ *
+ * Removes a skill/tag from the in-memory array by index and re-renders.
+ * Like plucking a bad sequin off a gown — quick and painless! ✂️✨
+ *
+ * @param {string} type - 'hard' | 'soft' | 'tag'
+ * @param {number} index - Array index to remove
+ */
+function removeSkillTag(type, index) {
+    if (type === 'hard') {
+        currentHardSkills.splice(index, 1);
+        renderSkillChips('hardSkillsContainer', currentHardSkills, '', 'hard');
+    } else if (type === 'soft') {
+        currentSoftSkills.splice(index, 1);
+        renderSkillChips('softSkillsContainer', currentSoftSkills, 'soft', 'soft');
+    } else {
+        currentTags.splice(index, 1);
+        renderSkillChips('tagsContainer', currentTags, 'ai-tag', 'tag');
+        syncPaletteState();
+    }
+}
+
+// =================================================================
+// ⚡ QUICK-PICK TAG PALETTE
+// =================================================================
+
+// Core tags grouped by category — mirrors ResumeClassifier.CORE_TAGS
+const CORE_TAGS = {
+    "Availability":  ["Available Now", "Immediate", "1-Month Notice", "2-Month Notice", "3-Month Notice"],
+    "Work Mode":     ["Remote Only", "Hybrid OK", "On-site Only", "Open to Relocation", "Willing to Travel"],
+    "Work Type":     ["Full-time", "Part-time", "Contract", "Freelance", "Temp"],
+    "Seniority":     ["Fresh Grad", "Junior", "Mid-level", "Senior", "Lead", "Manager", "Director", "C-Suite"],
+    "People":        ["Team Lead", "People Manager", "Individual Contributor", "Career Switch", "Return to Work"],
+    "Languages":     ["English", "Mandarin", "Malay", "Tamil", "Bilingual", "Trilingual"],
+    "Status":        ["Citizen (SG)", "PR (SG)", "EP Holder", "Citizen (MY)", "PR (MY)", "Visa Required"],
+    "Tech":          ["Full Stack", "Frontend", "Backend", "Mobile Dev", "DevOps", "Data Science", "AI/ML", "Cybersecurity", "Cloud", "QA / Testing"],
+    "Finance":       ["ACCA", "CPA", "CFA", "Big 4", "Audit", "Tax", "Payroll", "Financial Reporting", "SAP User"],
+    "HR":            ["Generalist", "Talent Acquisition", "L&D", "Payroll", "HRIS", "Business Partner"],
+    "Sales & Mktg":  ["B2B", "B2C", "SaaS Sales", "Key Account Mgmt", "Digital Mktg", "SEO/SEM", "CRM"],
+};
+
+const GROUP_COLORS = {
+    "Availability": "#e3b341", "Work Mode": "#7ee8fa", "Work Type": "#7ee8fa",
+    "Seniority": "#eeb8ff",    "People": "#eeb8ff",    "Languages": "#f778ba",
+    "Status": "#f778ba",       "Tech": "#56d364",      "Finance": "#7ee8fa",
+    "HR": "#eeb8ff",           "Sales & Mktg": "#e3b341",
+};
+
+/**
+ * buildTagPalette()
+ * Renders the quick-pick palette groups into #tagPaletteGroups.
+ * Called once on classify modal open.
+ */
+function buildTagPalette() {
+    const container = document.getElementById('tagPaletteGroups');
+    if (!container || container.dataset.built) return;
+    container.dataset.built = '1';
+
+    for (const [group, chips] of Object.entries(CORE_TAGS)) {
+        const color = GROUP_COLORS[group] || 'var(--accent-green)';
+
+        const label = document.createElement('div');
+        label.className = 'palette-group-label';
+        label.textContent = group;
+        label.style.color = color;
+        container.appendChild(label);
+
+        const row = document.createElement('div');
+        row.className = 'palette-chips';
+
+        chips.forEach(tag => {
+            const btn = document.createElement('span');
+            btn.className = 'palette-chip';
+            btn.textContent = tag;
+            btn.dataset.tag = tag;
+            btn.style.borderColor = color + '55';
+            btn.addEventListener('click', () => togglePaletteTag(tag, btn, color));
+            row.appendChild(btn);
+        });
+
+        container.appendChild(row);
+    }
+}
+
+/**
+ * togglePaletteTag(tag, btn, color)
+ * Adds or removes a tag when its palette chip is clicked.
+ * Syncs the chip's visual state with currentTags.
+ */
+function togglePaletteTag(tag, btn, color) {
+    const idx = currentTags.findIndex(t => t.toLowerCase() === tag.toLowerCase());
+    if (idx === -1) {
+        // Add
+        currentTags.push(tag);
+        btn.classList.add('active');
+        btn.style.borderColor = color;
+        btn.style.color = color;
+    } else {
+        // Remove
+        currentTags.splice(idx, 1);
+        btn.classList.remove('active');
+        btn.style.borderColor = color + '55';
+        btn.style.color = '';
+    }
+    renderSkillChips('tagsContainer', currentTags, 'ai-tag', 'tag');
+    syncPaletteState();  // Keep all chips in sync
+}
+
+/**
+ * syncPaletteState()
+ * Marks palette chips as active/inactive based on currentTags.
+ * Called after external changes (populate, remove chip).
+ */
+function syncPaletteState() {
+    const palette = document.getElementById('tagPaletteGroups');
+    if (!palette) return;
+    palette.querySelectorAll('.palette-chip').forEach(btn => {
+        const tag = btn.dataset.tag;
+        const color = btn.style.borderColor.replace('55', '') || 'var(--accent-green)';
+        const active = currentTags.some(t => t.toLowerCase() === tag.toLowerCase());
+        btn.classList.toggle('active', active);
+    });
+}
+
+/**
+ * toggleTagPalette()
+ * Shows/hides the quick-pick palette and builds it on first open.
+ */
+function toggleTagPalette() {
+    const palette = document.getElementById('tagPalette');
+    const btn = document.getElementById('paletteToggleBtn');
+    if (!palette) return;
+    const isOpen = palette.style.display !== 'none';
+    palette.style.display = isOpen ? 'none' : 'block';
+    btn.style.opacity = isOpen ? '0.75' : '1';
+    btn.style.borderColor = isOpen ? '' : 'var(--accent-green)';
+    if (!isOpen) {
+        buildTagPalette();   // Build on first open
+        syncPaletteState();  // Reflect any already-added tags
+    }
+}
+
+/**
+ * populateClassification(functionVal, industryVal, hardSkills, softSkills, tags)
+ *
+ * Populates the Function & Industry dropdowns AND the skill/tag chip
+ * containers with the given values. Called on page load and after
+ * re-classification.
+ *
+ * 🆕 Now handles the full classification suite: Function, Industry,
+ *     Hard Skills, Soft Skills, and AI-generated Tags!
+ */
+function populateClassification(functionVal, industryVal, hardSkills, softSkills, tags) {
     const funcSelect = document.getElementById('functionSelect');
     const indSelect = document.getElementById('industrySelect');
 
@@ -6206,7 +6834,11 @@ function populateClassification(functionVal, industryVal) {
     functionVal = (functionVal || '').trim();
     industryVal = (industryVal || '').trim();
 
-    console.log('🧠 Populating classification:', {functionVal, industryVal});
+    console.log('🧠 Populating classification:', {functionVal, industryVal,
+        hardSkills: (hardSkills || []).length,
+        softSkills: (softSkills || []).length,
+        tags: (tags || []).length
+    });
 
     funcSelect.innerHTML = FUNCTION_OPTIONS.map(f =>
         `<option value="${f}" ${f === functionVal ? 'selected' : ''}>${f}</option>`
@@ -6214,15 +6846,52 @@ function populateClassification(functionVal, industryVal) {
     indSelect.innerHTML = INDUSTRY_OPTIONS.map(i =>
         `<option value="${i}" ${i === industryVal ? 'selected' : ''}>${i}</option>`
     ).join('');
+
+    // 🆕 Populate skill/tag chips
+    currentHardSkills = Array.isArray(hardSkills) ? [...hardSkills] : [];
+    currentSoftSkills = Array.isArray(softSkills) ? [...softSkills] : [];
+    currentTags = Array.isArray(tags) ? [...tags] : [];
+
+    renderSkillChips('hardSkillsContainer', currentHardSkills, '', 'hard');
+    renderSkillChips('softSkillsContainer', currentSoftSkills, 'soft', 'soft');
+    renderSkillChips('tagsContainer', currentTags, 'ai-tag', 'tag');
+}
+
+/**
+ * openClassifyModal()
+ *
+ * Opens the Classification & Skills popup modal.
+ * Uses the same inspector-overlay pattern as Labels/BIO/Edge.
+ * Think of it as opening the talent dossier! 📋✨
+ */
+function openClassifyModal() {
+    openInspector('classify');
 }
 
 function reclassify() {
     document.getElementById('classifyStatus').textContent = '⏳ Classifying...';
-    fetch(`/api/classify/${CANDIDATE_ID}`)
+
+    // 🐛 BUG FIX: Send CURRENT in-memory annotations via POST!
+    // Previously this was a GET that loaded from the DATABASE (stale data).
+    // Now we send the live working annotations so the classifier sees
+    // the latest SKILL and SOFT_SKILL entities — even if unsaved! 💅
+    fetch(`/api/classify/${CANDIDATE_ID}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ annotations: annotations })
+    })
         .then(r => r.json())
         .then(data => {
-            populateClassification(data.Function, data.Industry);
-            document.getElementById('classifyStatus').textContent = '✅ Prediction updated';
+            if (data.error) {
+                document.getElementById('classifyStatus').textContent = '❌ ' + data.error;
+                return;
+            }
+            populateClassification(
+                data.Function, data.Industry,
+                data.HardSkills || [], data.SoftSkills || [], data.Tags || []
+            );
+            document.getElementById('classifyStatus').textContent =
+                `✅ Updated! ${(data.HardSkills||[]).length} hard, ${(data.SoftSkills||[]).length} soft, ${(data.Tags||[]).length} tags`;
         })
         .catch(err => {
             document.getElementById('classifyStatus').textContent = '❌ Error: ' + err;
@@ -6238,7 +6907,10 @@ function saveClassification() {
         body: JSON.stringify({
             candidate_id: CANDIDATE_ID,
             function: functionVal,
-            industry: industryVal
+            industry: industryVal,
+            hard_skills: currentHardSkills,
+            soft_skills: currentSoftSkills,
+            tags: currentTags
         })
     })
     .then(r => r.json())
@@ -6246,7 +6918,7 @@ function saveClassification() {
         if (d.success) {
             document.getElementById('classifyStatus').textContent = '✅ Saved!';
             showToast(
-                '🧠 Classification Saved! Function & Industry locked in, honey! 💼',
+                '🧠 Classification Saved! Function, Industry, Skills & Tags locked in! 💼',
                 'success',
                 3500
             );
@@ -6669,7 +7341,13 @@ renderText();
 // Populate classification dropdowns with stored values from server
 // NOTE: Using tojson filter to prevent Jinja2 HTML-escaping '&' chars
 // in values like "Accounting & Finance" → would become "&amp;" and break matching!
-populateClassification({{ stored_function | tojson }}, {{ stored_industry | tojson }});
+populateClassification(
+    {{ stored_function | tojson }},
+    {{ stored_industry | tojson }},
+    {{ stored_hard_skills | tojson }},
+    {{ stored_soft_skills | tojson }},
+    {{ stored_tags | tojson }}
+);
 </script>
 </body>
 </html>

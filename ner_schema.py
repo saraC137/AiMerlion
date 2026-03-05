@@ -214,16 +214,352 @@ class ResumeClassifier:
         "Others": []
     }
 
+    # ═══════════════════════════════════════════════════════════════
+    # 🏷️ TAG MAPPING — Hard Skills → Searchable ATS Tags
+    #
+    # Maps individual hard skills to broader, recruiter-friendly
+    # search tags. Think of it as translating "Python" into the
+    # categories a hiring manager would ACTUALLY type into the
+    # ATS search bar! 🔍💅
+    #
+    # Each key is a lowercase skill keyword; values are the tags
+    # it maps to. A single skill can generate MULTIPLE tags.
+    # Tags are deduplicated in the output.
+    # ═══════════════════════════════════════════════════════════════
+    TAG_MAPPING = {
+        # 💻 Programming & Development
+        "python": ["Python Developer", "Programming", "Backend Dev"],
+        "java": ["Java Developer", "Programming", "Backend Dev"],
+        "javascript": ["JS Developer", "Programming", "Web Dev"],
+        "typescript": ["TS Developer", "Programming", "Web Dev"],
+        "c++": ["C++ Developer", "Programming", "Sys Programming"],
+        "c#": ["C# Developer", "Programming", ".NET Development"],
+        "go": ["Go Developer", "Programming", "Backend Dev"],
+        "rust": ["Rust Developer", "Programming", "Sys Programming"],
+        "ruby": ["Ruby Developer", "Programming", "Web Dev"],
+        "php": ["PHP Developer", "Programming", "Web Dev"],
+        "swift": ["Swift Developer", "Programming", "Mobile Dev"],
+        "kotlin": ["Kotlin Developer", "Programming", "Mobile Dev"],
+        "scala": ["Scala Developer", "Programming", "Backend Dev"],
+        "r": ["R Programming", "Data Analysis", "Sci Computing"],
+        "matlab": ["MATLAB", "Eng Software", "Data Analysis"],
+        "sql": ["SQL", "DB Mgmt", "Data Analysis"],
+        "html": ["Web Dev", "Frontend Dev"],
+        "css": ["Web Dev", "Frontend Dev", "UI Development"],
+        "sass": ["Web Dev", "Frontend Dev", "UI Development"],
+
+        # 🌐 Frameworks & Libraries
+        "react": ["React Developer", "Frontend Dev", "Web Dev"],
+        "angular": ["Angular Developer", "Frontend Dev", "Web Dev"],
+        "vue": ["Vue.js Developer", "Frontend Dev", "Web Dev"],
+        "node": ["Node.js Developer", "Backend Dev", "Web Dev"],
+        "nodejs": ["Node.js Developer", "Backend Dev", "Web Dev"],
+        "express": ["Node.js Developer", "Backend Dev", "Web Dev"],
+        "django": ["Django Developer", "Python Developer", "Web Dev"],
+        "flask": ["Flask Developer", "Python Developer", "Web Dev"],
+        "spring": ["Spring Framework", "Java Developer", "Backend Dev"],
+        "spring boot": ["Spring Boot", "Java Developer", "Microservices"],
+        ".net": [".NET Developer", "C# Developer", "Backend Dev"],
+        "asp.net": [".NET Developer", "Web Dev", "Backend Dev"],
+        "laravel": ["Laravel Developer", "PHP Developer", "Web Dev"],
+        "rails": ["Ruby on Rails", "Ruby Developer", "Web Dev"],
+        "ruby on rails": ["Ruby on Rails", "Ruby Developer", "Web Dev"],
+        "next.js": ["Next.js Developer", "React Developer", "Full Stack"],
+        "nextjs": ["Next.js Developer", "React Developer", "Full Stack"],
+        "flutter": ["Flutter Developer", "Mobile Dev", "Cross-Platform"],
+        "react native": ["React Native", "Mobile Dev", "Cross-Platform"],
+        "tensorflow": ["TensorFlow", "Machine Learning", "AI/ML"],
+        "pytorch": ["PyTorch", "Machine Learning", "AI/ML"],
+        "pandas": ["Python Developer", "Data Analysis", "Data Engineering"],
+        "numpy": ["Python Developer", "Data Analysis", "Sci Computing"],
+        "scikit-learn": ["Machine Learning", "Data Science", "Python Developer"],
+        "spacy": ["NLP", "Machine Learning", "Python Developer"],
+
+        # ☁️ Cloud & DevOps
+        "aws": ["AWS", "Cloud Computing", "Cloud Infra"],
+        "azure": ["Azure", "Cloud Computing", "Cloud Infra"],
+        "gcp": ["Google Cloud", "Cloud Computing", "Cloud Infra"],
+        "google cloud": ["Google Cloud", "Cloud Computing", "Cloud Infra"],
+        "docker": ["Docker", "DevOps", "Containerization"],
+        "kubernetes": ["Kubernetes", "DevOps", "Orchestration"],
+        "terraform": ["Terraform", "IaC", "DevOps"],
+        "ansible": ["Ansible", "IaC", "DevOps"],
+        "jenkins": ["Jenkins", "CI/CD", "DevOps"],
+        "github actions": ["CI/CD", "DevOps", "Automation"],
+        "ci/cd": ["CI/CD", "DevOps", "Automation"],
+        "linux": ["Linux", "SysAdmin", "DevOps"],
+        "nginx": ["Nginx", "Web Server", "DevOps"],
+        "apache": ["Apache", "Web Server", "SysAdmin"],
+
+        # 📊 Data & Analytics
+        "tableau": ["Tableau", "Data Viz", "BI"],
+        "power bi": ["Power BI", "Data Viz", "BI"],
+        "excel": ["Excel", "Data Analysis", "Productivity"],
+        "sas": ["SAS", "Stats Analysis", "Data Analytics"],
+        "spss": ["SPSS", "Stats Analysis", "Data Analytics"],
+        "hadoop": ["Hadoop", "Big Data", "Data Engineering"],
+        "spark": ["Spark", "Big Data", "Data Engineering"],
+        "kafka": ["Kafka", "Data Streaming", "Data Engineering"],
+        "etl": ["ETL", "Data Engineering", "Data Pipeline"],
+        "data warehousing": ["Data Warehousing", "Data Engineering", "BI"],
+        "machine learning": ["Machine Learning", "AI/ML", "Data Science"],
+        "deep learning": ["Deep Learning", "AI/ML", "Data Science"],
+        "nlp": ["NLP", "AI/ML", "Data Science"],
+        "natural language processing": ["NLP", "AI/ML", "Data Science"],
+        "computer vision": ["Computer Vision", "AI/ML", "Data Science"],
+        "data mining": ["Data Mining", "Data Analysis", "Data Science"],
+        "big data": ["Big Data", "Data Engineering", "Data Analytics"],
+
+        # 🗄️ Databases
+        "mysql": ["MySQL", "DB Mgmt", "Backend Dev"],
+        "postgresql": ["PostgreSQL", "DB Mgmt", "Backend Dev"],
+        "mongodb": ["MongoDB", "NoSQL", "DB Mgmt"],
+        "redis": ["Redis", "Caching", "Backend Dev"],
+        "elasticsearch": ["Elasticsearch", "Search Engine", "Data Engineering"],
+        "oracle": ["Oracle Database", "DB Mgmt", "Enterprise Sys"],
+        "sql server": ["SQL Server", "DB Mgmt", "Enterprise Sys"],
+        "dynamodb": ["DynamoDB", "NoSQL", "AWS"],
+        "cassandra": ["Cassandra", "NoSQL", "Distributed Systems"],
+        "firebase": ["Firebase", "Mobile Dev", "Cloud Computing"],
+        "sqlite": ["SQLite", "DB Mgmt", "Embedded Systems"],
+
+        # 🏢 Enterprise & Business Software
+        "sap": ["SAP", "ERP Systems", "Enterprise SW"],
+        "oracle erp": ["Oracle ERP", "ERP Systems", "Enterprise SW"],
+        "salesforce": ["Salesforce", "CRM", "Sales Technology"],
+        "hubspot": ["HubSpot", "CRM", "MarTech"],
+        "jira": ["Jira", "Proj Mgmt", "Agile"],
+        "confluence": ["Confluence", "Documentation", "Proj Mgmt"],
+        "servicenow": ["ServiceNow", "ITSM", "Enterprise SW"],
+        "sharepoint": ["SharePoint", "Office 365", "Enterprise SW"],
+
+        # 📐 Design & Creative
+        "figma": ["Figma", "UI/UX Design", "Product Design"],
+        "sketch": ["Sketch", "UI/UX Design", "Product Design"],
+        "adobe xd": ["Adobe XD", "UI/UX Design", "Product Design"],
+        "photoshop": ["Photoshop", "Graphic Design", "Adobe Suite"],
+        "illustrator": ["Illustrator", "Graphic Design", "Adobe Suite"],
+        "indesign": ["InDesign", "Graphic Design", "Adobe Suite"],
+        "premiere pro": ["Premiere Pro", "Video Editing", "Adobe Suite"],
+        "after effects": ["After Effects", "Motion Graphics", "Adobe Suite"],
+        "autocad": ["AutoCAD", "CAD/CAM", "Eng Design"],
+        "solidworks": ["SolidWorks", "CAD/CAM", "Mechanical Design"],
+        "revit": ["Revit", "BIM", "Architecture"],
+
+        # 🔒 Security & Networking
+        "cybersecurity": ["Cybersecurity", "InfoSec", "IT Security"],
+        "penetration testing": ["Pen Testing", "Cybersecurity", "Security"],
+        "siem": ["SIEM", "Cybersecurity", "SecOps"],
+        "firewall": ["Network Security", "Cybersecurity", "Infrastructure"],
+        "networking": ["Networking", "IT Infrastructure", "SysAdmin"],
+        "cisco": ["Cisco", "Networking", "IT Infrastructure"],
+        "tcp/ip": ["Networking", "IT Infrastructure", "SysAdmin"],
+
+        # 🏗️ Methodologies & Practices
+        "agile": ["Agile", "Proj Mgmt", "Scrum"],
+        "scrum": ["Scrum", "Agile", "Proj Mgmt"],
+        "kanban": ["Kanban", "Agile", "Proj Mgmt"],
+        "devops": ["DevOps", "Automation", "CI/CD"],
+        "microservices": ["Microservices", "Architecture", "Backend Dev"],
+        "rest api": ["REST API", "API Development", "Backend Dev"],
+        "graphql": ["GraphQL", "API Development", "Backend Dev"],
+        "tdd": ["TDD", "Software Quality", "Testing"],
+        "unit testing": ["Unit Testing", "Software Quality", "Testing"],
+        "automation testing": ["Test Auto", "QA", "Software Quality"],
+        "selenium": ["Selenium", "Test Auto", "QA"],
+
+        # 💰 Finance & Accounting
+        "financial modeling": ["Fin Modeling", "Fin Analysis", "Finance"],
+        "financial analysis": ["Fin Analysis", "Finance", "Biz Analysis"],
+        "budgeting": ["Budgeting", "Fin Planning", "Finance"],
+        "forecasting": ["Forecasting", "Fin Planning", "Biz Analysis"],
+        "bookkeeping": ["Bookkeeping", "Accounting", "Finance"],
+        "gst": ["GST/Tax", "Accounting", "Compliance"],
+        "taxation": ["Taxation", "Accounting", "Compliance"],
+        "audit": ["Audit", "Accounting", "Compliance"],
+        "payroll": ["Payroll", "HR Operations", "Accounting"],
+        "quickbooks": ["QuickBooks", "Acct Software", "Finance"],
+        "xero": ["Xero", "Acct Software", "Finance"],
+
+        # 📣 Marketing & Digital
+        "seo": ["SEO", "Digital Marketing", "Content Marketing"],
+        "sem": ["SEM", "Digital Marketing", "Paid Advertising"],
+        "google analytics": ["Google Analytics", "Digital Marketing", "Data Analytics"],
+        "google ads": ["Google Ads", "Paid Advertising", "Digital Marketing"],
+        "facebook ads": ["Facebook Ads", "Social Media", "Paid Advertising"],
+        "social media marketing": ["Social Media", "Digital Marketing", "Content"],
+        "content marketing": ["Content Marketing", "Digital Marketing", "Content Strategy"],
+        "email marketing": ["Email Marketing", "Digital Marketing", "CRM"],
+        "copywriting": ["Copywriting", "Content Creation", "Marketing"],
+
+        # 🏭 Engineering & Manufacturing
+        "plc": ["PLC Programming", "Automation", "Manufacturing"],
+        "scada": ["SCADA", "Automation", "Manufacturing"],
+        "lean manufacturing": ["Lean Mfg", "Process Improv", "Operations"],
+        "six sigma": ["Six Sigma", "Process Improv", "QA Mgmt"],
+        "quality control": ["Quality Control", "QA Mgmt", "Manufacturing"],
+        "iso 9001": ["ISO 9001", "QA Mgmt", "Compliance"],
+        "project management": ["Proj Mgmt", "Planning", "Coordination"],
+        "pmp": ["PMP", "Proj Mgmt", "Certification"],
+
+        # 🗣️ HR & Administrative
+        "recruitment": ["Recruitment", "Talent Acquisition", "HR"],
+        "talent acquisition": ["Talent Acquisition", "Recruitment", "HR"],
+        "onboarding": ["Onboarding", "HR Operations", "Talent Mgmt"],
+        "performance management": ["Perf Mgmt", "HR", "Talent Mgmt"],
+        "training": ["L&D", "L&D", "HR"],
+        "employee relations": ["Emp Relations", "HR", "People Mgmt"],
+        "hris": ["HRIS", "HR Technology", "HR Operations"],
+        "workday": ["Workday", "HRIS", "HR Technology"],
+        "successfactors": ["SuccessFactors", "HRIS", "HR Technology"],
+    }
+
+    # ═══════════════════════════════════════════════════════════════
+    # 🏷️ CORE TAGS — Recruiter quick-pick palette
+    #
+    # Human-judgment tags that AI cannot infer from resume text alone.
+    # Organised into groups shown as a palette in the annotation UI.
+    # Each group maps to a colour category for visual clarity.
+    # ═══════════════════════════════════════════════════════════════
+    CORE_TAGS = {
+        "Availability": [
+            "Available Now", "Immediate", "1-Month Notice",
+            "2-Month Notice", "3-Month Notice",
+        ],
+        "Work Mode": [
+            "Remote Only", "Hybrid OK", "On-site Only",
+            "Open to Relocation", "Willing to Travel",
+        ],
+        "Work Type": [
+            "Full-time", "Part-time", "Contract", "Freelance", "Temp",
+        ],
+        "Seniority": [
+            "Fresh Grad", "Junior", "Mid-level", "Senior",
+            "Lead", "Manager", "Director", "C-Suite",
+        ],
+        "People": [
+            "Team Lead", "People Manager", "Individual Contributor",
+            "Career Switch", "Return to Work",
+        ],
+        "Languages": [
+            "English", "Mandarin", "Malay", "Tamil",
+            "Bilingual", "Trilingual",
+        ],
+        "Status": [
+            "Citizen (SG)", "PR (SG)", "EP Holder", "Citizen (MY)",
+            "PR (MY)", "Visa Required",
+        ],
+        # ── Domain-specific ─────────────────────────────────────────
+        "Tech": [
+            "Full Stack", "Frontend", "Backend", "Mobile Dev",
+            "DevOps", "Data Science", "AI/ML", "Cybersecurity",
+            "Cloud", "QA / Testing",
+        ],
+        "Finance": [
+            "ACCA", "CPA", "CFA", "Big 4", "Audit",
+            "Tax", "Payroll", "Financial Reporting", "SAP User",
+        ],
+        "HR": [
+            "Generalist", "Talent Acquisition", "L&D",
+            "Payroll", "HRIS", "Business Partner",
+        ],
+        "Sales & Mktg": [
+            "B2B", "B2C", "SaaS Sales", "Key Account Mgmt",
+            "Digital Mktg", "SEO/SEM", "CRM",
+        ],
+    }
+
+    @classmethod
+    def generate_tags(cls, hard_skills: List[str]) -> List[str]:
+        """
+        🏷️ Generate searchable ATS tags from hard skills!
+
+        This is the MATCHMAKER of our system, darling! 💘
+        Takes specific hard skills like "Python", "Django", "PostgreSQL"
+        and generates broader search tags like "Backend Dev",
+        "Web Dev", "DB Mgmt" — the kind of terms
+        a recruiter would type into the ATS search bar! 🔍
+
+        Strategy:
+          1. ALWAYS include the original hard skill itself as a tag
+             (recruiters search "Java" not just "Programming"!)
+          2. Exact match: skill text → TAG_MAPPING lookup for broader tags
+          3. Partial match: check if any mapping key appears IN the skill
+          4. Deduplicate + sort alphabetically for consistency
+
+        Args:
+            hard_skills: List of hard skill strings from SKILL annotations
+
+        Returns:
+            Sorted, deduplicated list of tag strings
+        """
+        if not hard_skills:
+            return []
+
+        tags = set()
+        for skill in hard_skills:
+            skill_stripped = skill.strip()
+            skill_lower = skill_stripped.lower()
+            if not skill_lower:
+                continue
+
+            # ── ALWAYS include the original hard skill as a tag ────────
+            # Recruiters search "SAP", "C++", "Java" directly — these
+            # exact terms MUST be in the tag list alongside the broader
+            # categories. Like listing both the designer AND the style! 👗✨
+            tags.add(skill_stripped)
+
+            # ── Strategy 1: Exact match → add broader tags too ─────────
+            if skill_lower in cls.TAG_MAPPING:
+                tags.update(cls.TAG_MAPPING[skill_lower])
+                continue
+
+            # ── Strategy 2: Partial/substring match ────────────────────
+            # Check if any known keyword appears WITHIN the skill text
+            # e.g., "Advanced Python Programming" matches "python"
+            for keyword, tag_list in cls.TAG_MAPPING.items():
+                if keyword in skill_lower or skill_lower in keyword:
+                    tags.update(tag_list)
+                    break  # Take first match to avoid over-tagging
+
+        return sorted(tags)
+
     @classmethod
     def classify(cls, text: str, entities: Optional[List["SpanAnnotation"]] = None) -> Dict[str, str]:
         """
-        Returns predicted Function and Industry based on text and optional entity texts.
+        Returns predicted Function, Industry, Hard Skills, Soft Skills,
+        and AI-generated Tags based on text and optional entity annotations.
+
+        🎭 THE FULL CLASSIFICATION SUITE — Now with Skills & Tags! ✨
+        Think of it as the complete talent profile:
+          • Function = What department? (HR, IT, Sales...)
+          • Industry = What sector? (Banking, Healthcare...)
+          • Hard Skills = Technical abilities extracted from resume
+          • Soft Skills = Interpersonal skills extracted from resume
+          • Tags = AI-generated ATS search keywords from hard skills
         """
         # Combine raw text with entity texts for richer matching
         full_text = text.lower()
+
+        # ── Extract hard skills and soft skills from entities ──────────
+        hard_skills = []
+        soft_skills = []
         if entities:
             entity_texts = [e.text.lower() for e in entities if e.text]
             full_text += " " + " ".join(entity_texts)
+
+            # Collect SKILL and SOFT_SKILL entity types separately
+            for e in entities:
+                if not e.text or not e.text.strip():
+                    continue
+                if e.entity_type == "SKILL":
+                    hard_skills.append(e.text.strip())
+                elif e.entity_type == "SOFT_SKILL":
+                    soft_skills.append(e.text.strip())
+
+        # Deduplicate while preserving order (like removing duplicate outfits! 👗)
+        hard_skills = list(dict.fromkeys(hard_skills))
+        soft_skills = list(dict.fromkeys(soft_skills))
 
         def _best_match(keywords_dict, default="others"):
             scores = {}
@@ -240,7 +576,17 @@ class ResumeClassifier:
 
         function = _best_match(cls.FUNCTION_KEYWORDS, default="others")
         industry = _best_match(cls.INDUSTRY_KEYWORDS, default="Others")
-        return {"Function": function, "Industry": industry}
+
+        # ── Generate AI tags from hard skills ──────────────────────────
+        tags = cls.generate_tags(hard_skills)
+
+        return {
+            "Function": function,
+            "Industry": industry,
+            "HardSkills": hard_skills,
+            "SoftSkills": soft_skills,
+            "Tags": tags,
+        }
 
 
 class EntityCategory(Enum):
@@ -401,6 +747,30 @@ class EntitySchema:
             shortcut_key="3",
             is_required=True,
             max_per_doc=3
+        ))
+
+        self._add(EntityType(
+            name="LINKEDIN",
+            label="LinkedIn URL",
+            category=EntityCategory.PERSONAL,
+            description="LinkedIn profile URLs. Include the complete URL from first char to last.",
+            examples=["linkedin.com/in/johndoe", "https://www.linkedin.com/in/johndoe"],
+            boundary_rules="START: First character of URL. END: Last character of URL.",
+            color="#0a66c2",
+            shortcut_key="L",
+            max_per_doc=1
+        ))
+
+        self._add(EntityType(
+            name="GITHUB",
+            label="GitHub URL",
+            category=EntityCategory.PERSONAL,
+            description="GitHub profile URLs. Include the complete URL from first char to last.",
+            examples=["github.com/johndoe", "https://github.com/johndoe"],
+            boundary_rules="START: First character of URL. END: Last character of URL.",
+            color="#8b949e",
+            shortcut_key="G",
+            max_per_doc=1
         ))
 
         self._add(EntityType(
@@ -2114,6 +2484,8 @@ class PreAnnotator:
         annotations.extend(self._detect_phones(text))
         annotations.extend(self._detect_dates(text))
         annotations.extend(self._detect_nric(text))
+        annotations.extend(self._detect_linkedin(text))
+        annotations.extend(self._detect_github(text))
         
         # --- Dictionary matching ---
         annotations.extend(self._match_dictionary(
@@ -2223,6 +2595,36 @@ class PreAnnotator:
             for m in pattern.finditer(text)
         ]
     
+    def _detect_linkedin(self, text: str) -> List[SpanAnnotation]:
+        """Detect LinkedIn profile URLs."""
+        pattern = re.compile(r'(?:https?://)?(?:www\.)?linkedin\.com/in/[\w\-]+/?', re.IGNORECASE)
+        return [
+            SpanAnnotation(
+                entity_type="LINKEDIN",
+                char_start=m.start(),
+                char_end=m.end(),
+                text=m.group(),
+                confidence=0.95,
+                annotator="auto_regex"
+            )
+            for m in pattern.finditer(text)
+        ]
+
+    def _detect_github(self, text: str) -> List[SpanAnnotation]:
+        """Detect GitHub profile URLs."""
+        pattern = re.compile(r'(?:https?://)?(?:www\.)?github\.com/[\w\-]+/?', re.IGNORECASE)
+        return [
+            SpanAnnotation(
+                entity_type="GITHUB",
+                char_start=m.start(),
+                char_end=m.end(),
+                text=m.group(),
+                confidence=0.95,
+                annotator="auto_regex"
+            )
+            for m in pattern.finditer(text)
+        ]
+
     def _match_dictionary(
         self,
         text: str,
@@ -2375,7 +2777,9 @@ class TrainingExporter:
         
         logger.info(f"📤 Exported {len(documents)} docs to CoNLL: {output_path}")
         
-         # =================================================================
+        return output_path
+
+    # =================================================================
     # 🧠 CLASSIFICATION TRAINING EXPORT
     # Exports human-corrected Function/Industry labels for
     # training a text classification model to REPLACE the
@@ -2443,6 +2847,9 @@ class TrainingExporter:
                 nd.candidate_id,
                 nd.function,
                 nd.industry,
+                nd.hard_skills,
+                nd.soft_skills,
+                nd.tags,
                 se.name,
                 se.experience_raw,
                 se.education_raw,
@@ -2478,6 +2885,9 @@ class TrainingExporter:
                     nd.candidate_id,
                     nd.function,
                     nd.industry,
+                    nd.hard_skills,
+                    nd.soft_skills,
+                    nd.tags,
                     se.name,
                     se.experience_raw,
                     se.education_raw,
@@ -2579,6 +2989,11 @@ class TrainingExporter:
                 # Extract skills
                 skills = safe_json(row["skills_json"], [])
                 features["skills"] = skills if isinstance(skills, list) else []
+
+                # 🆕 Separated hard skills, soft skills, and AI-generated tags
+                features["hard_skills"] = safe_json(row["hard_skills"], [])
+                features["soft_skills"] = safe_json(row["soft_skills"], [])
+                features["tags"] = safe_json(row["tags"], [])
 
                 # Extract education
                 edu = safe_json(row["education_json"], [])
@@ -3024,6 +3439,11 @@ class TrainingExporter:
           structured_row["education_json"]→ Education (parsed JSON)
           structured_row["projects"]      → Project Experience (raw text)
 
+        🆕 New separated skills & tags fields:
+          doc.metadata["hard_skills"]     → Hard Skills (from SKILL annotations)
+          doc.metadata["soft_skills"]     → Soft Skills (from SOFT_SKILL annotations)
+          doc.metadata["tags"]            → Tags (AI-generated ATS search keywords)
+
         Fields NOT in structured_extractions (always from annotations):
           Gender, Expected Location, Created By, Creation Date, Team
 
@@ -3105,6 +3525,7 @@ class TrainingExporter:
 
         # ══════════════════════════════════════════════════════════════════
         # TAGS (skills) — parse skills_json column; fallback to annotations
+        # 🆕 Also load separated hard_skills, soft_skills, and AI-generated tags
         # ══════════════════════════════════════════════════════════════════
 
         raw_skills = parse_json(fb.get("skills_json"), None)
@@ -3129,6 +3550,30 @@ class TrainingExporter:
                         if val and val.lower() not in tags_seen:
                             tags_seen.add(val.lower())
                             tags.append(val)
+
+        # ── 🆕 Separated Hard Skills / Soft Skills / AI Tags ──────────
+        # Priority: ner_documents columns → structured_extractions → annotations
+        #
+        # Hard Skills = technical skills from SKILL entities
+        # Soft Skills = interpersonal skills from SOFT_SKILL entities
+        # AI Tags = recruiter-friendly search keywords generated from hard skills
+        hard_skills = doc.metadata.get("hard_skills", [])
+        soft_skills = doc.metadata.get("soft_skills", [])
+        ai_tags = doc.metadata.get("tags", [])
+
+        # Fallback: if ner_documents didn't have them, try structured_extractions
+        if not hard_skills:
+            hard_skills = parse_json(fb.get("hard_skills_json"), [])
+        if not soft_skills:
+            soft_skills = parse_json(fb.get("soft_skills_json"), [])
+        if not ai_tags:
+            ai_tags = parse_json(fb.get("tags_json"), [])
+
+        # Final fallback: extract from annotations directly
+        if not hard_skills:
+            hard_skills = all_of("SKILL")
+        if not soft_skills:
+            soft_skills = all_of("SOFT_SKILL")
 
         # ══════════════════════════════════════════════════════════════════
         # WORK EXPERIENCE — parse experience_json; fallback to annotation groups
@@ -3237,6 +3682,10 @@ class TrainingExporter:
         # ANNOTATION-ONLY FIELDS (no structured_extractions column for these)
         # ══════════════════════════════════════════════════════════════════
 
+        # LinkedIn / GitHub — read from annotations
+        linkedin = first("LINKEDIN")
+        github   = first("GITHUB")
+
         # Gender is not stored in structured_extractions — read from annotations
         gender = first("GENDER")
 
@@ -3253,6 +3702,8 @@ class TrainingExporter:
             "Name":             name,
             "Phone":            phone,
             "Email":            email,
+            "LinkedIn":         linkedin,
+            "GitHub":           github,
             "Current Company":  current_company,
             "Current Title":    current_title,
             "Team":             "",   # Recruiter-assigned — not on resume
@@ -3269,7 +3720,10 @@ class TrainingExporter:
             "Work Experience":  work_experience,
             "Education":        education,
             "Project Experience": project_experience,
-            "tags":             tags,
+            "Hard Skills":      hard_skills,
+            "Soft Skills":      soft_skills,
+            "Tags":             ai_tags,
+            "tags":             tags,  # Legacy combined skills (backward compat)
         }
 
         return profile
@@ -3361,7 +3815,8 @@ class TrainingExporter:
             "Function", "Industry", "Summary", "Language Skills",
         ]
         # Nested columns are JSON-serialized in the CSV cell
-        NESTED_COLUMNS = ["Work Experience", "Education", "Project Experience", "tags"]
+        NESTED_COLUMNS = ["Work Experience", "Education", "Project Experience",
+                          "Hard Skills", "Soft Skills", "Tags", "tags"]
         ALL_COLUMNS = FLAT_COLUMNS + NESTED_COLUMNS
 
         with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
@@ -3503,6 +3958,9 @@ class AnnotationStorage:
                     notes TEXT DEFAULT '',
                     function TEXT DEFAULT '',
                     industry TEXT DEFAULT '',
+                    hard_skills TEXT DEFAULT '[]',
+                    soft_skills TEXT DEFAULT '[]',
+                    tags TEXT DEFAULT '[]',
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
@@ -3530,6 +3988,15 @@ class AnnotationStorage:
                 conn.execute("ALTER TABLE ner_documents ADD COLUMN industry TEXT DEFAULT ''")
             except sqlite3.OperationalError:
                 pass
+
+            # 🆕 Add hard_skills/soft_skills/tags columns (for existing databases)
+            # These store JSON arrays of skills and AI-generated search tags.
+            # Like adding three new wardrobe sections to an existing closet! 👗✨
+            for col in ['hard_skills', 'soft_skills', 'tags']:
+                try:
+                    conn.execute(f"ALTER TABLE ner_documents ADD COLUMN {col} TEXT DEFAULT '[]'")
+                except sqlite3.OperationalError:
+                    pass  # column already exists — fabulous!
 
             # ----------------------------------------------------------
             # 🔄 MIGRATION: verified_candidates schema v1 → v2
@@ -3662,7 +4129,54 @@ class AnnotationStorage:
                 CREATE INDEX IF NOT EXISTS idx_verified_industry
                 ON verified_candidates(industry)
             """)
-            
+
+            # ----------------------------------------------------------
+            # TABLE 4: iaa_annotations
+            #
+            # Stores a SECOND annotator's labels for the same document,
+            # enabling Inter-Annotator Agreement (IAA) computation.
+            # The primary annotations live in ner_annotations; this
+            # table holds the comparison set from annotator B.
+            # ----------------------------------------------------------
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS iaa_annotations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    candidate_id INTEGER NOT NULL,
+                    doc_id TEXT NOT NULL,
+                    annotator_name TEXT NOT NULL,
+                    entity_type TEXT NOT NULL,
+                    char_start INTEGER NOT NULL,
+                    char_end INTEGER NOT NULL,
+                    text_content TEXT,
+                    layer INTEGER DEFAULT 0,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(doc_id, annotator_name, entity_type, char_start, char_end, layer)
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_iaa_doc
+                ON iaa_annotations(doc_id)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_iaa_annotator
+                ON iaa_annotations(annotator_name)
+            """)
+
+            # IAA sessions: tracks which docs have been assigned for IAA
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS iaa_sessions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    doc_id TEXT NOT NULL,
+                    candidate_id INTEGER NOT NULL,
+                    annotator_a TEXT NOT NULL DEFAULT '',
+                    annotator_b TEXT NOT NULL DEFAULT '',
+                    status TEXT DEFAULT 'pending',
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    completed_at DATETIME,
+                    UNIQUE(doc_id, annotator_b)
+                )
+            """)
+
             conn.commit()
             logger.info("🗄️ NER annotation tables initialized")
         except sqlite3.Error as e:
@@ -3775,6 +4289,21 @@ class AnnotationStorage:
             metadata = json.loads(doc_row["notes"]) if doc_row["notes"] else {}
             metadata["function"] = doc_row["function"] or ""
             metadata["industry"] = doc_row["industry"] or ""
+
+            # 🆕 Load hard skills, soft skills, and tags (JSON arrays)
+            # Gracefully handle missing columns in older databases
+            try:
+                metadata["hard_skills"] = json.loads(doc_row["hard_skills"] or "[]")
+            except (KeyError, json.JSONDecodeError):
+                metadata["hard_skills"] = []
+            try:
+                metadata["soft_skills"] = json.loads(doc_row["soft_skills"] or "[]")
+            except (KeyError, json.JSONDecodeError):
+                metadata["soft_skills"] = []
+            try:
+                metadata["tags"] = json.loads(doc_row["tags"] or "[]")
+            except (KeyError, json.JSONDecodeError):
+                metadata["tags"] = []
             
             doc = AnnotatedDocument(
                 doc_id=doc_id,
@@ -3839,7 +4368,10 @@ class AnnotationStorage:
             conn.close()
 
     def update_document_metadata(self, doc_id: str, status: Optional[str] = None,
-                             function: Optional[str] = None, industry: Optional[str] = None):
+                             function: Optional[str] = None, industry: Optional[str] = None,
+                             hard_skills: Optional[List[str]] = None,
+                             soft_skills: Optional[List[str]] = None,
+                             tags: Optional[List[str]] = None):
         """
         Update status and/or classification for a document.
 
@@ -3848,6 +4380,8 @@ class AnnotationStorage:
         Now uses INSERT OR IGNORE to ensure the row EXISTS before updating.
         Think of it as making sure the guest list is on the table BEFORE
         writing names on it! 📋✨
+
+        🆕 Now also handles hard_skills, soft_skills, and tags (JSON arrays).
         """
         conn = sqlite3.connect(self.db_path)
         try:
@@ -3864,8 +4398,11 @@ class AnnotationStorage:
             # exist; does nothing if it already does. No data is overwritten.
             conn.execute("""
                 INSERT OR IGNORE INTO ner_documents
-                    (doc_id, candidate_id, status, function, industry, created_at, updated_at)
-                VALUES (?, ?, 'pending', '', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    (doc_id, candidate_id, status, function, industry,
+                     hard_skills, soft_skills, tags,
+                     created_at, updated_at)
+                VALUES (?, ?, 'pending', '', '', '[]', '[]', '[]',
+                        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """, (doc_id, candidate_id))
 
             # ── Step 2: Now UPDATE the row (guaranteed to exist) ──────────
@@ -3880,6 +4417,16 @@ class AnnotationStorage:
             if industry is not None:
                 updates.append("industry = ?")
                 params.append(industry)
+            # 🆕 Handle skills & tags (stored as JSON arrays)
+            if hard_skills is not None:
+                updates.append("hard_skills = ?")
+                params.append(json.dumps(hard_skills, ensure_ascii=False))
+            if soft_skills is not None:
+                updates.append("soft_skills = ?")
+                params.append(json.dumps(soft_skills, ensure_ascii=False))
+            if tags is not None:
+                updates.append("tags = ?")
+                params.append(json.dumps(tags, ensure_ascii=False))
             if not updates:
                 conn.commit()  # Commit the INSERT OR IGNORE at minimum
                 return
@@ -4083,21 +4630,39 @@ class AnnotationStorage:
         # e.g. "work@co.com; personal@gmail.com"
         email = join_vals('EMAIL', '; ')
         phone = join_vals('PHONE', '; ')
+        linkedin = first_val('LINKEDIN')
+        github = first_val('GITHUB')
         date_of_birth = first_val('DATE_OF_BIRTH')
         location = join_vals('LOCATION', '; ')
         nationality = first_val('NATIONALITY')
 
         # ══════════════════════════════════════════════════════════════
         # 🛠️ SKILLS — Dual storage: raw (pipe-separated) + JSON array
+        # 🆕 Now also stores hard_skills, soft_skills, and AI-generated tags separately!
         # ══════════════════════════════════════════════════════════════
-        # Combine SKILL + SOFT_SKILL + SKILL_CATEGORY into unified skills
+        # Hard skills = SKILL entities (technical abilities)
+        hard_skills_list = all_vals('SKILL')
+        # Soft skills = SOFT_SKILL entities (interpersonal abilities)
+        soft_skills_list = all_vals('SOFT_SKILL')
+
+        # Combined skills (backward compatible with existing skills_raw/skills_json)
         all_skills = (
-            all_vals('SKILL') +
-            all_vals('SOFT_SKILL') +
+            hard_skills_list +
+            soft_skills_list +
             all_vals('SKILL_CATEGORY')
         )
         skills_raw = ' | '.join(all_skills) if all_skills else ""
         skills_json_str = json.dumps(all_skills, ensure_ascii=False) if all_skills else "[]"
+
+        # 🏷️ AI-Generated Tags — map hard skills to ATS search keywords
+        # Deduplicate hard skills before generating tags
+        unique_hard = list(dict.fromkeys(hard_skills_list))
+        generated_tags = ResumeClassifier.generate_tags(unique_hard)
+
+        # Store as JSON strings for the new columns
+        hard_skills_json = json.dumps(list(dict.fromkeys(hard_skills_list)), ensure_ascii=False)
+        soft_skills_json = json.dumps(list(dict.fromkeys(soft_skills_list)), ensure_ascii=False)
+        tags_json = json.dumps(generated_tags, ensure_ascii=False)
 
          # ══════════════════════════════════════════════════════════════
         # 💼 EXPERIENCE — Build structured work history
@@ -4348,7 +4913,8 @@ class AnnotationStorage:
         try:
             # ── Ensure function/industry columns exist ────────────────
             # These may not be in the original schema — add them gracefully
-            for col in ['function', 'industry']:
+            for col in ['function', 'industry', 'linkedin', 'github',
+                        'hard_skills_json', 'soft_skills_json', 'tags_json']:
                 try:
                     conn.execute(
                         f"ALTER TABLE structured_extractions ADD COLUMN {col} TEXT DEFAULT ''"
@@ -4375,6 +4941,8 @@ class AnnotationStorage:
             add_update('name', name)
             add_update('email', email)
             add_update('phone', phone)
+            add_update('linkedin', linkedin)
+            add_update('github', github)
             add_update('date_of_birth', date_of_birth)
             add_update('location', location)
             add_update('nationality', nationality)
@@ -4382,6 +4950,11 @@ class AnnotationStorage:
             # 🛠️ Skills
             add_update('skills_raw', skills_raw)
             add_update('skills_json', skills_json_str)
+
+            # 🆕 Separated skills + AI-generated tags
+            add_update('hard_skills_json', hard_skills_json)
+            add_update('soft_skills_json', soft_skills_json)
+            add_update('tags_json', tags_json)
 
             # 💼 Experience
             add_update('experience_raw', experience_raw)
@@ -4436,6 +5009,360 @@ class AnnotationStorage:
             conn.rollback()
         finally:
             conn.close()
+
+# =============================================================================
+# 📏 INTER-ANNOTATOR AGREEMENT (IAA)
+# =============================================================================
+
+class InterAnnotatorAgreement:
+    """
+    Computes Inter-Annotator Agreement metrics between two sets of
+    annotations on the same documents. Supports:
+
+      - Cohen's Kappa (token-level BIO tag agreement)
+      - Span-level F1 / Precision / Recall (exact & partial match)
+      - Per-entity-type breakdown
+
+    Requires at least one document with annotations from two annotators.
+    """
+
+    def __init__(self, db_path: str, schema: EntitySchema):
+        self.db_path = db_path
+        self.schema = schema
+        self.tokenizer = ResumeTokenizer()
+        self.tagger = BIOTagger(schema)
+
+    # ------------------------------------------------------------------
+    # Storage helpers
+    # ------------------------------------------------------------------
+
+    def save_iaa_annotations(self, doc_id: str, annotator_name: str,
+                             annotations_list: List[Dict],
+                             candidate_id: Optional[int] = None):
+        """Save annotator B's annotations for IAA comparison."""
+        if candidate_id is None and doc_id.startswith("doc_"):
+            try:
+                candidate_id = int(doc_id[4:])
+            except ValueError:
+                candidate_id = 0
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            with conn:
+                # Clear previous IAA annotations for this doc + annotator
+                conn.execute(
+                    "DELETE FROM iaa_annotations WHERE doc_id = ? AND annotator_name = ?",
+                    (doc_id, annotator_name)
+                )
+                manual_counter = -1
+                for ann in annotations_list:
+                    cs = int(ann.get("char_start", -1))
+                    ce = int(ann.get("char_end", -1))
+                    if cs < 0 or ce < 0:
+                        cs = manual_counter
+                        ce = manual_counter
+                        manual_counter -= 1
+                    conn.execute("""
+                        INSERT OR REPLACE INTO iaa_annotations
+                            (candidate_id, doc_id, annotator_name, entity_type,
+                             char_start, char_end, text_content, layer)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        candidate_id, doc_id, annotator_name,
+                        ann.get("entity_type", ""),
+                        cs, ce,
+                        ann.get("text", ""),
+                        int(ann.get("layer", 0))
+                    ))
+
+                # Update / create IAA session
+                conn.execute("""
+                    INSERT OR REPLACE INTO iaa_sessions
+                        (doc_id, candidate_id, annotator_b, status, completed_at)
+                    VALUES (?, ?, ?, 'completed', CURRENT_TIMESTAMP)
+                """, (doc_id, candidate_id, annotator_name))
+
+            logger.info(f"📏 Saved IAA annotations: {doc_id} by {annotator_name} "
+                        f"({len(annotations_list)} spans)")
+        except sqlite3.Error as e:
+            logger.error(f"❌ IAA save failed: {e}")
+            raise
+        finally:
+            conn.close()
+
+    def get_iaa_docs(self) -> List[Dict]:
+        """Return docs that have both primary and IAA annotations."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute("""
+                SELECT DISTINCT ia.doc_id, ia.candidate_id, ia.annotator_name,
+                       nd.annotator as annotator_a, ia.created_at
+                FROM iaa_annotations ia
+                JOIN ner_documents nd ON ia.doc_id = nd.doc_id
+                ORDER BY ia.created_at DESC
+            """).fetchall()
+            return [dict(r) for r in rows]
+        except sqlite3.OperationalError:
+            return []
+        finally:
+            conn.close()
+
+    # ------------------------------------------------------------------
+    # Core metrics
+    # ------------------------------------------------------------------
+
+    def _load_spans(self, doc_id: str, table: str = "ner_annotations",
+                    annotator_name: Optional[str] = None) -> List[Dict]:
+        """Load annotation spans from a table."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            if table == "iaa_annotations" and annotator_name:
+                rows = conn.execute(
+                    "SELECT entity_type, char_start, char_end, text_content "
+                    "FROM iaa_annotations WHERE doc_id = ? AND annotator_name = ?",
+                    (doc_id, annotator_name)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT entity_type, char_start, char_end, text_content "
+                    "FROM ner_annotations WHERE doc_id = ?",
+                    (doc_id,)
+                ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def _spans_to_set(self, spans: List[Dict]) -> Set[Tuple[str, int, int]]:
+        """Convert spans to a set of (entity_type, start, end) tuples."""
+        return {
+            (s["entity_type"], s["char_start"], s["char_end"])
+            for s in spans if s["char_start"] >= 0
+        }
+
+    def compute_span_agreement(self, doc_id: str,
+                               annotator_b: str) -> Dict[str, Any]:
+        """
+        Compute span-level agreement between primary annotations and
+        annotator B's IAA annotations for a single document.
+
+        Returns exact-match and partial-match (overlap) metrics.
+        """
+        spans_a = self._load_spans(doc_id, "ner_annotations")
+        spans_b = self._load_spans(doc_id, "iaa_annotations", annotator_b)
+
+        set_a = self._spans_to_set(spans_a)
+        set_b = self._spans_to_set(spans_b)
+
+        # Exact match
+        exact_match = set_a & set_b
+        exact_precision = len(exact_match) / len(set_b) if set_b else 0.0
+        exact_recall = len(exact_match) / len(set_a) if set_a else 0.0
+        exact_f1 = (2 * exact_precision * exact_recall /
+                     (exact_precision + exact_recall)
+                     if (exact_precision + exact_recall) > 0 else 0.0)
+
+        # Partial match: overlapping spans with same entity type
+        partial_matches = 0
+        for et_b, cs_b, ce_b in set_b:
+            for et_a, cs_a, ce_a in set_a:
+                if et_a == et_b and cs_a < ce_b and cs_b < ce_a:
+                    partial_matches += 1
+                    break
+
+        partial_precision = partial_matches / len(set_b) if set_b else 0.0
+        partial_recall_matches = 0
+        for et_a, cs_a, ce_a in set_a:
+            for et_b, cs_b, ce_b in set_b:
+                if et_a == et_b and cs_a < ce_b and cs_b < ce_a:
+                    partial_recall_matches += 1
+                    break
+        partial_recall = partial_recall_matches / len(set_a) if set_a else 0.0
+        partial_f1 = (2 * partial_precision * partial_recall /
+                       (partial_precision + partial_recall)
+                       if (partial_precision + partial_recall) > 0 else 0.0)
+
+        # Per-entity-type breakdown
+        entity_types = {s[0] for s in set_a} | {s[0] for s in set_b}
+        per_entity = {}
+        for et in sorted(entity_types):
+            ea = {(cs, ce) for t, cs, ce in set_a if t == et}
+            eb = {(cs, ce) for t, cs, ce in set_b if t == et}
+            match = ea & eb
+            p = len(match) / len(eb) if eb else 0.0
+            r = len(match) / len(ea) if ea else 0.0
+            f = 2 * p * r / (p + r) if (p + r) > 0 else 0.0
+            per_entity[et] = {
+                "count_a": len(ea), "count_b": len(eb),
+                "exact_matches": len(match),
+                "precision": round(p, 4), "recall": round(r, 4),
+                "f1": round(f, 4)
+            }
+
+        return {
+            "doc_id": doc_id,
+            "spans_a": len(set_a),
+            "spans_b": len(set_b),
+            "exact": {
+                "matches": len(exact_match),
+                "precision": round(exact_precision, 4),
+                "recall": round(exact_recall, 4),
+                "f1": round(exact_f1, 4),
+            },
+            "partial": {
+                "matches": partial_matches,
+                "precision": round(partial_precision, 4),
+                "recall": round(partial_recall, 4),
+                "f1": round(partial_f1, 4),
+            },
+            "per_entity": per_entity,
+        }
+
+    def compute_token_kappa(self, doc_id: str, annotator_b: str,
+                            raw_text: str) -> Dict[str, Any]:
+        """
+        Compute Cohen's Kappa on BIO tags at the token level.
+        Requires the raw text to tokenize.
+        """
+        spans_a = self._load_spans(doc_id, "ner_annotations")
+        spans_b = self._load_spans(doc_id, "iaa_annotations", annotator_b)
+
+        # Convert to SpanAnnotation objects
+        def to_span_anns(spans):
+            return [
+                SpanAnnotation(
+                    entity_type=s["entity_type"],
+                    char_start=s["char_start"],
+                    char_end=s["char_end"],
+                    text=s.get("text_content", "")
+                )
+                for s in spans if s["char_start"] >= 0
+            ]
+
+        anns_a = to_span_anns(spans_a)
+        anns_b = to_span_anns(spans_b)
+
+        tokens = self.tokenizer.tokenize(raw_text)
+        tags_a = self.tagger.tag_tokens(tokens, anns_a)
+        tags_b = self.tagger.tag_tokens(tokens, anns_b)
+
+        if len(tags_a) != len(tags_b):
+            min_len = min(len(tags_a), len(tags_b))
+            tags_a = tags_a[:min_len]
+            tags_b = tags_b[:min_len]
+
+        n = len(tags_a)
+        if n == 0:
+            return {"kappa": 0.0, "observed_agreement": 0.0, "tokens": 0}
+
+        # Observed agreement
+        agree = sum(1 for a, b in zip(tags_a, tags_b) if a == b)
+        po = agree / n
+
+        # Expected agreement (by chance)
+        all_labels = sorted(set(tags_a) | set(tags_b))
+        pe = 0.0
+        for label in all_labels:
+            freq_a = sum(1 for t in tags_a if t == label) / n
+            freq_b = sum(1 for t in tags_b if t == label) / n
+            pe += freq_a * freq_b
+
+        kappa = (po - pe) / (1 - pe) if (1 - pe) > 0 else 1.0
+
+        return {
+            "kappa": round(kappa, 4),
+            "observed_agreement": round(po, 4),
+            "expected_agreement": round(pe, 4),
+            "tokens": n,
+            "agreed_tokens": agree,
+        }
+
+    def compute_all(self, raw_texts: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+        """
+        Compute IAA across ALL documents that have dual annotations.
+        Returns per-doc results and aggregate summary.
+
+        Args:
+            raw_texts: optional dict of {doc_id: raw_text} for kappa.
+                       If not provided, kappa is skipped.
+        """
+        iaa_docs = self.get_iaa_docs()
+        if not iaa_docs:
+            return {
+                "status": "no_data",
+                "message": "No documents with dual annotations found.",
+                "docs": [],
+                "aggregate": {},
+            }
+
+        results = []
+        all_exact_f1 = []
+        all_partial_f1 = []
+        all_kappa = []
+        per_entity_agg: Dict[str, Dict[str, list]] = defaultdict(
+            lambda: {"f1": [], "precision": [], "recall": []}
+        )
+
+        for doc_info in iaa_docs:
+            doc_id = doc_info["doc_id"]
+            ann_b = doc_info["annotator_name"]
+
+            span_result = self.compute_span_agreement(doc_id, ann_b)
+            all_exact_f1.append(span_result["exact"]["f1"])
+            all_partial_f1.append(span_result["partial"]["f1"])
+
+            for et, metrics in span_result["per_entity"].items():
+                per_entity_agg[et]["f1"].append(metrics["f1"])
+                per_entity_agg[et]["precision"].append(metrics["precision"])
+                per_entity_agg[et]["recall"].append(metrics["recall"])
+
+            doc_result = {
+                "doc_id": doc_id,
+                "candidate_id": doc_info["candidate_id"],
+                "annotator_a": doc_info.get("annotator_a", ""),
+                "annotator_b": ann_b,
+                "span_agreement": span_result,
+            }
+
+            # Token-level kappa if raw text is available
+            if raw_texts and doc_id in raw_texts:
+                kappa_result = self.compute_token_kappa(
+                    doc_id, ann_b, raw_texts[doc_id]
+                )
+                doc_result["token_kappa"] = kappa_result
+                all_kappa.append(kappa_result["kappa"])
+
+            results.append(doc_result)
+
+        # Aggregate
+        def safe_mean(vals):
+            return round(sum(vals) / len(vals), 4) if vals else 0.0
+
+        entity_summary = {}
+        for et, agg in sorted(per_entity_agg.items()):
+            entity_summary[et] = {
+                "avg_f1": safe_mean(agg["f1"]),
+                "avg_precision": safe_mean(agg["precision"]),
+                "avg_recall": safe_mean(agg["recall"]),
+                "doc_count": len(agg["f1"]),
+            }
+
+        aggregate = {
+            "total_docs": len(results),
+            "avg_exact_f1": safe_mean(all_exact_f1),
+            "avg_partial_f1": safe_mean(all_partial_f1),
+            "per_entity": entity_summary,
+        }
+        if all_kappa:
+            aggregate["avg_kappa"] = safe_mean(all_kappa)
+
+        return {
+            "status": "ok",
+            "docs": results,
+            "aggregate": aggregate,
+        }
+
 
 # =============================================================================
 # 🖥️ CLI INTERFACE
