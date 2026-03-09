@@ -1472,29 +1472,100 @@ def api_iaa_dashboard():
     typical IAA workflow involves 20-50 dual-annotated docs, so this
     is perfectly performant. 🏎️💨
     """
-    # Gather raw texts for all IAA-annotated docs (needed for kappa)
-    iaa_docs = iaa_engine.get_iaa_docs()
-    raw_texts = {}
-    for doc_info in iaa_docs:
-        doc_id = doc_info["doc_id"]
-        cid = doc_info.get("candidate_id", 0)
-        if cid:
-            text = get_raw_text_for_candidate(cid)
-            if text:
-                raw_texts[doc_id] = text
+    try:
+        # Gather raw texts for all IAA-annotated docs (needed for kappa)
+        iaa_docs = iaa_engine.get_iaa_docs()
+        raw_texts = {}
+        for doc_info in iaa_docs:
+            doc_id = doc_info["doc_id"]
+            cid = doc_info.get("candidate_id", 0)
+            if cid:
+                text = get_raw_text_for_candidate(cid)
+                if text:
+                    raw_texts[doc_id] = text
 
-    result = iaa_engine.compute_all(raw_texts=raw_texts if raw_texts else None)
+        result = iaa_engine.compute_all(raw_texts=raw_texts if raw_texts else None)
 
-    # Enrich with entity color map for the heatmap visualization
-    result["entity_colors"] = schema.get_color_map()
+        # Enrich with entity color map for the heatmap visualization
+        result["entity_colors"] = schema.get_color_map()
 
-    # Add entity labels for display
-    entity_labels = {}
-    for name, etype in schema.entities.items():
-        entity_labels[name] = etype.label
-    result["entity_labels"] = entity_labels
+        # Add entity labels for display
+        entity_labels = {}
+        for name, etype in schema.entities.items():
+            entity_labels[name] = etype.label
+        result["entity_labels"] = entity_labels
 
-    return jsonify(result)
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"❌ IAA dashboard failed: {e}", exc_info=True)
+        return jsonify({
+            "status": "error",
+            "error": str(e),
+            "message": "IAA dashboard computation failed. Check server logs for details."
+        }), 500
+
+
+@app.route("/api/iaa/annotations/<doc_id>")
+def api_iaa_annotations(doc_id: str):
+    """
+    📏 Load existing IAA annotations for a specific doc + annotator.
+
+    Called by enterIAAMode() on page load so Annotator B sees their
+    PREVIOUS work restored — not a blank slate every time they return.
+
+    Query params:
+        ?annotator=<name>   The annotator whose IAA annotations to load.
+
+    Returns:
+        {
+          "found": true/false,
+          "annotations": [ { entity_type, char_start, char_end, text, layer }, ... ],
+          "span_count": N
+        }
+    """
+    annotator = request.args.get("annotator", "").strip()
+    if not annotator:
+        return jsonify({"found": False, "annotations": [], "span_count": 0,
+                        "error": "Missing ?annotator= query param"}), 400
+
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            """SELECT entity_type, char_start, char_end, text_content, layer
+               FROM iaa_annotations
+               WHERE doc_id = ? AND annotator_name = ?
+               ORDER BY char_start""",
+            (doc_id, annotator)
+        ).fetchall()
+    except sqlite3.OperationalError:
+        # Table doesn't exist yet — totally fine, just means no saved IAA yet
+        return jsonify({"found": False, "annotations": [], "span_count": 0})
+    finally:
+        conn.close()
+
+    if not rows:
+        return jsonify({"found": False, "annotations": [], "span_count": 0})
+
+    # Reshape to match the frontend annotation object format
+    annotations_out = [
+        {
+            "entity_type": r["entity_type"],
+            "char_start":  r["char_start"],
+            "char_end":    r["char_end"],
+            "text":        r["text_content"] or "",
+            "layer":       r["layer"] or 0,
+        }
+        for r in rows
+        if r["char_start"] >= 0  # filter out placeholder negatives
+    ]
+
+    logger.info(f"📏 Loaded {len(annotations_out)} IAA annotations: {doc_id} by {annotator}")
+    return jsonify({
+        "found": True,
+        "annotations": annotations_out,
+        "span_count": len(annotations_out)
+    })
 
 
 @app.route("/api/iaa/docs")
@@ -2956,7 +3027,7 @@ function renderStats(d) {
         // Convert ENTITY_NAME → Entity Name for display
         const label = name.replace(/_/g, ' ')
                           .toLowerCase()
-                          .replace(/\b\w/g, c => c.toUpperCase());
+                          .replace(/\\b\\w/g, c => c.toUpperCase());
         return `
         <div class="entity-bar-row">
             <div class="entity-bar-label" title="${name}">${label}</div>
@@ -5064,7 +5135,13 @@ ANNOTATE_TEMPLATE = """
     <span class="iaa-badge">IAA MODE</span>
     <span>Annotating as <strong id="iaaBannerName">—</strong> (Annotator B).
           Primary annotations hidden · Label from scratch.</span>
+    <!-- Save status indicator — shows ✅ after successful save, ⚠️ if unsaved changes -->
+    <span id="iaaSaveStatus" style="font-size:0.72rem; color:var(--text-muted);
+          margin-left:8px; transition: color 0.3s;">
+        <!-- Populated dynamically by JS -->
+    </span>
     <button class="btn btn-sm" onclick="saveIAAAnnotations()"
+            id="iaaSaveBtn"
             style="margin-left:auto; font-size:0.78rem; padding:6px 18px;
                    background:rgba(247,120,186,0.15);
                    border: 2px solid var(--accent-pink); color:var(--accent-pink); font-weight:700;">
@@ -5951,6 +6028,9 @@ document.getElementById('textPanel').addEventListener('mouseup', (e) => {
         annotator:   'human'
     });
 
+    // Mark IAA annotations as unsaved whenever a new label is added in IAA mode
+    if (iaaMode) setIAASaveStatus('unsaved');
+
     selection.removeAllRanges();
     renderText();
     showToast(`✅ Added ${activeEntityType}: "${selectedText.substring(0, 40)}${selectedText.length > 40 ? '...' : ''}"`);
@@ -6074,6 +6154,8 @@ function updateAnnoList() {
 
 function deleteAnnotation(idx) {
     annotations.splice(idx, 1);
+    // Mark IAA annotations as unsaved whenever a label is removed in IAA mode
+    if (iaaMode) setIAASaveStatus('unsaved');
     renderText();
 }
 
@@ -8014,8 +8096,69 @@ function buildShortcutGrid() {
 /** @type {boolean} Whether we're currently in IAA annotation mode */
 let iaaMode = false;
 
+/** @type {boolean} Tracks whether IAA annotations have unsaved changes */
+let iaaHasUnsavedChanges = false;
+
 /** @type {string} Scope for the IAA dashboard: 'doc' or 'all' */
 let iaaDashboardScope = 'all';
+
+/**
+ * setIAASaveStatus(state, spanCount?)
+ *
+ * Updates the save status indicator in the IAA banner.
+ * Like a little scoreboard that always tells Annotator B
+ * whether their work is safe! 📋✨
+ *
+ * States:
+ *   'loading'  → ⏳ fetching previous annotations on mode enter
+ *   'saved'    → ✅ N spans saved  (shown after successful save or on restore)
+ *   'unsaved'  → ● Unsaved changes  (shown when annotations are modified)
+ *   'saving'   → 💾 Saving...  (shown while the fetch is in-flight)
+ *   'error'    → ⚠️ Save failed  (shown if save request errors out)
+ */
+function setIAASaveStatus(state, spanCount) {
+    const el = document.getElementById('iaaSaveStatus');
+    const btn = document.getElementById('iaaSaveBtn');
+    if (!el) return;
+
+    switch (state) {
+        case 'loading':
+            el.textContent = '⏳ Loading previous work...';
+            el.style.color = 'var(--text-muted)';
+            iaaHasUnsavedChanges = false;
+            break;
+        case 'saved':
+            el.textContent = `✅ ${spanCount != null ? spanCount + ' span' + (spanCount !== 1 ? 's' : '') + ' ' : ''}saved`;
+            el.style.color = 'var(--accent-green)';
+            iaaHasUnsavedChanges = false;
+            // Flash the save button green briefly as confirmation
+            if (btn) {
+                btn.style.borderColor = 'var(--accent-green)';
+                btn.style.color = 'var(--accent-green)';
+                setTimeout(() => {
+                    btn.style.borderColor = 'var(--accent-pink)';
+                    btn.style.color = 'var(--accent-pink)';
+                }, 2500);
+            }
+            break;
+        case 'unsaved':
+            el.textContent = '● Unsaved changes';
+            el.style.color = 'var(--accent-yellow)';
+            iaaHasUnsavedChanges = true;
+            break;
+        case 'saving':
+            el.textContent = '💾 Saving...';
+            el.style.color = 'var(--text-muted)';
+            break;
+        case 'error':
+            el.textContent = '⚠️ Save failed — try again';
+            el.style.color = 'var(--accent-red)';
+            iaaHasUnsavedChanges = true;
+            break;
+        default:
+            el.textContent = '';
+    }
+}
 
 // -----------------------------------------------------------------
 // 👤 ANNOTATOR NAME — localStorage-backed identity
@@ -8131,30 +8274,66 @@ function enterIAAMode() {
 
     iaaMode = true;
 
-    // ── Backup & clear primary annotations ───────────────────────
+    // ── Backup & clear primary annotations ───────────────────────────
+    // We always back up Annotator A's work so we can restore it on exit.
     primaryAnnotationsBackup = JSON.parse(JSON.stringify(annotations));
     annotations = [];
     renderText();
     updateAnnoList();
 
-    // ── Visual transformation ────────────────────────────────────
+    // ── Visual transformation ─────────────────────────────────────────
     document.body.classList.add('iaa-active');
     const normalBtns = document.getElementById('normalSaveButtons');
     if (normalBtns) normalBtns.classList.add('iaa-dimmed-btn');
 
-    // ── Show banner ──────────────────────────────────────────────
+    // ── Show banner ───────────────────────────────────────────────────
     const banner = document.getElementById('iaaBanner');
     banner.style.display = 'flex';
     document.getElementById('iaaBannerName').textContent = annotatorName;
 
-    // Persist for next candidate
+    // Persist IAA mode across page loads / candidate navigation
     localStorage.setItem('iaa_mode_active', 'true');
 
-    showToast(
-        `📏 IAA Mode ON — annotating as "${annotatorName}". ` +
-        `Primary annotations hidden. Label from scratch! ✨`,
-        'success', 5000
-    );
+    // ── THE FIX: Load previously saved IAA annotations for this doc ───
+    // Without this, every time Annotator B re-enters IAA mode their
+    // previous labels are gone — like re-painting a canvas you already
+    // finished! This fetches their saved work from the DB and restores it.
+    setIAASaveStatus('loading');  // Show a loading indicator immediately
+    fetch(`/api/iaa/annotations/${DOC_ID}?annotator=${encodeURIComponent(annotatorName)}`)
+        .then(res => res.json())
+        .then(data => {
+            if (data.found && data.annotations && data.annotations.length > 0) {
+                // ✅ Previous IAA work found — restore it!
+                annotations = data.annotations;
+                renderText();
+                updateAnnoList();
+                setIAASaveStatus('saved', data.span_count);
+                showToast(
+                    `📏 IAA Mode ON — restored ${data.span_count} saved annotation` +
+                    `${data.span_count !== 1 ? 's' : ''} by "${annotatorName}". ` +
+                    `Continue labeling or save when done! ✨`,
+                    'success', 5000
+                );
+            } else {
+                // 🆕 No previous work — clean slate as expected
+                setIAASaveStatus('unsaved');
+                showToast(
+                    `📏 IAA Mode ON — annotating as "${annotatorName}". ` +
+                    `Primary annotations hidden. Label from scratch! ✨`,
+                    'success', 5000
+                );
+            }
+        })
+        .catch(err => {
+            // Network error loading previous annotations — warn but don't block
+            console.warn('Could not load previous IAA annotations:', err);
+            setIAASaveStatus('unsaved');
+            showToast(
+                `📏 IAA Mode ON — annotating as "${annotatorName}". ` +
+                `(Could not load previous work: ${err}) ⚠️`,
+                'warning', 5000
+            );
+        });
 }
 
 /**
@@ -8217,6 +8396,9 @@ function saveIAAAnnotations() {
         return;
     }
 
+    // Show saving state on the banner button
+    setIAASaveStatus('saving');
+
     const payload = {
         doc_id: DOC_ID,
         annotator_name: annotatorName,
@@ -8228,20 +8410,33 @@ function saveIAAAnnotations() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
     })
-    .then(res => res.json())
+    .then(res => {
+        if (!res.ok) {
+            return res.json().catch(() => {
+                throw new Error(`Server error ${res.status}`);
+            }).then(errData => {
+                throw new Error(errData.error || `HTTP ${res.status}`);
+            });
+        }
+        return res.json();
+    })
     .then(data => {
         if (data.success) {
+            // ✅ Update the banner status to "saved" with span count
+            setIAASaveStatus('saved', data.spans);
             showToast(
-                `📏 IAA annotations saved! ${data.spans} spans by ${annotatorName}. ` +
-                `Open the IAA dashboard to see agreement metrics! 🏆`,
+                `✅ IAA annotations saved! ${data.spans} span${data.spans !== 1 ? 's' : ''} ` +
+                `by "${annotatorName}" — your labels are locked in, darling! 🏆`,
                 'success', 5000
             );
         } else {
+            setIAASaveStatus('error');
             showToast('❌ IAA save failed: ' + (data.error || 'Unknown'), 'error', 6000);
         }
     })
     .catch(err => {
-        showToast('❌ Network error: ' + err, 'error', 6000);
+        setIAASaveStatus('error');
+        showToast('❌ Network error saving IAA: ' + err, 'error', 6000);
     });
 }
 
@@ -8296,9 +8491,24 @@ function loadIAADashboard() {
         : '/api/iaa/dashboard';
 
     fetch(url)
-        .then(res => res.json())
+        .then(res => {
+            if (!res.ok) {
+                return res.json().catch(() => {
+                    throw new Error(`Server error ${res.status} (${res.statusText})`);
+                }).then(errData => {
+                    throw new Error(errData.error || errData.message || `HTTP ${res.status}`);
+                });
+            }
+            return res.json();
+        })
         .then(data => {
-            if (data.status === 'no_data') {
+            if (data.status === 'error') {
+                body.innerHTML = `<div style="text-align:center; padding:40px; color:var(--accent-red);">
+                    ❌ IAA Error: ${escapeHtml(data.error || data.message || 'Unknown error')}<br>
+                    <small style="color:var(--text-muted); margin-top:8px; display:block;">
+                        Check the server logs for the full traceback.
+                    </small></div>`;
+            } else if (data.status === 'no_data') {
                 renderIAAEmptyState(body, data.message);
             } else if (iaaDashboardScope === 'doc') {
                 renderIAASingleDoc(body, data);
@@ -8308,7 +8518,7 @@ function loadIAADashboard() {
         })
         .catch(err => {
             body.innerHTML = `<div style="text-align:center; padding:40px; color:var(--accent-red);">
-                ❌ Failed to load IAA data: ${err}</div>`;
+                ❌ Failed to load IAA data: ${escapeHtml(String(err))}</div>`;
         });
 }
 

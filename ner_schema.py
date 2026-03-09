@@ -1877,6 +1877,102 @@ class BIOTagger:
         
         return token_texts, token_tags
     
+    def tag_tokens(
+        self,
+        tokens: List[Token],
+        annotations: List[SpanAnnotation]
+    ) -> List[str]:
+        """
+        🏷️ Tag pre-tokenized Token objects against a list of SpanAnnotations.
+
+        This is the convenience wrapper for compute_token_kappa() — it receives
+        Token objects (which already carry char_start/char_end) and SpanAnnotation
+        objects (which also carry char_start/char_end), so we use those positions
+        DIRECTLY instead of rebuilding them.
+
+        Drama analogy: tag_text() measures the fabric AND cuts it. tag_tokens()
+        is called AFTER the fabric is already cut — the Token objects already
+        know exactly where they live in the text. We just pin the labels on! 📌✂️
+
+        The key difference vs the old draft:
+        ❌ OLD (broken): treated tokens as plain strings, called len(token) to
+                         rebuild offsets from scratch — crashed because Token
+                         is not a string!
+        ✅ NEW (fixed):  uses token.char_start / token.char_end directly, and
+                         ann.char_start / ann.char_end from SpanAnnotation.
+
+        NOTE: We do NOT delegate to tag_text() here because tag_text() has an
+        early-exit guard `if not text: return [], []` that would short-circuit
+        when passed text="" — even if tokens are pre-supplied. So this method
+        reimplements the core tagging loop directly. 💅
+
+        Args:
+            tokens:      Pre-tokenized list of Token objects (each has .char_start,
+                         .char_end, and .text attributes).
+            annotations: List of SpanAnnotation objects (each has .char_start,
+                         .char_end, and .entity_type attributes).
+
+        Returns:
+            List[str]: BIO tag per token. Length always equals len(tokens).
+            e.g. ['B-JOB_TITLE', 'I-JOB_TITLE', 'O', 'B-ORGANIZATION']
+
+        Edge cases handled:
+            - Empty tokens       → returns []
+            - Empty annotations  → returns ['O', ...] for all tokens
+            - Unknown entity types → skipped with a warning (matches tag_text)
+            - Overlapping spans  → longest span wins (token_claimed flag)
+        """
+        if not tokens:
+            return []  # Nothing to tag — the stage is empty, honey! 🎭
+
+        if not annotations:
+            # No entities at all — every token is an outsider.
+            # Tragic, but perfectly valid. 🥀
+            return ["O"] * len(tokens)
+
+        # Start every token as 'O' — outside any entity
+        token_tags = ["O"] * len(tokens)
+        # Prevent double-assignment when spans overlap at token boundaries
+        # (longest span wins, enforced by the sort below)
+        token_claimed = [False] * len(tokens)
+
+        # Sort annotations: earlier start first, then LONGER span first.
+        # This mirrors tag_text()'s conflict resolution — longest span wins! 👑
+        sorted_anns = sorted(
+            annotations,
+            key=lambda a: (a.char_start, -(a.char_end - a.char_start))
+        )
+
+        for ann in sorted_anns:
+            # Validate entity type against the schema — unknown types get skipped
+            if ann.entity_type not in self._valid_entities:
+                logger.warning(
+                    f"⚠️ tag_tokens: unknown entity type '{ann.entity_type}' — skipping"
+                )
+                continue
+
+            first_token_found = False  # Tracks whether we've placed a B- tag yet
+
+            for i, token in enumerate(tokens):
+                # Skip tokens already claimed by a higher-priority span
+                if token_claimed[i]:
+                    continue
+
+                # Use the Token's OWN char_start/char_end — no rebuilding needed!
+                # Overlap: token starts before ann ends AND token ends after ann starts
+                if token.char_start < ann.char_end and token.char_end > ann.char_start:
+                    if not first_token_found:
+                        # First overlapping token → Beginning tag 🌟
+                        token_tags[i] = f"B-{ann.entity_type}"
+                        first_token_found = True
+                    else:
+                        # Subsequent overlapping tokens → Inside tag ✨
+                        token_tags[i] = f"I-{ann.entity_type}"
+
+                    token_claimed[i] = True  # Lock this token — no double-dressing!
+
+        return token_tags
+
     def _spans_overlap(
         self,
         start1: int, end1: int,
