@@ -5184,15 +5184,19 @@ class InterAnnotatorAgreement:
             conn.close()
 
     def get_iaa_docs(self) -> List[Dict]:
-        """Return docs that have both primary and IAA annotations."""
+        """Return docs that have IAA annotations (with or without primary annotations).
+
+        🐛 BUG FIX: Uses LEFT JOIN so docs appear even when ner_documents has no
+        row yet (e.g. Annotator B worked before Annotator A ever clicked Save).
+        """
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         try:
             rows = conn.execute("""
                 SELECT DISTINCT ia.doc_id, ia.candidate_id, ia.annotator_name,
-                       nd.annotator as annotator_a, ia.created_at
+                       COALESCE(nd.annotator, '') as annotator_a, ia.created_at
                 FROM iaa_annotations ia
-                JOIN ner_documents nd ON ia.doc_id = nd.doc_id
+                LEFT JOIN ner_documents nd ON ia.doc_id = nd.doc_id
                 ORDER BY ia.created_at DESC
             """).fetchall()
             return [dict(r) for r in rows]
@@ -5200,6 +5204,44 @@ class InterAnnotatorAgreement:
             return []
         finally:
             conn.close()
+
+    def get_iaa_annotators(self) -> List[Dict]:
+        """
+        📋 Return all unique Annotator B names that have saved IAA annotations,
+        along with their document count and most recent annotation date.
+
+        Used to power the annotator selector in the IAA dashboard so users can
+        filter metrics by a specific Annotator B — or view everyone at once.
+
+        Returns list of dicts:
+            [
+                {
+                    "annotator_name": "Soraya",
+                    "doc_count": 5,
+                    "last_annotated": "2026-03-09 11:00:00"
+                },
+                ...
+            ]
+        """
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute("""
+                SELECT
+                    annotator_name,
+                    COUNT(DISTINCT doc_id)  AS doc_count,
+                    MAX(created_at)         AS last_annotated
+                FROM iaa_annotations
+                WHERE annotator_name IS NOT NULL AND annotator_name != ''
+                GROUP BY annotator_name
+                ORDER BY last_annotated DESC
+            """).fetchall()
+            return [dict(r) for r in rows]
+        except sqlite3.OperationalError:
+            return []
+        finally:
+            conn.close()
+
 
     # ------------------------------------------------------------------
     # Core metrics
@@ -5371,16 +5413,29 @@ class InterAnnotatorAgreement:
             "agreed_tokens": agree,
         }
 
-    def compute_all(self, raw_texts: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+    def compute_all(self, raw_texts: Optional[Dict[str, str]] = None,
+                    annotator_filter: Optional[str] = None) -> Dict[str, Any]:
         """
-        Compute IAA across ALL documents that have dual annotations.
+        Compute IAA across documents that have dual annotations.
         Returns per-doc results and aggregate summary.
 
         Args:
-            raw_texts: optional dict of {doc_id: raw_text} for kappa.
-                       If not provided, kappa is skipped.
+            raw_texts:        optional dict of {doc_id: raw_text} for kappa.
+                              If not provided, kappa is skipped.
+            annotator_filter: optional Annotator B name to restrict results.
+                              When set, only docs annotated by that person are
+                              included — like filtering the scoreboard to one judge! 🏆
+                              When None (default), all annotators are included.
         """
         iaa_docs = self.get_iaa_docs()
+
+        # ── Apply annotator filter if requested ────────────────────────────
+        if annotator_filter:
+            iaa_docs = [
+                d for d in iaa_docs
+                if d["annotator_name"] == annotator_filter
+            ]
+
         if not iaa_docs:
             return {
                 "status": "no_data",
@@ -5454,6 +5509,8 @@ class InterAnnotatorAgreement:
             "status": "ok",
             "docs": results,
             "aggregate": aggregate,
+            # Pass the active filter back so frontend knows what's being shown
+            "annotator_filter": annotator_filter or None,
         }
 
 

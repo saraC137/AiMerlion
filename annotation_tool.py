@@ -1570,14 +1570,24 @@ def api_iaa_dashboard():
     Returns the full compute_all() result from InterAnnotatorAgreement,
     enriched with raw_texts for kappa computation.
 
+    Optional query params:
+        ?annotator=<name>   Filter to a specific Annotator B's work only.
+                            When omitted, all annotators are aggregated.
+
     Performance note: This scans ALL iaa_annotations rows — for large
     datasets (500+ docs), consider adding pagination. For now, the
     typical IAA workflow involves 20-50 dual-annotated docs, so this
     is perfectly performant. 🏎️💨
     """
     try:
-        # Gather raw texts for all IAA-annotated docs (needed for kappa)
+        # Optional: filter dashboard to a single annotator's work 🎯
+        annotator_filter = request.args.get("annotator", "").strip() or None
+
+        # Gather raw texts for kappa — only for the relevant docs
         iaa_docs = iaa_engine.get_iaa_docs()
+        if annotator_filter:
+            iaa_docs = [d for d in iaa_docs if d["annotator_name"] == annotator_filter]
+
         raw_texts = {}
         for doc_info in iaa_docs:
             doc_id = doc_info["doc_id"]
@@ -1587,7 +1597,10 @@ def api_iaa_dashboard():
                 if text:
                     raw_texts[doc_id] = text
 
-        result = iaa_engine.compute_all(raw_texts=raw_texts if raw_texts else None)
+        result = iaa_engine.compute_all(
+            raw_texts=raw_texts if raw_texts else None,
+            annotator_filter=annotator_filter
+        )
 
         # Enrich with entity color map for the heatmap visualization
         result["entity_colors"] = schema.get_color_map()
@@ -1669,6 +1682,33 @@ def api_iaa_annotations(doc_id: str):
         "annotations": annotations_out,
         "span_count": len(annotations_out)
     })
+
+
+@app.route("/api/iaa/annotators")
+def api_iaa_annotators():
+    """
+    👥 Return all unique Annotator B names that have saved IAA annotations.
+
+    Powers the annotator selector in the IAA dashboard so users can:
+    - See WHO has done IAA work (with doc count + last annotated date)
+    - Filter the entire dashboard to a specific annotator's work
+    - Add a new annotator name to the system
+
+    Returns:
+        {
+          "annotators": [
+            { "annotator_name": "Soraya", "doc_count": 5, "last_annotated": "..." },
+            ...
+          ],
+          "total": N
+        }
+    """
+    try:
+        annotators = iaa_engine.get_iaa_annotators()
+        return jsonify({"annotators": annotators, "total": len(annotators)})
+    except Exception as e:
+        logger.error(f"❌ IAA annotators list failed: {e}", exc_info=True)
+        return jsonify({"annotators": [], "total": 0, "error": str(e)})
 
 
 @app.route("/api/iaa/docs")
@@ -4624,6 +4664,52 @@ ANNOTATE_TEMPLATE = """
         max-height: 90vh;
     }
 
+    /* ── IAA Annotator selector pills ───────────────────────────────────
+       Shown in the modal header — one pill per Annotator B + "All" pill.
+       Active pill is highlighted pink; inactive are subtle border style. */
+    .iaa-annotator-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 3px 10px;
+        border-radius: 20px;
+        border: 1px solid var(--border);
+        background: var(--bg-elevated);
+        color: var(--text-secondary);
+        font-size: 0.68rem;
+        font-family: var(--font-body);
+        cursor: pointer;
+        transition: all 0.15s ease;
+        white-space: nowrap;
+    }
+    .iaa-annotator-pill:hover {
+        border-color: var(--accent-pink);
+        color: var(--accent-pink);
+        background: rgba(247,120,186,0.08);
+    }
+    .iaa-annotator-pill.active {
+        border-color: var(--accent-pink);
+        background: rgba(247,120,186,0.18);
+        color: var(--accent-pink);
+        font-weight: 600;
+    }
+    .iaa-annotator-pill-count {
+        font-size: 0.60rem;
+        opacity: 0.7;
+        background: rgba(255,255,255,0.07);
+        padding: 1px 5px;
+        border-radius: 10px;
+    }
+    .iaa-annotator-add-btn {
+        border-style: dashed;
+        color: var(--text-muted);
+    }
+    .iaa-annotator-add-btn:hover {
+        border-color: var(--accent-green);
+        color: var(--accent-green);
+        background: rgba(86,211,100,0.08);
+    }
+
     /* IAA mode banner — shown when annotator B is working */
     .iaa-mode-banner {
         background: linear-gradient(90deg, rgba(247,120,186,0.18), rgba(238,184,255,0.10), rgba(247,120,186,0.18));
@@ -5813,7 +5899,7 @@ ANNOTATE_TEMPLATE = """
      ================================================================ -->
 <div class="inspector-overlay" id="iaaOverlay" onclick="if(event.target===this)closeInspector('iaa')">
   <div class="inspector-modal iaa-modal-wide" role="dialog" aria-modal="true">
-    <div class="inspector-header" style="border-bottom-color:var(--accent-pink);">
+    <div class="inspector-header" style="border-bottom-color:var(--accent-pink); flex-wrap:wrap; gap:8px;">
       <h3>📏 Inter-Annotator Agreement</h3>
       <div style="display:flex; gap:8px; align-items:center;">
         <!-- Toggle: show this doc only vs. all docs -->
@@ -5822,6 +5908,14 @@ ANNOTATE_TEMPLATE = """
             🔍 This Doc
         </button>
         <button class="preview-close" onclick="closeInspector('iaa')" title="Close (Escape)">✕</button>
+      </div>
+      <!-- ── Annotator selector row ─────────────────────────────────
+           Shown below the title row. Pills for each Annotator B + "All".
+           Hidden until annotators are loaded from the API. -->
+      <div id="iaaAnnotatorSelector"
+           style="display:none; flex-wrap:wrap; gap:6px; width:100%;
+                  padding-top:6px; border-top:1px solid var(--border); margin-top:2px;">
+        <!-- Pills injected by renderAnnotatorSelector() -->
       </div>
     </div>
     <div class="inspector-body" id="iaaModalBody" style="padding:20px 24px;">
@@ -8365,6 +8459,18 @@ let iaaHasUnsavedChanges = false;
 let iaaDashboardScope = 'all';
 
 /**
+ * @type {string|null} Currently selected Annotator B filter for the dashboard.
+ * null = show all annotators aggregated; string = filter to that name only.
+ */
+let iaaSelectedAnnotator = null;
+
+/**
+ * @type {Array} Cached list of annotators from /api/iaa/annotators.
+ * Populated once when the dashboard opens, refreshed on demand.
+ */
+let iaaAnnotatorList = [];
+
+/**
  * setIAASaveStatus(state, spanCount?)
  *
  * Updates the save status indicator in the IAA banner.
@@ -8744,14 +8850,180 @@ function saveIAAAnnotations() {
 /**
  * openIAAModal()
  *
- * Opens the IAA dashboard modal and fetches data based on current scope.
- * Default scope is 'all' (aggregate across all dual-annotated docs).
- *
- * Like opening the judges' scorecards at the end of the competition! 🏆
+ * Opens the IAA dashboard modal. On first open, fetches the annotator
+ * list so the selector is populated before any data loads.
  */
 function openIAAModal() {
     openInspector('iaa');
-    loadIAADashboard();
+    // Fetch annotators first, then load the dashboard data.
+    // Like getting the guest list before the party starts! 🎉
+    loadIAAAnnotators().then(() => loadIAADashboard());
+}
+
+/**
+ * loadIAAAnnotators()
+ *
+ * Fetches the list of all Annotator B names from the server and
+ * refreshes the annotator selector UI in the modal header.
+ * Returns a Promise so callers can chain .then().
+ */
+function loadIAAAnnotators() {
+    return fetch('/api/iaa/annotators')
+        .then(res => res.ok ? res.json() : { annotators: [] })
+        .then(data => {
+            iaaAnnotatorList = data.annotators || [];
+            renderAnnotatorSelector();
+        })
+        .catch(() => {
+            iaaAnnotatorList = [];
+            renderAnnotatorSelector();
+        });
+}
+
+/**
+ * renderAnnotatorSelector()
+ *
+ * Builds the annotator filter pill-buttons in the IAA modal header.
+ * Shows an "All" pill plus one pill per unique Annotator B, each
+ * showing name + doc count. Active pill is highlighted pink.
+ *
+ * Like a guest list at the door — tap a name to see only their scores! 💅
+ */
+function renderAnnotatorSelector() {
+    const container = document.getElementById('iaaAnnotatorSelector');
+    if (!container) return;
+
+    if (iaaAnnotatorList.length === 0) {
+        // No IAA annotators yet — hide the selector entirely
+        container.innerHTML = '';
+        container.style.display = 'none';
+        return;
+    }
+
+    container.style.display = 'flex';
+
+    // Build pill buttons: "All" + one per annotator
+    const allActive = iaaSelectedAnnotator === null;
+    let html = `
+        <!-- "All Annotators" pill -->
+        <button class="iaa-annotator-pill ${allActive ? 'active' : ''}"
+                onclick="selectIAAAnnotator(null)"
+                title="Show aggregate across all annotators">
+            👥 All
+            <span class="iaa-annotator-pill-count">${iaaAnnotatorList.reduce((s, a) => s + (a.doc_count || 0), 0)} docs</span>
+        </button>`;
+
+    for (const ann of iaaAnnotatorList) {
+        const isActive = iaaSelectedAnnotator === ann.annotator_name;
+        // Format last annotated date nicely (just show date, not time)
+        const lastDate = ann.last_annotated
+            ? ann.last_annotated.split(' ')[0]
+            : '';
+        html += `
+        <button class="iaa-annotator-pill ${isActive ? 'active' : ''}"
+                onclick="selectIAAAnnotator(${JSON.stringify(ann.annotator_name)})"
+                title="Last annotated: ${escapeHtml(lastDate)}">
+            👤 ${escapeHtml(ann.annotator_name)}
+            <span class="iaa-annotator-pill-count">${ann.doc_count} doc${ann.doc_count !== 1 ? 's' : ''}</span>
+        </button>`;
+    }
+
+    // "Add annotator" mini-input — lets you register a new IAA annotator name
+    // so they can enter IAA mode even before they've saved their first doc
+    html += `
+        <button class="iaa-annotator-pill iaa-annotator-add-btn"
+                onclick="showAddAnnotatorPrompt()"
+                title="Add a new IAA annotator">
+            ＋ Add
+        </button>`;
+
+    container.innerHTML = html;
+}
+
+/**
+ * selectIAAAnnotator(name)
+ *
+ * Sets the active annotator filter and reloads the dashboard.
+ * Passing null shows all annotators aggregated.
+ */
+function selectIAAAnnotator(name) {
+    iaaSelectedAnnotator = name;
+    renderAnnotatorSelector();   // Update active pill immediately
+    if (iaaDashboardScope === 'all') {
+        loadIAADashboard();          // Reload with new filter
+    }
+}
+
+/**
+ * showAddAnnotatorPrompt()
+ *
+ * Shows a tiny inline input to type a new annotator name.
+ * On confirm, sets that person as the active annotator so they
+ * can immediately enter IAA mode — their name will appear in the
+ * selector once they've actually saved their first annotation.
+ */
+function showAddAnnotatorPrompt() {
+    const container = document.getElementById('iaaAnnotatorSelector');
+    if (!container) return;
+
+    // Replace the ＋ Add button with an inline input form
+    const addBtn = container.querySelector('.iaa-annotator-add-btn');
+    if (!addBtn) return;
+
+    addBtn.outerHTML = `
+        <span style="display:inline-flex; align-items:center; gap:4px;">
+            <input id="iaaNewAnnotatorInput"
+                   type="text"
+                   placeholder="Annotator name…"
+                   maxlength="60"
+                   style="font-size:0.7rem; padding:3px 8px; border-radius:6px;
+                           border:1px solid var(--accent-pink); background:var(--bg-elevated);
+                           color:var(--text-primary); width:130px; outline:none;"
+                   onkeydown="if(event.key==='Enter') confirmAddAnnotator();
+                              if(event.key==='Escape') renderAnnotatorSelector();">
+            <button class="iaa-annotator-pill active"
+                    onclick="confirmAddAnnotator()"
+                    style="padding:3px 8px;">✓</button>
+            <button class="iaa-annotator-pill"
+                    onclick="renderAnnotatorSelector()"
+                    style="padding:3px 8px;">✕</button>
+        </span>`;
+
+    document.getElementById('iaaNewAnnotatorInput')?.focus();
+}
+
+/**
+ * confirmAddAnnotator()
+ *
+ * Reads the new annotator name from the inline input, sets it as the
+ * active annotator, and tells the user to enter IAA mode under that name.
+ * The name will persist in the selector after they save their first doc.
+ */
+function confirmAddAnnotator() {
+    const input = document.getElementById('iaaNewAnnotatorInput');
+    const name = input ? input.value.trim() : '';
+    if (!name) {
+        renderAnnotatorSelector();
+        return;
+    }
+
+    // Pre-select this annotator so the dashboard is ready to show their work
+    iaaSelectedAnnotator = name;
+
+    // Also pre-fill the annotator name input so entering IAA mode is seamless
+    const nameInput = document.getElementById('annotatorNameInput');
+    if (nameInput) {
+        nameInput.value = name;
+        // Persist to localStorage immediately
+        localStorage.setItem('annotator_name', name);
+    }
+
+    renderAnnotatorSelector();
+    showToast(
+        `👤 "${name}" added! Close this dashboard and click 📏 Enter IAA Mode ` +
+        `to start annotating. Their scores will appear here after saving. ✨`,
+        'success', 6000
+    );
 }
 
 /**
@@ -8777,14 +9049,21 @@ function toggleIAAScope() {
  * loadIAADashboard()
  *
  * Fetches IAA data from the appropriate endpoint and renders it.
+ * Respects the active scope (doc/all) and annotator filter.
  */
 function loadIAADashboard() {
     const body = document.getElementById('iaaModalBody');
     body.innerHTML = '<div style="text-align:center; padding:40px; color:var(--text-muted);">Loading IAA metrics... ⏳</div>';
 
-    const url = iaaDashboardScope === 'doc'
-        ? `/api/iaa/compute/${DOC_ID}`
-        : '/api/iaa/dashboard';
+    let url;
+    if (iaaDashboardScope === 'doc') {
+        url = `/api/iaa/compute/${DOC_ID}`;
+    } else {
+        // Build URL with optional annotator filter query param
+        url = iaaSelectedAnnotator
+            ? `/api/iaa/dashboard?annotator=${encodeURIComponent(iaaSelectedAnnotator)}`
+            : '/api/iaa/dashboard';
+    }
 
     fetch(url)
         .then(res => {
@@ -8978,14 +9257,23 @@ function renderIAAAllDocs(container, data) {
     const perEntity = agg.per_entity || {};
     const entityColors = data.entity_colors || {};
     const entityLabels = data.entity_labels || {};
+    // Active filter passed back from the server
+    const activeAnnotator = data.annotator_filter || null;
 
     // Overall KPIs
     const kappaVal = agg.avg_kappa != null ? agg.avg_kappa : null;
     const kappaInterp = kappaVal != null ? kappaInterpretation(kappaVal) : null;
 
+    // Context line: shows who is being shown
+    const contextLine = activeAnnotator
+        ? `Showing <strong style="color:var(--accent-pink);">${escapeHtml(activeAnnotator)}</strong>'s annotations across
+           <strong style="color:var(--accent-cyan);">${agg.total_docs || 0}</strong> document${(agg.total_docs || 0) !== 1 ? 's' : ''}`
+        : `Aggregate across <strong style="color:var(--accent-cyan);">${agg.total_docs || 0}</strong> dual-annotated documents
+           · <span style="color:var(--text-muted);">all annotators</span>`;
+
     let html = `
         <div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:12px;">
-            Aggregate across <strong style="color:var(--accent-cyan);">${agg.total_docs || 0}</strong> dual-annotated documents
+            ${contextLine}
         </div>
 
         <div class="iaa-kpi-row">
