@@ -54,7 +54,8 @@ from ner_schema import (
     EntitySchema, EntityCategory, ResumeTokenizer, BIOTagger,
     SpanAnnotation, AnnotatedDocument, NestedEntityLayer,
     EdgeCaseHandler, PreAnnotator, TrainingExporter,
-    AnnotationStorage, ResumeClassifier
+    AnnotationStorage, ResumeClassifier,
+    InterAnnotatorAgreement  # 📏 IAA computation engine
 )
 
 # =============================================================================
@@ -86,6 +87,8 @@ nested_handler = NestedEntityLayer(schema)
 edge_handler = EdgeCaseHandler()
 exporter = TrainingExporter(schema)
 storage = AnnotationStorage(DATABASE_PATH)
+
+iaa_engine = InterAnnotatorAgreement(DATABASE_PATH, schema)  # 📏 IAA metrics calculator
 
 
 # =============================================================================
@@ -1315,6 +1318,200 @@ def api_save_classification():
         conn.close()
     return jsonify({"success": True})
 
+# =============================================================================
+# 📏 INTER-ANNOTATOR AGREEMENT (IAA) ROUTES
+# =============================================================================
+
+@app.route("/api/iaa/save", methods=["POST"])
+def api_iaa_save():
+    """
+    📏 Save Annotator B's annotations for IAA comparison.
+
+    When a second annotator works on a document that already has primary
+    annotations, their labels go into iaa_annotations (not ner_annotations).
+    Think of it as a parallel universe annotation — same resume, different
+    pair of eyes! 👀✨
+
+    Expected JSON payload:
+        {
+            "doc_id": "doc_42",
+            "annotator_name": "Soraya",
+            "annotations": [ { entity_type, char_start, char_end, text, layer }, ... ]
+        }
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data received"}), 400
+
+    doc_id = data.get("doc_id")
+    annotator_name = data.get("annotator_name", "").strip()
+    annotations_list = data.get("annotations", [])
+
+    # ── Validation: the three non-negotiables ─────────────────────────
+    if not doc_id:
+        return jsonify({"error": "Missing doc_id — who are we saving for?"}), 400
+    if not annotator_name:
+        return jsonify({
+            "error": "Missing annotator_name — we need to know who's "
+                     "holding the second pen! 🖊️"
+        }), 400
+    if not annotations_list:
+        return jsonify({
+            "error": "No annotations to save — the canvas is blank, darling! 🎨"
+        }), 400
+
+    # ── Guard: annotator B must NOT be the same as annotator A ────────
+    # Otherwise we'd be comparing someone to themselves — that's just
+    # narcissism, not inter-annotator agreement! 💅
+    conn = get_db()
+    try:
+        primary_row = conn.execute(
+            "SELECT annotator FROM ner_documents WHERE doc_id = ?",
+            (doc_id,)
+        ).fetchone()
+        if primary_row and primary_row["annotator"] == annotator_name:
+            return jsonify({
+                "error": f"'{annotator_name}' is already the primary annotator "
+                         f"for this document. IAA requires a DIFFERENT annotator! "
+                         f"Like having two judges, not one judge twice! 👯"
+            }), 409
+    except sqlite3.OperationalError:
+        pass  # Table may not exist yet — let save_iaa_annotations handle it
+    finally:
+        conn.close()
+
+    try:
+        iaa_engine.save_iaa_annotations(
+            doc_id=doc_id,
+            annotator_name=annotator_name,
+            annotations_list=annotations_list
+        )
+        logger.info(f"📏 IAA annotations saved: {doc_id} by {annotator_name} "
+                     f"({len(annotations_list)} spans)")
+        return jsonify({
+            "success": True,
+            "message": f"IAA annotations saved for {annotator_name}",
+            "spans": len(annotations_list),
+        })
+    except Exception as e:
+        logger.error(f"❌ IAA save failed: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/iaa/compute/<doc_id>")
+def api_iaa_compute(doc_id: str):
+    """
+    📏 Compute IAA metrics for a SINGLE document.
+
+    Returns span-level agreement (exact + partial match F1) and
+    token-level Cohen's Kappa between the primary annotator and
+    annotator B.
+
+    Like getting two fashion critics to rate the same outfit and
+    seeing how much they agree! 👗📊
+    """
+    # Find who annotated this doc as annotator B
+    conn = get_db()
+    try:
+        iaa_row = conn.execute(
+            "SELECT DISTINCT annotator_name FROM iaa_annotations WHERE doc_id = ?",
+            (doc_id,)
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return jsonify({"error": "IAA tables not yet initialized"}), 404
+    finally:
+        conn.close()
+
+    if not iaa_row:
+        return jsonify({
+            "status": "no_data",
+            "message": "No IAA annotations found for this document."
+        })
+
+    annotator_b = iaa_row["annotator_name"]
+
+    # Span-level agreement
+    span_result = iaa_engine.compute_span_agreement(doc_id, annotator_b)
+
+    # Token-level kappa (needs raw text)
+    raw_text = get_raw_text_for_candidate(
+        int(doc_id.replace("doc_", "")) if doc_id.startswith("doc_") else 0
+    )
+    kappa_result = None
+    if raw_text:
+        try:
+            kappa_result = iaa_engine.compute_token_kappa(doc_id, annotator_b, raw_text)
+        except Exception as e:
+            logger.warning(f"⚠️ Kappa computation failed for {doc_id}: {e}")
+
+    return jsonify({
+        "status": "ok",
+        "doc_id": doc_id,
+        "annotator_b": annotator_b,
+        "span_agreement": span_result,
+        "token_kappa": kappa_result,
+    })
+
+
+@app.route("/api/iaa/dashboard")
+def api_iaa_dashboard():
+    """
+    📏📊 IAA Dashboard — aggregate metrics across ALL dual-annotated docs.
+
+    This is the BIG picture, darling! Shows:
+      - Overall Cohen's Kappa (how much do our annotators agree?)
+      - Exact & partial match F1 (are they finding the same spans?)
+      - Per-entity heatmap data (which entity types cause the most drama?)
+      - Per-document breakdown (which resumes need a recount?)
+
+    Returns the full compute_all() result from InterAnnotatorAgreement,
+    enriched with raw_texts for kappa computation.
+
+    Performance note: This scans ALL iaa_annotations rows — for large
+    datasets (500+ docs), consider adding pagination. For now, the
+    typical IAA workflow involves 20-50 dual-annotated docs, so this
+    is perfectly performant. 🏎️💨
+    """
+    # Gather raw texts for all IAA-annotated docs (needed for kappa)
+    iaa_docs = iaa_engine.get_iaa_docs()
+    raw_texts = {}
+    for doc_info in iaa_docs:
+        doc_id = doc_info["doc_id"]
+        cid = doc_info.get("candidate_id", 0)
+        if cid:
+            text = get_raw_text_for_candidate(cid)
+            if text:
+                raw_texts[doc_id] = text
+
+    result = iaa_engine.compute_all(raw_texts=raw_texts if raw_texts else None)
+
+    # Enrich with entity color map for the heatmap visualization
+    result["entity_colors"] = schema.get_color_map()
+
+    # Add entity labels for display
+    entity_labels = {}
+    for name, etype in schema.entities.items():
+        entity_labels[name] = etype.label
+    result["entity_labels"] = entity_labels
+
+    return jsonify(result)
+
+
+@app.route("/api/iaa/docs")
+def api_iaa_docs():
+    """
+    📏 List all documents that have IAA annotations.
+
+    Quick lookup so the frontend can show which docs are ready
+    for comparison — like checking the RSVP list! 📋✨
+    """
+    try:
+        docs = iaa_engine.get_iaa_docs()
+        return jsonify({"docs": docs, "total": len(docs)})
+    except Exception as e:
+        logger.error(f"❌ IAA docs list failed: {e}")
+        return jsonify({"docs": [], "total": 0, "error": str(e)})
+
 
 # =============================================================================
 # 🎨 SHARED CSS
@@ -2105,6 +2302,11 @@ INDEX_TEMPLATE = """
         <button class="btn" onclick="exportTrainingData()" title="Export NER training data (CoNLL/spaCy/HuggingFace)">
             🤖 Export Training Data
         </button>
+        <button class="btn" id="iaaToggleBtn" onclick="toggleIAAGlobal()"
+                title="Toggle IAA mode — second annotator activates this before reviewing"
+                style="border-color:var(--accent-pink); color:var(--accent-pink);">
+            📏 IAA Mode
+        </button>
     </div>
 </div>
 
@@ -2127,6 +2329,23 @@ INDEX_TEMPLATE = """
         </div>
         <div class="stat-label">Progress</div>
     </div>
+</div>
+
+<!-- 📏 IAA Mode banner on queue page -->
+<div id="iaaQueueBanner" style="display:none; background:linear-gradient(90deg, rgba(247,120,186,0.15), rgba(238,184,255,0.08), rgba(247,120,186,0.15));
+     border-bottom:2px solid rgba(247,120,186,0.5); padding:12px 28px;
+     font-size:0.82rem; color:#f778ba; align-items:center; gap:12px;">
+    <span style="background:#f778ba; color:#0e1117; font-size:0.65rem; font-weight:800;
+                 padding:3px 10px; border-radius:4px; text-transform:uppercase; letter-spacing:0.08em;">
+        IAA MODE ACTIVE
+    </span>
+    <span>Annotating as <strong id="iaaQueueName">—</strong>.
+          Every candidate will open with a clean slate for independent annotation.</span>
+    <button class="btn" onclick="toggleIAAGlobal()"
+            style="margin-left:auto; font-size:0.7rem; padding:5px 14px;
+                   border-color:#f778ba; color:#f778ba;">
+        ✕ Deactivate
+    </button>
 </div>
 
 <!-- Filter tabs -->
@@ -2878,6 +3097,72 @@ function decodeHtmlEntities(text) {
     div.innerHTML = text;
     return div.textContent || div.innerText || '';
 }
+
+// ================================================================
+// 🍞 TOAST — Index page
+// ================================================================
+function showToast(msg, type = 'success', duration = 4000) {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+    const toast = document.createElement('div');
+    toast.style.cssText = `
+        padding:12px 20px; border-radius:8px; margin-bottom:8px; font-size:0.82rem;
+        color:#e6edf3; max-width:480px; box-shadow:0 4px 24px rgba(0,0,0,0.4);
+        background:${type === 'error' ? 'rgba(218,54,51,0.9)' : 'rgba(86,211,100,0.9)'};
+    `;
+    toast.textContent = msg;
+    container.appendChild(toast);
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transition = 'opacity 0.3s';
+        setTimeout(() => toast.remove(), 300);
+    }, duration);
+}
+
+// ================================================================
+// 📏 IAA GLOBAL TOGGLE — Queue page on/off switch
+// ================================================================
+function toggleIAAGlobal() {
+    const isActive = localStorage.getItem('iaa_mode_active') === 'true';
+    if (isActive) {
+        localStorage.removeItem('iaa_mode_active');
+        updateIAAQueueUI(false);
+        showToast('📏 IAA Mode deactivated. Normal annotation restored.', 'success', 4000);
+    } else {
+        let name = localStorage.getItem('annotator_name') || '';
+        if (!name) {
+            name = prompt('Enter your annotator name (e.g. Soraya, Ahmad):');
+            if (!name || name.trim().length < 2) {
+                showToast('Need a name (2+ chars) to activate IAA!', 'error', 4000);
+                return;
+            }
+            localStorage.setItem('annotator_name', name.trim());
+        }
+        localStorage.setItem('iaa_mode_active', 'true');
+        updateIAAQueueUI(true);
+        showToast(`📏 IAA ON! Annotating as "${name.trim()}". Open any candidate for a clean slate!`, 'success', 5000);
+    }
+}
+
+function updateIAAQueueUI(active) {
+    const btn = document.getElementById('iaaToggleBtn');
+    const banner = document.getElementById('iaaQueueBanner');
+    const nameEl = document.getElementById('iaaQueueName');
+    if (active) {
+        const name = localStorage.getItem('annotator_name') || '?';
+        if (btn) { btn.textContent = '📏 IAA ON'; btn.style.background = 'rgba(247,120,186,0.2)'; btn.style.fontWeight = '700'; }
+        if (banner) banner.style.display = 'flex';
+        if (nameEl) nameEl.textContent = name;
+    } else {
+        if (btn) { btn.textContent = '📏 IAA Mode'; btn.style.background = ''; btn.style.fontWeight = ''; }
+        if (banner) banner.style.display = 'none';
+    }
+}
+
+// Restore IAA state on page load
+(function() {
+    if (localStorage.getItem('iaa_mode_active') === 'true') updateIAAQueueUI(true);
+})();
 
 </script>
 </body>
@@ -4005,6 +4290,303 @@ ANNOTATE_TEMPLATE = """
         max-height: 85vh;
     }
 
+    /* ============================================================
+     * 📏 IAA MODAL STYLES — Agreement Dashboard
+     * ============================================================ */
+
+    /* Wider modal for heatmap + metrics layout */
+    .iaa-modal-wide {
+        width: 820px;
+        max-width: 95vw;
+        max-height: 90vh;
+    }
+
+    /* IAA mode banner — shown when annotator B is working */
+    .iaa-mode-banner {
+        background: linear-gradient(90deg, rgba(247,120,186,0.18), rgba(238,184,255,0.10), rgba(247,120,186,0.18));
+        border-top: 2px solid rgba(247,120,186,0.5);
+        border-bottom: 2px solid rgba(247,120,186,0.5);
+        padding: 12px 24px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 0.82rem;
+        color: var(--accent-pink);
+        animation: iaaBannerPulse 3s ease infinite;
+        position: relative;
+        overflow: hidden;
+    }
+    /* Animated shimmer across the banner */
+    .iaa-mode-banner::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(90deg,
+            transparent 0%,
+            rgba(247,120,186,0.08) 40%,
+            rgba(247,120,186,0.15) 50%,
+            rgba(247,120,186,0.08) 60%,
+            transparent 100%);
+        animation: iaaShimmer 4s ease infinite;
+    }
+    @keyframes iaaShimmer {
+        0% { transform: translateX(-100%); }
+        100% { transform: translateX(100%); }
+    }
+    @keyframes iaaBannerPulse {
+        0%, 100% { border-color: rgba(247,120,186,0.4); }
+        50% { border-color: rgba(247,120,186,0.8); }
+    }
+    .iaa-mode-banner > * { position: relative; z-index: 1; }
+    .iaa-mode-banner .iaa-badge {
+        background: var(--accent-pink);
+        color: var(--bg-primary);
+        font-size: 0.68rem;
+        font-weight: 800;
+        padding: 4px 12px;
+        border-radius: 4px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        animation: iaaBadgePulse 2s ease infinite;
+    }
+    @keyframes iaaBadgePulse {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(247,120,186,0.4); }
+        50% { box-shadow: 0 0 12px 3px rgba(247,120,186,0.3); }
+    }
+
+    /* ============================================================
+     * 📏🔥 IAA ACTIVE — body.iaa-active theme overrides
+     *
+     * When active, the ENTIRE page gets a pink accent treatment
+     * so Annotator B can NEVER forget they're in IAA mode.
+     * ============================================================ */
+    body.iaa-active {
+        outline: 3px solid rgba(247,120,186,0.5);
+        outline-offset: -3px;
+        animation: iaaPagePulse 3s ease infinite;
+    }
+    @keyframes iaaPagePulse {
+        0%, 100% { outline-color: rgba(247,120,186,0.35); }
+        50% { outline-color: rgba(247,120,186,0.7); }
+    }
+    body.iaa-active .header {
+        background: linear-gradient(180deg, var(--bg-primary) 0%, rgba(247,120,186,0.06) 100%);
+        border-bottom: 2px solid rgba(247,120,186,0.5);
+    }
+    body.iaa-active .text-panel {
+        background: linear-gradient(135deg, rgba(247,120,186,0.03) 0%, transparent 60%);
+    }
+    body.iaa-active .side-panel {
+        border-left: 2px solid rgba(247,120,186,0.4);
+    }
+    body.iaa-active .palette-section h3 {
+        color: var(--accent-pink);
+    }
+    body.iaa-active .resize-handle:hover,
+    body.iaa-active .resize-handle.dragging {
+        background: var(--accent-pink);
+    }
+    body.iaa-active .iaa-dimmed-btn {
+        opacity: 0.3;
+        pointer-events: none;
+        filter: grayscale(0.8);
+    }
+    body.iaa-active .anno-span {
+        box-shadow: 0 0 0 1px rgba(247,120,186,0.2);
+    }
+    /* Shrink layout to accommodate the IAA banner above it */
+    body.iaa-active .anno-layout {
+        height: calc(100vh - 140px);
+    }
+
+    /* Annotator name prompt modal */
+    .annotator-prompt-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.85);
+        z-index: 9999;
+        align-items: center;
+        justify-content: center;
+        backdrop-filter: blur(6px);
+    }
+    .annotator-prompt-overlay.open { display: flex; }
+    .annotator-prompt-card {
+        background: var(--bg-primary);
+        border: 1px solid var(--accent-pink);
+        border-radius: 16px;
+        padding: 36px 40px;
+        width: 380px;
+        max-width: 90vw;
+        text-align: center;
+        box-shadow: 0 0 60px rgba(247,120,186,0.15);
+        animation: previewSlideIn 0.3s ease;
+    }
+    .annotator-prompt-card h3 {
+        font-family: var(--font-display);
+        font-size: 1.2rem;
+        color: var(--accent-pink);
+        margin-bottom: 8px;
+    }
+    .annotator-prompt-card p {
+        font-size: 0.78rem;
+        color: var(--text-secondary);
+        margin-bottom: 18px;
+        line-height: 1.6;
+    }
+    .annotator-prompt-card input {
+        width: 100%;
+        padding: 10px 14px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--text-primary);
+        font-family: var(--font-body);
+        font-size: 0.88rem;
+        margin-bottom: 14px;
+        outline: none;
+        transition: border-color 0.2s;
+    }
+    .annotator-prompt-card input:focus {
+        border-color: var(--accent-pink);
+    }
+
+    /* IAA KPI cards row */
+    .iaa-kpi-row {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        margin-bottom: 18px;
+    }
+    .iaa-kpi-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 14px 12px;
+        text-align: center;
+    }
+    .iaa-kpi-value {
+        font-family: var(--font-display);
+        font-size: 1.4rem;
+        font-weight: 800;
+        margin-bottom: 2px;
+    }
+    .iaa-kpi-label {
+        font-size: 0.65rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    /* Heatmap grid */
+    .iaa-heatmap {
+        display: grid;
+        gap: 2px;
+        margin-bottom: 18px;
+    }
+    .iaa-heatmap-cell {
+        border-radius: 4px;
+        padding: 6px 4px;
+        text-align: center;
+        font-size: 0.62rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        transition: transform 0.15s, box-shadow 0.15s;
+        cursor: default;
+        position: relative;
+    }
+    .iaa-heatmap-cell:hover {
+        transform: scale(1.08);
+        box-shadow: 0 2px 12px rgba(0,0,0,0.4);
+        z-index: 2;
+    }
+    .iaa-heatmap-header {
+        font-size: 0.58rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        padding: 4px;
+        text-align: center;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .iaa-heatmap-row-label {
+        font-size: 0.62rem;
+        color: var(--text-secondary);
+        text-align: right;
+        padding-right: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    /* Per-document results table */
+    .iaa-doc-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.72rem;
+    }
+    .iaa-doc-table th {
+        background: var(--bg-secondary);
+        padding: 8px 10px;
+        text-align: left;
+        font-size: 0.65rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        border-bottom: 1px solid var(--border);
+    }
+    .iaa-doc-table td {
+        padding: 8px 10px;
+        border-bottom: 1px solid rgba(42,49,64,0.5);
+        color: var(--text-secondary);
+    }
+    .iaa-doc-table tr:hover td {
+        background: var(--bg-hover);
+    }
+
+    /* Kappa interpretation badge */
+    .kappa-badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 0.6rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+    .kappa-almost-perfect { background: rgba(86,211,100,0.2); color: #56d364; }
+    .kappa-substantial    { background: rgba(126,232,250,0.2); color: #7ee8fa; }
+    .kappa-moderate       { background: rgba(227,179,65,0.2);  color: #e3b341; }
+    .kappa-fair           { background: rgba(240,136,62,0.2);  color: #f0883e; }
+    .kappa-poor           { background: rgba(218,54,51,0.2);   color: #da3633; }
+
+    /* Empty state for IAA dashboard */
+    .iaa-empty-state {
+        text-align: center;
+        padding: 50px 30px;
+        color: var(--text-muted);
+    }
+    .iaa-empty-state .iaa-empty-icon {
+        font-size: 3rem;
+        margin-bottom: 12px;
+    }
+    .iaa-empty-state h4 {
+        font-family: var(--font-display);
+        color: var(--text-secondary);
+        margin-bottom: 8px;
+    }
+    .iaa-empty-state p {
+        font-size: 0.78rem;
+        line-height: 1.7;
+        max-width: 380px;
+        margin: 0 auto;
+    }
+
     /* Badge on buttons to show annotation count */
     .tab-badge {
         display: inline-block;
@@ -4430,7 +5012,7 @@ ANNOTATE_TEMPLATE = """
                 {{ ann_status }}
             </span>
         </div>
-        <div style="display:flex; gap:6px;">
+        <div style="display:flex; gap:6px;" id="normalSaveButtons">
             <button class="btn" onclick="saveAnnotations('in_progress')" title="Save draft (Ctrl+S)">💾 Save</button>
             <button class="btn btn-success" onclick="showSavePreview('completed')" title="Validate & mark complete">✅ Complete</button>
         </div>
@@ -4450,6 +5032,10 @@ ANNOTATE_TEMPLATE = """
             </button>
             <button class="btn btn-sm" onclick="openBIOModal()" title="Preview BIO tags">🏷️ BIO</button>
             <button class="btn btn-sm" onclick="openEdgeModal()" title="Edge case scan">🧩 Edge</button>
+            <button class="btn btn-sm" onclick="openIAAModal()" title="Inter-Annotator Agreement dashboard"
+                    style="border-color:var(--accent-pink); color:var(--accent-pink);">
+                📏 IAA
+            </button>
             <button class="btn btn-sm" onclick="openClassifyModal()" title="Classification & Skills"
                     style="border-color:var(--accent-purple); color:var(--accent-purple);">
                 🧠 Classify
@@ -4467,6 +5053,27 @@ ANNOTATE_TEMPLATE = """
             <button class="btn btn-sm" onclick="openHelp()" title="User manual" style="border-color:var(--accent-purple); color:var(--accent-purple);">❓ Help</button>
         </div>
     </div>
+</div>
+
+<!-- ================================================================
+     📏 IAA MODE BANNER — Between toolbar and main layout.
+     THIS POSITION IS CRITICAL! Must be ABOVE the anno-layout grid
+     or the banner renders off-screen below the viewport! 🎭
+     ================================================================ -->
+<div id="iaaBanner" class="iaa-mode-banner" style="display:none;">
+    <span class="iaa-badge">IAA MODE</span>
+    <span>Annotating as <strong id="iaaBannerName">—</strong> (Annotator B).
+          Primary annotations hidden · Label from scratch.</span>
+    <button class="btn btn-sm" onclick="saveIAAAnnotations()"
+            style="margin-left:auto; font-size:0.78rem; padding:6px 18px;
+                   background:rgba(247,120,186,0.15);
+                   border: 2px solid var(--accent-pink); color:var(--accent-pink); font-weight:700;">
+        💾 Save IAA
+    </button>
+    <button class="btn btn-sm" onclick="exitIAAMode()"
+            style="font-size:0.68rem; padding:4px 12px;">
+        ✕ Exit
+    </button>
 </div>
 
     <!-- MAIN LAYOUT — 3 columns: text | drag-handle | side panel -->
@@ -4857,6 +5464,64 @@ ANNOTATE_TEMPLATE = """
       </div>
 
     </div>
+  </div>
+</div>
+
+<!-- ================================================================
+     📏 IAA DASHBOARD MODAL
+     
+     The grand agreement showdown! Shows Cohen's Kappa, F1 scores,
+     and a gorgeous heatmap of per-entity agreement. Like a talent
+     show scoreboard where every judge's vote is visible! 🏆👩‍⚖️👨‍⚖️
+     ================================================================ -->
+<div class="inspector-overlay" id="iaaOverlay" onclick="if(event.target===this)closeInspector('iaa')">
+  <div class="inspector-modal iaa-modal-wide" role="dialog" aria-modal="true">
+    <div class="inspector-header" style="border-bottom-color:var(--accent-pink);">
+      <h3>📏 Inter-Annotator Agreement</h3>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <!-- Toggle: show this doc only vs. all docs -->
+        <button class="btn btn-sm" id="iaaToggleScope" onclick="toggleIAAScope()"
+                style="font-size:0.65rem; padding:3px 10px;">
+            🔍 This Doc
+        </button>
+        <button class="preview-close" onclick="closeInspector('iaa')" title="Close (Escape)">✕</button>
+      </div>
+    </div>
+    <div class="inspector-body" id="iaaModalBody" style="padding:20px 24px;">
+      <!-- Content injected by renderIAADashboard() -->
+      <div style="text-align:center; padding:40px; color:var(--text-muted);">
+        Loading IAA data... ⏳
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================================================================
+     👤 ANNOTATOR NAME PROMPT
+     
+     Shows on first visit (if no annotator name in localStorage).
+     Like the sign-in sheet at the stage door — you can't go on
+     without putting your name down, darling! 🎭✍️
+     ================================================================ -->
+<div class="annotator-prompt-overlay" id="annotatorPromptOverlay">
+  <div class="annotator-prompt-card">
+    <div style="font-size:2.2rem; margin-bottom:8px;">🎭</div>
+    <h3>Welcome, Annotator!</h3>
+    <p>
+      Enter your name so we can track who annotated what.
+      This enables <strong>Inter-Annotator Agreement</strong> (IAA)
+      — comparing annotations across different people! 📏
+    </p>
+    <input type="text" id="annotatorNameInput" placeholder="Your name (e.g. Soraya, Ahmad, etc.)"
+           maxlength="50" autocomplete="off"
+           onkeydown="if(event.key==='Enter')confirmAnnotatorName()">
+    <div style="display:flex; gap:8px; justify-content:center;">
+      <button class="btn btn-sm btn-primary" onclick="confirmAnnotatorName()"
+              style="padding:8px 24px; font-size:0.8rem;">
+        ✨ Let's Go!
+      </button>
+    </div>
+    <div id="annotatorNameError" style="color:var(--accent-red); font-size:0.7rem; margin-top:8px; display:none;"></div>
   </div>
 </div>
 
@@ -7332,11 +7997,692 @@ function buildShortcutGrid() {
 }
 
 // =================================================================
+// 📏 IAA — INTER-ANNOTATOR AGREEMENT SYSTEM
+// =================================================================
+//
+// This section handles:
+//   1. Annotator name management (localStorage-backed)
+//   2. IAA mode toggle (annotator B can label the same doc)
+//   3. IAA dashboard with heatmap + metrics
+//
+// Architecture analogy: Think of IAA like having TWO fashion critics
+// review the same runway show independently, then comparing their
+// scorecards to see how often they agree. The heatmap shows which
+// "categories" (entity types) cause the most disagreement! 👗📊
+// =================================================================
+
+/** @type {boolean} Whether we're currently in IAA annotation mode */
+let iaaMode = false;
+
+/** @type {string} Scope for the IAA dashboard: 'doc' or 'all' */
+let iaaDashboardScope = 'all';
+
+// -----------------------------------------------------------------
+// 👤 ANNOTATOR NAME — localStorage-backed identity
+// -----------------------------------------------------------------
+
+/**
+ * getAnnotatorName()
+ *
+ * Returns the stored annotator name from localStorage, or empty string.
+ * Used to populate the annotator field on saves and IAA sessions.
+ *
+ * @returns {string} The annotator's name
+ */
+function getAnnotatorName() {
+    return localStorage.getItem('annotator_name') || '';
+}
+
+/**
+ * setAnnotatorName(name)
+ *
+ * Stores the annotator name in localStorage for persistence across sessions.
+ *
+ * @param {string} name - The annotator's display name
+ */
+function setAnnotatorName(name) {
+    localStorage.setItem('annotator_name', name.trim());
+}
+
+/**
+ * initAnnotatorName()
+ *
+ * Called on page load. If no annotator name is stored, shows the
+ * welcome prompt. Otherwise, silently proceeds.
+ *
+ * Like checking IDs at the door — if you've been here before,
+ * you waltz right in. First-timers need to sign the guest book! 🎭
+ */
+function initAnnotatorName() {
+    const name = getAnnotatorName();
+    if (!name) {
+        // Show the name prompt overlay
+        document.getElementById('annotatorPromptOverlay').classList.add('open');
+        // Auto-focus the input after a tiny delay (for animation)
+        setTimeout(() => {
+            document.getElementById('annotatorNameInput').focus();
+        }, 200);
+    }
+}
+
+/**
+ * confirmAnnotatorName()
+ *
+ * Validates and saves the name from the prompt input.
+ * Closes the overlay on success, shows error on empty.
+ */
+function confirmAnnotatorName() {
+    const input = document.getElementById('annotatorNameInput');
+    const errorEl = document.getElementById('annotatorNameError');
+    const name = input.value.trim();
+
+    if (!name) {
+        errorEl.textContent = "Honey, we need a name! Even stage names count! 💅";
+        errorEl.style.display = 'block';
+        input.focus();
+        return;
+    }
+
+    // Basic sanitization: alphanumeric + spaces + common chars
+    if (name.length < 2) {
+        errorEl.textContent = "That's too short, darling — at least 2 characters!";
+        errorEl.style.display = 'block';
+        input.focus();
+        return;
+    }
+
+    if (name.length > 50) {
+        errorEl.textContent = "Whoa, keep it under 50 characters, superstar! ✨";
+        errorEl.style.display = 'block';
+        input.focus();
+        return;
+    }
+
+    setAnnotatorName(name);
+    errorEl.style.display = 'none';
+    document.getElementById('annotatorPromptOverlay').classList.remove('open');
+    showToast(`👋 Welcome, ${name}! Your annotations will be tracked. ✨`, 'success', 4000);
+}
+
+// -----------------------------------------------------------------
+// 📏 IAA MODE — Toggle between primary and IAA annotation
+// -----------------------------------------------------------------
+
+/** Stash of Annotator A's annotations — restored on exit */
+let primaryAnnotationsBackup = null;
+
+/**
+ * enterIAAMode()
+ *
+ * THE FULL TRANSFORMATION:
+ *   1. Backs up & HIDES Annotator A's annotations (clean slate, no bias)
+ *   2. Adds body.iaa-active (pink theme overrides kick in)
+ *   3. Dims normal Save/Complete buttons (use Save IAA instead)
+ *   4. Shows the IAA banner (between toolbar and layout — VISIBLE!)
+ *   5. Stores state in localStorage (persists across candidates)
+ */
+function enterIAAMode() {
+    const annotatorName = getAnnotatorName();
+    if (!annotatorName) {
+        document.getElementById('annotatorPromptOverlay').classList.add('open');
+        setTimeout(() => document.getElementById('annotatorNameInput').focus(), 200);
+        return;
+    }
+
+    iaaMode = true;
+
+    // ── Backup & clear primary annotations ───────────────────────
+    primaryAnnotationsBackup = JSON.parse(JSON.stringify(annotations));
+    annotations = [];
+    renderText();
+    updateAnnoList();
+
+    // ── Visual transformation ────────────────────────────────────
+    document.body.classList.add('iaa-active');
+    const normalBtns = document.getElementById('normalSaveButtons');
+    if (normalBtns) normalBtns.classList.add('iaa-dimmed-btn');
+
+    // ── Show banner ──────────────────────────────────────────────
+    const banner = document.getElementById('iaaBanner');
+    banner.style.display = 'flex';
+    document.getElementById('iaaBannerName').textContent = annotatorName;
+
+    // Persist for next candidate
+    localStorage.setItem('iaa_mode_active', 'true');
+
+    showToast(
+        `📏 IAA Mode ON — annotating as "${annotatorName}". ` +
+        `Primary annotations hidden. Label from scratch! ✨`,
+        'success', 5000
+    );
+}
+
+/**
+ * exitIAAMode()
+ *
+ * Restores everything: annotations, theme, buttons, banner.
+ */
+function exitIAAMode() {
+    iaaMode = false;
+
+    // Restore primary annotations
+    if (primaryAnnotationsBackup) {
+        annotations = primaryAnnotationsBackup;
+        primaryAnnotationsBackup = null;
+        renderText();
+        updateAnnoList();
+    }
+
+    // Reverse visual transformation
+    document.body.classList.remove('iaa-active');
+    const normalBtns = document.getElementById('normalSaveButtons');
+    if (normalBtns) normalBtns.classList.remove('iaa-dimmed-btn');
+    document.getElementById('iaaBanner').style.display = 'none';
+
+    localStorage.removeItem('iaa_mode_active');
+
+    showToast('📏 IAA Mode OFF — primary annotations restored! ✨', 'success', 3000);
+}
+
+/**
+ * autoDetectIAAMode()
+ *
+ * Called on page load. If IAA was activated from the queue page,
+ * auto-enters IAA mode so Annotator B gets a clean slate
+ * on every candidate without clicking anything extra.
+ */
+function autoDetectIAAMode() {
+    if (localStorage.getItem('iaa_mode_active') === 'true') {
+        setTimeout(() => enterIAAMode(), 300);
+    }
+}
+
+/**
+ * saveIAAAnnotations()
+ *
+ * Saves the current annotation state as Annotator B's IAA set.
+ * Routes to /api/iaa/save with the annotator name attached.
+ *
+ * Edge case: If annotations array is empty, warns and bails.
+ */
+function saveIAAAnnotations() {
+    const annotatorName = getAnnotatorName();
+    if (!annotatorName) {
+        showToast('❌ No annotator name set — please enter your name first!', 'error', 4000);
+        return;
+    }
+
+    if (!annotations || annotations.length === 0) {
+        showToast('❌ No annotations to save — label some entities first! 🎨', 'error', 4000);
+        return;
+    }
+
+    const payload = {
+        doc_id: DOC_ID,
+        annotator_name: annotatorName,
+        annotations: annotations
+    };
+
+    fetch('/api/iaa/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            showToast(
+                `📏 IAA annotations saved! ${data.spans} spans by ${annotatorName}. ` +
+                `Open the IAA dashboard to see agreement metrics! 🏆`,
+                'success', 5000
+            );
+        } else {
+            showToast('❌ IAA save failed: ' + (data.error || 'Unknown'), 'error', 6000);
+        }
+    })
+    .catch(err => {
+        showToast('❌ Network error: ' + err, 'error', 6000);
+    });
+}
+
+
+// -----------------------------------------------------------------
+// 📏📊 IAA DASHBOARD — Modal with heatmap + metrics
+// -----------------------------------------------------------------
+
+/**
+ * openIAAModal()
+ *
+ * Opens the IAA dashboard modal and fetches data based on current scope.
+ * Default scope is 'all' (aggregate across all dual-annotated docs).
+ *
+ * Like opening the judges' scorecards at the end of the competition! 🏆
+ */
+function openIAAModal() {
+    openInspector('iaa');
+    loadIAADashboard();
+}
+
+/**
+ * toggleIAAScope()
+ *
+ * Switches between 'This Doc' and 'All Docs' views in the dashboard.
+ */
+function toggleIAAScope() {
+    const btn = document.getElementById('iaaToggleScope');
+    if (iaaDashboardScope === 'all') {
+        iaaDashboardScope = 'doc';
+        btn.textContent = '📊 All Docs';
+        btn.title = 'Show aggregate metrics across all documents';
+    } else {
+        iaaDashboardScope = 'all';
+        btn.textContent = '🔍 This Doc';
+        btn.title = 'Show metrics for this document only';
+    }
+    loadIAADashboard();
+}
+
+/**
+ * loadIAADashboard()
+ *
+ * Fetches IAA data from the appropriate endpoint and renders it.
+ */
+function loadIAADashboard() {
+    const body = document.getElementById('iaaModalBody');
+    body.innerHTML = '<div style="text-align:center; padding:40px; color:var(--text-muted);">Loading IAA metrics... ⏳</div>';
+
+    const url = iaaDashboardScope === 'doc'
+        ? `/api/iaa/compute/${DOC_ID}`
+        : '/api/iaa/dashboard';
+
+    fetch(url)
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'no_data') {
+                renderIAAEmptyState(body, data.message);
+            } else if (iaaDashboardScope === 'doc') {
+                renderIAASingleDoc(body, data);
+            } else {
+                renderIAAAllDocs(body, data);
+            }
+        })
+        .catch(err => {
+            body.innerHTML = `<div style="text-align:center; padding:40px; color:var(--accent-red);">
+                ❌ Failed to load IAA data: ${err}</div>`;
+        });
+}
+
+/**
+ * renderIAAEmptyState(container, message)
+ *
+ * Shows a friendly empty state when no IAA data exists yet.
+ */
+function renderIAAEmptyState(container, message) {
+    container.innerHTML = `
+        <div class="iaa-empty-state">
+            <div class="iaa-empty-icon">📏</div>
+            <h4>No IAA Data Yet</h4>
+            <p>${escapeHtml(message || 'No documents have been dual-annotated yet.')}</p>
+            <div style="margin-top:18px; font-size:0.72rem; color:var(--text-secondary); line-height:1.8;">
+                <strong>How to start IAA:</strong><br>
+                1. Have Annotator A complete annotations normally<br>
+                2. A different annotator enters <strong>IAA Mode</strong> (📏 button)<br>
+                3. Annotator B labels the same document independently<br>
+                4. Click <strong>💾 Save IAA</strong> to store their labels<br>
+                5. Come back here to see agreement metrics! 🏆
+            </div>
+            <div style="margin-top:16px;">
+                <button class="btn btn-sm" onclick="closeInspector('iaa'); enterIAAMode();"
+                        style="border-color:var(--accent-pink); color:var(--accent-pink); padding:6px 18px;">
+                    📏 Enter IAA Mode
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * kappaInterpretation(k)
+ *
+ * Returns a human-readable label + CSS class for a Kappa value.
+ * Uses Landis & Koch (1977) interpretation scale.
+ *
+ * Think of it as the Michelin star rating for agreement:
+ *   ⭐⭐⭐ Almost Perfect  (0.81 - 1.00)
+ *   ⭐⭐   Substantial     (0.61 - 0.80)
+ *   ⭐     Moderate        (0.41 - 0.60)
+ *   (meh)  Fair            (0.21 - 0.40)
+ *   (yikes) Slight/Poor    (≤ 0.20)
+ *
+ * @param {number} k - Cohen's Kappa value (-1 to 1)
+ * @returns {Object} label (string), cls (string)
+ */
+function kappaInterpretation(k) {
+    if (k >= 0.81) return { label: 'Almost Perfect', cls: 'kappa-almost-perfect' };
+    if (k >= 0.61) return { label: 'Substantial',    cls: 'kappa-substantial' };
+    if (k >= 0.41) return { label: 'Moderate',       cls: 'kappa-moderate' };
+    if (k >= 0.21) return { label: 'Fair',           cls: 'kappa-fair' };
+    return { label: 'Poor/Slight', cls: 'kappa-poor' };
+}
+
+/**
+ * f1Color(f1)
+ *
+ * Returns a CSS color for an F1 value — green for high, red for low.
+ * Used for both heatmap cells and inline score displays.
+ *
+ * @param {number} f1 - F1 score (0.0 to 1.0)
+ * @returns {string} CSS color string
+ */
+function f1Color(f1) {
+    if (f1 >= 0.8)  return 'rgba(86,211,100,0.85)';   // Green — great!
+    if (f1 >= 0.6)  return 'rgba(126,232,250,0.75)';   // Cyan — decent
+    if (f1 >= 0.4)  return 'rgba(227,179,65,0.75)';    // Yellow — meh
+    if (f1 >= 0.2)  return 'rgba(240,136,62,0.75)';    // Orange — concerning
+    return 'rgba(218,54,51,0.7)';                       // Red — yikes
+}
+
+/**
+ * f1Background(f1)
+ *
+ * Returns a lighter background color for heatmap cells.
+ * Lower opacity than f1Color so text remains readable.
+ *
+ * @param {number} f1 - F1 score (0.0 to 1.0)
+ * @returns {string} CSS background color
+ */
+function f1Background(f1) {
+    if (f1 >= 0.8)  return 'rgba(86,211,100,0.2)';
+    if (f1 >= 0.6)  return 'rgba(126,232,250,0.15)';
+    if (f1 >= 0.4)  return 'rgba(227,179,65,0.15)';
+    if (f1 >= 0.2)  return 'rgba(240,136,62,0.15)';
+    return 'rgba(218,54,51,0.15)';
+}
+
+/**
+ * renderIAASingleDoc(container, data)
+ *
+ * Renders IAA metrics for a single document.
+ * Shows span-level and token-level agreement with per-entity breakdown.
+ */
+function renderIAASingleDoc(container, data) {
+    const span = data.span_agreement || {};
+    const kappa = data.token_kappa || {};
+    const exact = span.exact || {};
+    const partial = span.partial || {};
+    const perEntity = span.per_entity || {};
+
+    // KPI cards
+    const kappaVal = kappa.kappa != null ? kappa.kappa : null;
+    const kappaInterp = kappaVal != null ? kappaInterpretation(kappaVal) : null;
+
+    let html = `
+        <div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:12px;">
+            Comparing primary annotations vs <strong style="color:var(--accent-pink);">${escapeHtml(data.annotator_b || '?')}</strong>
+            on document <strong>${escapeHtml(data.doc_id || '')}</strong>
+        </div>
+
+        <div class="iaa-kpi-row">
+            <div class="iaa-kpi-card">
+                <div class="iaa-kpi-value" style="color:${kappaVal != null ? f1Color(kappaVal) : 'var(--text-muted)'}">
+                    ${kappaVal != null ? kappaVal.toFixed(3) : '—'}
+                </div>
+                <div class="iaa-kpi-label">Cohen's Kappa</div>
+                ${kappaInterp ? `<div class="kappa-badge ${kappaInterp.cls}" style="margin-top:4px;">${kappaInterp.label}</div>` : ''}
+            </div>
+            <div class="iaa-kpi-card">
+                <div class="iaa-kpi-value" style="color:${f1Color(exact.f1 || 0)}">
+                    ${(exact.f1 || 0).toFixed(3)}
+                </div>
+                <div class="iaa-kpi-label">Exact F1</div>
+            </div>
+            <div class="iaa-kpi-card">
+                <div class="iaa-kpi-value" style="color:${f1Color(partial.f1 || 0)}">
+                    ${(partial.f1 || 0).toFixed(3)}
+                </div>
+                <div class="iaa-kpi-label">Partial F1</div>
+            </div>
+            <div class="iaa-kpi-card">
+                <div class="iaa-kpi-value" style="color:var(--text-primary)">
+                    ${kappa.tokens || 0}
+                </div>
+                <div class="iaa-kpi-label">Tokens Compared</div>
+            </div>
+        </div>
+    `;
+
+    // Per-entity breakdown as mini heatmap
+    const entityNames = Object.keys(perEntity).sort();
+    if (entityNames.length > 0) {
+        html += buildEntityHeatmapSection(perEntity, entityNames, data);
+    }
+
+    container.innerHTML = html;
+}
+
+/**
+ * renderIAAAllDocs(container, data)
+ *
+ * Renders aggregate IAA metrics across all dual-annotated documents.
+ * Shows overall KPIs, per-entity heatmap, and per-document table.
+ */
+function renderIAAAllDocs(container, data) {
+    const agg = data.aggregate || {};
+    const docs = data.docs || [];
+    const perEntity = agg.per_entity || {};
+    const entityColors = data.entity_colors || {};
+    const entityLabels = data.entity_labels || {};
+
+    // Overall KPIs
+    const kappaVal = agg.avg_kappa != null ? agg.avg_kappa : null;
+    const kappaInterp = kappaVal != null ? kappaInterpretation(kappaVal) : null;
+
+    let html = `
+        <div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:12px;">
+            Aggregate across <strong style="color:var(--accent-cyan);">${agg.total_docs || 0}</strong> dual-annotated documents
+        </div>
+
+        <div class="iaa-kpi-row">
+            <div class="iaa-kpi-card">
+                <div class="iaa-kpi-value" style="color:${kappaVal != null ? f1Color(kappaVal) : 'var(--text-muted)'}">
+                    ${kappaVal != null ? kappaVal.toFixed(3) : '—'}
+                </div>
+                <div class="iaa-kpi-label">Avg Cohen's Kappa</div>
+                ${kappaInterp ? `<div class="kappa-badge ${kappaInterp.cls}" style="margin-top:4px;">${kappaInterp.label}</div>` : ''}
+            </div>
+            <div class="iaa-kpi-card">
+                <div class="iaa-kpi-value" style="color:${f1Color(agg.avg_exact_f1 || 0)}">
+                    ${(agg.avg_exact_f1 || 0).toFixed(3)}
+                </div>
+                <div class="iaa-kpi-label">Avg Exact F1</div>
+            </div>
+            <div class="iaa-kpi-card">
+                <div class="iaa-kpi-value" style="color:${f1Color(agg.avg_partial_f1 || 0)}">
+                    ${(agg.avg_partial_f1 || 0).toFixed(3)}
+                </div>
+                <div class="iaa-kpi-label">Avg Partial F1</div>
+            </div>
+            <div class="iaa-kpi-card">
+                <div class="iaa-kpi-value" style="color:var(--text-primary)">
+                    ${agg.total_docs || 0}
+                </div>
+                <div class="iaa-kpi-label">Documents</div>
+            </div>
+        </div>
+    `;
+
+    // ── Per-Entity Heatmap ────────────────────────────────────────
+    // The STAR of the show! 🌟 A color-coded grid showing F1, Precision,
+    // and Recall for each entity type. Red = disagreement, Green = harmony.
+    const entityNames = Object.keys(perEntity).sort();
+    if (entityNames.length > 0) {
+        const metrics = ['avg_f1', 'avg_precision', 'avg_recall'];
+        const metricLabels = { avg_f1: 'F1', avg_precision: 'Prec', avg_recall: 'Rec' };
+
+        html += `
+            <div style="margin-bottom:6px;">
+                <h4 style="font-family:var(--font-display); font-size:0.85rem; color:var(--text-primary); margin-bottom:4px;">
+                    🔥 Agreement Heatmap by Entity Type
+                </h4>
+                <div style="font-size:0.62rem; color:var(--text-muted);">
+                    Hover for details · 🟢 High agreement · 🔴 Low agreement
+                </div>
+            </div>
+            <div class="iaa-heatmap" style="grid-template-columns: 140px repeat(${metrics.length}, 1fr);">
+                <!-- Header row -->
+                <div class="iaa-heatmap-header"></div>
+                ${metrics.map(m => `<div class="iaa-heatmap-header">${metricLabels[m]}</div>`).join('')}
+
+                <!-- Data rows -->
+                ${entityNames.map(eName => {
+                    const eData = perEntity[eName];
+                    const label = entityLabels[eName] || eName;
+                    const color = entityColors[eName] || '#8b949e';
+                    return `
+                        <div class="iaa-heatmap-row-label" title="${eName}">
+                            <span style="display:inline-block; width:8px; height:8px; border-radius:2px;
+                                         background:${color}; margin-right:5px; flex-shrink:0;"></span>
+                            ${escapeHtml(label)}
+                        </div>
+                        ${metrics.map(m => {
+                            const val = eData[m] || 0;
+                            return `<div class="iaa-heatmap-cell"
+                                         style="background:${f1Background(val)}; color:${f1Color(val)};"
+                                         title="${label} — ${metricLabels[m]}: ${val.toFixed(3)} (${eData.doc_count || 0} docs)">
+                                        ${val.toFixed(2)}
+                                    </div>`;
+                        }).join('')}
+                    `;
+                }).join('')}
+            </div>
+        `;
+    }
+
+    // ── Per-Document Table ─────────────────────────────────────────
+    if (docs.length > 0) {
+        html += `
+            <h4 style="font-family:var(--font-display); font-size:0.85rem; color:var(--text-primary);
+                        margin-top:20px; margin-bottom:8px;">
+                📋 Per-Document Breakdown
+            </h4>
+            <div style="max-height:250px; overflow-y:auto; border:1px solid var(--border); border-radius:8px;">
+                <table class="iaa-doc-table">
+                    <thead>
+                        <tr>
+                            <th>Doc ID</th>
+                            <th>Annotator B</th>
+                            <th>Exact F1</th>
+                            <th>Partial F1</th>
+                            <th>Kappa</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${docs.map(doc => {
+                            const sa = doc.span_agreement || {};
+                            const ex = sa.exact || {};
+                            const pa = sa.partial || {};
+                            const tk = doc.token_kappa || {};
+                            const kVal = tk.kappa != null ? tk.kappa : null;
+                            const kInterp = kVal != null ? kappaInterpretation(kVal) : null;
+                            return `
+                                <tr>
+                                    <td><a href="/annotate/${doc.candidate_id || 0}" style="color:var(--accent-cyan);">
+                                        ${escapeHtml(doc.doc_id)}</a></td>
+                                    <td>${escapeHtml(doc.annotator_b || '—')}</td>
+                                    <td style="color:${f1Color(ex.f1 || 0)}">${(ex.f1 || 0).toFixed(3)}</td>
+                                    <td style="color:${f1Color(pa.f1 || 0)}">${(pa.f1 || 0).toFixed(3)}</td>
+                                    <td>
+                                        ${kVal != null ? `<span style="color:${f1Color(kVal)}">${kVal.toFixed(3)}</span>` : '—'}
+                                        ${kInterp ? `<span class="kappa-badge ${kInterp.cls}" style="margin-left:4px;">${kInterp.label}</span>` : ''}
+                                    </td>
+                                </tr>
+                            `;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+    }
+
+    // ── IAA Mode CTA ──────────────────────────────────────────────
+    html += `
+        <div style="margin-top:18px; padding-top:14px; border-top:1px solid var(--border);
+                     display:flex; gap:8px; align-items:center;">
+            <button class="btn btn-sm" onclick="enterIAAMode(); closeInspector('iaa');"
+                    style="border-color:var(--accent-pink); color:var(--accent-pink); padding:6px 16px;">
+                📏 Enter IAA Mode
+            </button>
+            <span style="font-size:0.65rem; color:var(--text-muted);">
+                Annotate this document as a second reviewer
+            </span>
+        </div>
+    `;
+
+    container.innerHTML = html;
+}
+
+/**
+ * buildEntityHeatmapSection(perEntity, entityNames, data)
+ *
+ * Builds the per-entity heatmap section for a SINGLE document view.
+ * Shows F1, Precision, and Recall for each entity type.
+ *
+ * @param {Object} perEntity - { ENTITY_NAME: { f1, precision, recall, count_a, count_b } }
+ * @param {string[]} entityNames - Sorted entity type names
+ * @param {Object} data - Full API response (for colors/labels)
+ * @returns {string} HTML string
+ */
+function buildEntityHeatmapSection(perEntity, entityNames, data) {
+    const entityColors = (data && data.entity_colors) || COLOR_MAP || {};
+    const metrics = ['f1', 'precision', 'recall'];
+    const metricLabels = { f1: 'F1', precision: 'Prec', recall: 'Rec' };
+
+    let html = `
+        <div style="margin-bottom:6px;">
+            <h4 style="font-family:var(--font-display); font-size:0.85rem; color:var(--text-primary); margin-bottom:4px;">
+                🔥 Agreement by Entity Type
+            </h4>
+            <div style="font-size:0.62rem; color:var(--text-muted);">
+                Hover for span counts · 🟢 High · 🔴 Low
+            </div>
+        </div>
+        <div class="iaa-heatmap" style="grid-template-columns: 140px repeat(${metrics.length}, 1fr);">
+            <div class="iaa-heatmap-header"></div>
+            ${metrics.map(m => `<div class="iaa-heatmap-header">${metricLabels[m]}</div>`).join('')}
+            ${entityNames.map(eName => {
+                const eData = perEntity[eName];
+                const label = (SCHEMA.entities[eName] || {}).label || eName;
+                const color = entityColors[eName] || '#8b949e';
+                return `
+                    <div class="iaa-heatmap-row-label" title="${eName}">
+                        <span style="display:inline-block; width:8px; height:8px; border-radius:2px;
+                                     background:${color}; margin-right:5px; flex-shrink:0;"></span>
+                        ${escapeHtml(label)}
+                    </div>
+                    ${metrics.map(m => {
+                        const val = eData[m] || 0;
+                        const tooltip = `${label} ${metricLabels[m]}: ${val.toFixed(3)} (A:${eData.count_a||0} / B:${eData.count_b||0} spans)`;
+                        return `<div class="iaa-heatmap-cell"
+                                     style="background:${f1Background(val)}; color:${f1Color(val)};"
+                                     title="${tooltip}">
+                                    ${val.toFixed(2)}
+                                </div>`;
+                    }).join('')}
+                `;
+            }).join('')}
+        </div>
+    `;
+    return html;
+}
+
+// =================================================================
 // 🚀 INIT
 // =================================================================
 buildPalette();
-buildShortcutGrid();   // Inject entity shortcuts into the Help Modal grid
+buildShortcutGrid();
+initAnnotatorName();   // 👤 Prompt for annotator name on first visit
 renderText();
+autoDetectIAAMode();   // 📏 Auto-enter IAA mode if activated from queue page
 
 // Populate classification dropdowns with stored values from server
 // NOTE: Using tojson filter to prevent Jinja2 HTML-escaping '&' chars
