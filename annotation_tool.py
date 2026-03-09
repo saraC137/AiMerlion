@@ -133,7 +133,8 @@ def get_candidates_for_annotation(
         if status_filter == "annotated":
             rows = conn.execute("""
                 SELECT s.candidate_id, s.name, s.email,
-                       s.extraction_status, nd.status as ann_status
+                       s.extraction_status, nd.status as ann_status,
+                       nd.annotator as ann_by
                 FROM structured_extractions s
                 INNER JOIN ner_documents nd
                     ON 'doc_' || s.candidate_id = nd.doc_id
@@ -143,7 +144,8 @@ def get_candidates_for_annotation(
         elif status_filter == "pending":
             rows = conn.execute("""
                 SELECT s.candidate_id, s.name, s.email,
-                       s.extraction_status, NULL as ann_status
+                       s.extraction_status, NULL as ann_status,
+                       NULL as ann_by
                 FROM structured_extractions s
                 WHERE NOT EXISTS (
                     SELECT 1 FROM ner_documents nd
@@ -155,7 +157,8 @@ def get_candidates_for_annotation(
         else:
             rows = conn.execute("""
                 SELECT s.candidate_id, s.name, s.email,
-                       s.extraction_status, nd.status as ann_status
+                       s.extraction_status, nd.status as ann_status,
+                       nd.annotator as ann_by
                 FROM structured_extractions s
                 LEFT JOIN ner_documents nd
                     ON 'doc_' || s.candidate_id = nd.doc_id
@@ -332,16 +335,15 @@ def save_annotations():
         hard_skills = data.get('hard_skills', [])
         soft_skills = data.get('soft_skills', [])
         tags = data.get('tags', [])
+        # 👤 Annotator name — tracks WHO saved this document
+        annotator_name = data.get('annotator_name', '')
 
         if not doc_id:
             return jsonify({"success": False, "error": "No doc_id"}), 400
 
         # ── 📊 Diagnostic logging: what data actually arrived? ────────
-        # This helps trace the EXACT data flowing from frontend → backend.
-        # If the user reports "old data", check the server console for these
-        # logs to see if the frontend sent the updated or original values.
-        # Like installing a security camera backstage! 📹✨
         logger.info(f"💾 SAVE REQUEST for {doc_id} | status={status} | "
+                     f"annotator={annotator_name} | "
                      f"func={func} | ind={ind} | "
                      f"hard_skills={len(hard_skills)} | soft_skills={len(soft_skills)} | "
                      f"tags={len(tags)} | annotations={len(annotations_list)}")
@@ -359,11 +361,12 @@ def save_annotations():
         for etype, texts in type_summary.items():
             logger.info(f"   📋 {etype}: {texts}")
 
-        # Save classification and status
+        # Save classification, status, and annotator name
         storage.update_document_metadata(doc_id, status, func, ind,
                                          hard_skills=hard_skills,
                                          soft_skills=soft_skills,
-                                         tags=tags)
+                                         tags=tags,
+                                         annotator=annotator_name)
 
         # Save the actual entity spans
         storage.save_annotations(doc_id, annotations_list)
@@ -946,6 +949,106 @@ def api_stats():
         conn.close()
 
     return jsonify(stats)
+
+
+@app.route("/api/annotator-tracker")
+def api_annotator_tracker():
+    """
+    👥 Annotator Tracker — who annotated what, when, and how much.
+
+    Returns per-annotator summary, per-document detail, and IAA sessions.
+    Think of it as the production manager's clipboard! 🎭📋
+    """
+    conn = get_db()
+    try:
+        # ── Per-annotator summary ─────────────────────────────────────
+        annotator_summary = []
+        try:
+            rows = conn.execute("""
+                SELECT
+                    annotator,
+                    COUNT(*) as total_docs,
+                    SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+                    SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) as in_progress,
+                    MIN(created_at) as first_activity,
+                    MAX(updated_at) as last_activity
+                FROM ner_documents
+                WHERE annotator != '' AND annotator IS NOT NULL
+                GROUP BY annotator
+                ORDER BY total_docs DESC
+            """).fetchall()
+            annotator_summary = [dict(r) for r in rows]
+        except sqlite3.OperationalError:
+            pass
+
+        # ── Span counts per annotator ─────────────────────────────────
+        span_counts = {}
+        try:
+            span_rows = conn.execute("""
+                SELECT nd.annotator, COUNT(na.id) as span_count
+                FROM ner_annotations na
+                JOIN ner_documents nd ON na.doc_id = nd.doc_id
+                WHERE nd.annotator != '' AND nd.annotator IS NOT NULL
+                GROUP BY nd.annotator
+            """).fetchall()
+            span_counts = {r["annotator"]: r["span_count"] for r in span_rows}
+        except sqlite3.OperationalError:
+            pass
+
+        for item in annotator_summary:
+            item["total_spans"] = span_counts.get(item["annotator"], 0)
+
+        # ── Recent documents with annotator info ──────────────────────
+        doc_detail = []
+        try:
+            doc_rows = conn.execute("""
+                SELECT
+                    nd.doc_id, nd.candidate_id, nd.annotator, nd.status,
+                    nd.function, nd.industry, nd.created_at, nd.updated_at,
+                    s.name as candidate_name,
+                    COUNT(na.id) as span_count
+                FROM ner_documents nd
+                LEFT JOIN structured_extractions s ON nd.candidate_id = s.candidate_id
+                LEFT JOIN ner_annotations na ON nd.doc_id = na.doc_id
+                GROUP BY nd.doc_id
+                ORDER BY nd.updated_at DESC
+                LIMIT 50
+            """).fetchall()
+            doc_detail = [dict(r) for r in doc_rows]
+        except sqlite3.OperationalError:
+            pass
+
+        # ── IAA sessions ──────────────────────────────────────────────
+        iaa_sessions = []
+        try:
+            iaa_rows = conn.execute("""
+                SELECT
+                    ia.doc_id, ia.candidate_id,
+                    ia.annotator_name as annotator_b,
+                    nd.annotator as annotator_a,
+                    COUNT(*) as span_count,
+                    MAX(ia.created_at) as last_activity
+                FROM iaa_annotations ia
+                LEFT JOIN ner_documents nd ON ia.doc_id = nd.doc_id
+                GROUP BY ia.doc_id, ia.annotator_name
+                ORDER BY ia.created_at DESC
+            """).fetchall()
+            iaa_sessions = [dict(r) for r in iaa_rows]
+        except sqlite3.OperationalError:
+            pass
+
+        return jsonify({
+            "annotators": annotator_summary,
+            "documents": doc_detail,
+            "iaa_sessions": iaa_sessions,
+            "total_annotators": len(annotator_summary),
+            "total_docs": len(doc_detail),
+        })
+    except Exception as e:
+        logger.error(f"❌ Annotator tracker failed: {e}")
+        return jsonify({"annotators": [], "documents": [], "iaa_sessions": [], "error": str(e)})
+    finally:
+        conn.close()
 
 
 # =============================================================================
@@ -2362,6 +2465,10 @@ INDEX_TEMPLATE = """
         <button class="btn" onclick="openStats()" id="statsBtn" title="View annotation statistics dashboard">
             📊 Stats
         </button>
+        <button class="btn" onclick="openAnnotatorTracker()" title="See who annotated what"
+                style="border-color:var(--accent-purple); color:var(--accent-purple);">
+            👥 Annotators
+        </button>
         <!-- Profile exports: recruiter-friendly talent DB format -->
         <button class="btn btn-success" onclick="exportProfiles('csv')" title="Export as Excel-compatible CSV (talent database format)">
             📊 Export CSV
@@ -2436,6 +2543,7 @@ INDEX_TEMPLATE = """
                 <th>Email</th>
                 <th>Extraction</th>
                 <th>Annotation</th>
+                <th>Annotator</th>
                 <th>Action</th>
             </tr>
         </thead>
@@ -2463,6 +2571,13 @@ INDEX_TEMPLATE = """
                         <span class="badge badge-pending">⏳ {{ c.ann_status }}</span>
                     {% else %}
                         <span class="badge badge-pending">⏳ Not Started</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if c.ann_by %}
+                        <span style="font-size:0.75rem; color:var(--accent-purple);">👤 {{ c.ann_by }}</span>
+                    {% else %}
+                        <span style="font-size:0.72rem; color:var(--text-muted);">—</span>
                     {% endif %}
                 </td>
                 <td>
@@ -2561,6 +2676,27 @@ INDEX_TEMPLATE = """
 
     </div>
     </div>
+
+<!-- ================================================================
+     👥 ANNOTATOR TRACKER MODAL
+     ================================================================ -->
+<div class="stats-overlay" id="trackerOverlay" onclick="closeTrackerOnBackdrop(event)">
+  <div class="stats-modal" role="dialog" aria-modal="true" style="max-width:900px;">
+    <div class="stats-header">
+      <div>
+        <h2>👥 Annotator <span>Tracker</span></h2>
+        <div class="subtitle" id="trackerSubtitle">Loading…</div>
+      </div>
+      <button class="stats-close" onclick="closeTracker()" title="Close">✕</button>
+    </div>
+    <div class="stats-body" id="trackerBody" style="max-height:75vh; overflow-y:auto;">
+      <div class="stats-loading">
+        <div class="spin">⚙️</div>
+        <div>Loading annotator data…</div>
+      </div>
+    </div>
+  </div>
+</div>
 
 <script>
 // ── Scroll to & highlight the row the user came from ──
@@ -3193,6 +3329,122 @@ function showToast(msg, type = 'success', duration = 4000) {
 // ================================================================
 // 📏 IAA GLOBAL TOGGLE — Queue page on/off switch
 // ================================================================
+// ================================================================
+// 👥 ANNOTATOR TRACKER — Open / Close / Render
+// ================================================================
+function openAnnotatorTracker() {
+    const overlay = document.getElementById('trackerOverlay');
+    overlay.classList.add('open');
+    document.addEventListener('keydown', closeTrackerOnEscape);
+    document.getElementById('trackerBody').innerHTML = `
+        <div class="stats-loading"><div class="spin">⚙️</div><div>Loading annotator data…</div></div>`;
+    document.getElementById('trackerSubtitle').textContent = 'Loading…';
+    fetch('/api/annotator-tracker')
+        .then(r => r.json())
+        .then(d => renderAnnotatorTracker(d))
+        .catch(err => {
+            document.getElementById('trackerBody').innerHTML =
+                `<div style="text-align:center;padding:40px;color:#da3633;">Failed to load: ${err}</div>`;
+        });
+}
+function closeTracker() {
+    document.getElementById('trackerOverlay').classList.remove('open');
+    document.removeEventListener('keydown', closeTrackerOnEscape);
+}
+function closeTrackerOnEscape(e) { if (e.key === 'Escape') closeTracker(); }
+function closeTrackerOnBackdrop(e) {
+    if (e.target === document.getElementById('trackerOverlay')) closeTracker();
+}
+
+function renderAnnotatorTracker(d) {
+    const body = document.getElementById('trackerBody');
+    document.getElementById('trackerSubtitle').textContent =
+        `${d.total_annotators || 0} annotators · ${d.total_docs || 0} documents tracked`;
+
+    // ── Annotator Summary Cards ──────────────────────────────
+    let annoHTML = '';
+    if ((d.annotators || []).length > 0) {
+        const medals = ['🥇','🥈','🥉','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣'];
+        annoHTML = `<div class="stats-panel"><h4>👥 Annotator Summary</h4>
+            ${d.annotators.map((a, i) => {
+                const pct = a.total_docs > 0 ? Math.round(a.completed / a.total_docs * 100) : 0;
+                const barColor = pct >= 80 ? '#56d364' : pct >= 50 ? '#e3b341' : '#f0883e';
+                return `<div style="padding:10px 0; border-bottom:1px solid rgba(42,49,64,0.5);">
+                    <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+                        <span style="font-size:1.1rem;">${medals[i] || ''}</span>
+                        <strong style="color:#e6edf3;">${escapeHtml(a.annotator)}</strong>
+                        <span style="font-size:0.65rem; color:#545d68; margin-left:auto;">
+                            Last: ${a.last_activity ? a.last_activity.slice(0,16).replace('T',' ') : '—'}</span>
+                    </div>
+                    <div style="display:flex; gap:16px; font-size:0.72rem; color:#8b949e; margin-bottom:6px;">
+                        <span>✅ ${a.completed||0} done</span>
+                        <span>🔵 ${a.in_progress||0} wip</span>
+                        <span>🏷️ ${(a.total_spans||0).toLocaleString()} spans</span>
+                        <span>📄 ${a.total_docs||0} docs</span>
+                    </div>
+                    <div style="background:rgba(42,49,64,0.5); border-radius:4px; height:6px; overflow:hidden;">
+                        <div style="background:${barColor}; height:100%; width:${pct}%; border-radius:4px;"></div>
+                    </div>
+                    <div style="font-size:0.6rem; color:#545d68; margin-top:2px; text-align:right;">${pct}% complete</div>
+                </div>`;
+            }).join('')}
+        </div>`;
+    } else {
+        annoHTML = `<div class="stats-panel"><h4>👥 Annotator Summary</h4>
+            <div style="color:#545d68; font-size:0.82rem; padding:20px 0; text-align:center;">
+                No annotators recorded yet. Names are saved when you click 💾 Save or ✅ Complete.
+            </div></div>`;
+    }
+
+    // ── IAA Sessions ─────────────────────────────────────────
+    let iaaHTML = '';
+    if ((d.iaa_sessions || []).length > 0) {
+        iaaHTML = `<div class="stats-panel" style="margin-top:14px;"><h4>📏 IAA Sessions</h4>
+            <div style="max-height:200px; overflow-y:auto;">
+            <table style="width:100%; border-collapse:collapse; font-size:0.72rem;">
+                <thead><tr style="color:#545d68; text-align:left;">
+                    <th style="padding:6px 8px;">Doc</th><th style="padding:6px 8px;">Annotator A</th>
+                    <th style="padding:6px 8px;">Annotator B</th><th style="padding:6px 8px;">Spans</th>
+                    <th style="padding:6px 8px;">Date</th>
+                </tr></thead><tbody>
+                ${d.iaa_sessions.map(s => `<tr style="border-bottom:1px solid rgba(42,49,64,0.3);">
+                    <td style="padding:6px 8px;"><a href="/annotate/${s.candidate_id||0}" style="color:#7ee8fa;">${escapeHtml(s.doc_id||'—')}</a></td>
+                    <td style="padding:6px 8px; color:#8b949e;">${escapeHtml(s.annotator_a||'—')}</td>
+                    <td style="padding:6px 8px; color:#f778ba; font-weight:600;">${escapeHtml(s.annotator_b||'—')}</td>
+                    <td style="padding:6px 8px;">${s.span_count||0}</td>
+                    <td style="padding:6px 8px; color:#545d68;">${s.last_activity ? s.last_activity.slice(0,10) : '—'}</td>
+                </tr>`).join('')}
+                </tbody></table></div></div>`;
+    }
+
+    // ── Recent Docs ──────────────────────────────────────────
+    let docsHTML = '';
+    if ((d.documents || []).length > 0) {
+        docsHTML = `<div class="stats-panel" style="margin-top:14px;"><h4>📋 Recent Documents</h4>
+            <div style="max-height:300px; overflow-y:auto;">
+            <table style="width:100%; border-collapse:collapse; font-size:0.72rem;">
+                <thead><tr style="color:#545d68; text-align:left;">
+                    <th style="padding:6px 8px;">ID</th><th style="padding:6px 8px;">Candidate</th>
+                    <th style="padding:6px 8px;">Annotator</th><th style="padding:6px 8px;">Status</th>
+                    <th style="padding:6px 8px;">Spans</th><th style="padding:6px 8px;">Last Saved</th>
+                </tr></thead><tbody>
+                ${d.documents.map(doc => {
+                    const sc = doc.status==='completed' ? '#56d364' : doc.status==='in_progress' ? '#7ee8fa' : '#e3b341';
+                    return `<tr style="border-bottom:1px solid rgba(42,49,64,0.3);">
+                        <td style="padding:6px 8px;"><a href="/annotate/${doc.candidate_id||0}" style="color:#7ee8fa;">#${doc.candidate_id||'?'}</a></td>
+                        <td style="padding:6px 8px; color:#8b949e; max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(doc.candidate_name||'—')}</td>
+                        <td style="padding:6px 8px; color:#eeb8ff; font-weight:600;">${escapeHtml(doc.annotator||'—')}</td>
+                        <td style="padding:6px 8px;"><span style="color:${sc};">${doc.status||'pending'}</span></td>
+                        <td style="padding:6px 8px;">${doc.span_count||0}</td>
+                        <td style="padding:6px 8px; color:#545d68;">${doc.updated_at ? doc.updated_at.slice(0,16).replace('T',' ') : '—'}</td>
+                    </tr>`;
+                }).join('')}
+                </tbody></table></div></div>`;
+    }
+
+    body.innerHTML = `${annoHTML}${iaaHTML}${docsHTML}`;
+}
+
 function toggleIAAGlobal() {
     const isActive = localStorage.getItem('iaa_mode_active') === 'true';
     if (isActive) {
@@ -5081,6 +5333,14 @@ ANNOTATE_TEMPLATE = """
             <span id="statusBadge"
                   class="badge {{ 'badge-complete' if ann_status == 'completed' else 'badge-progress' if ann_status == 'in_progress' else 'badge-pending' }}">
                 {{ ann_status }}
+            </span>
+            <!-- 👤 Current annotator — shows who's working, click to change -->
+            <span id="annotatorBadge"
+                  style="font-size:0.65rem; color:var(--text-muted); cursor:pointer;
+                         padding:2px 8px; border:1px dashed var(--border); border-radius:4px;"
+                  onclick="changeAnnotatorName()"
+                  title="Click to change annotator name">
+                👤 <span id="annotatorBadgeName">—</span>
             </span>
         </div>
         <div style="display:flex; gap:6px;" id="normalSaveButtons">
@@ -7105,7 +7365,9 @@ function saveAnnotations(status = 'in_progress') {
         hard_skills: currentHardSkills,
         soft_skills: currentSoftSkills,
         tags: currentTags,
-        annotations: annotations
+        annotations: annotations,
+        // 👤 Track who saved — stored in ner_documents.annotator
+        annotator_name: getAnnotatorName() || ''
     };
 
     fetch('/api/save_annotations', {
@@ -8244,7 +8506,41 @@ function confirmAnnotatorName() {
     setAnnotatorName(name);
     errorEl.style.display = 'none';
     document.getElementById('annotatorPromptOverlay').classList.remove('open');
+    updateAnnotatorBadge();
     showToast(`👋 Welcome, ${name}! Your annotations will be tracked. ✨`, 'success', 4000);
+}
+
+/**
+ * updateAnnotatorBadge()
+ * Updates the 👤 badge in the header with the current annotator name.
+ */
+function updateAnnotatorBadge() {
+    const badge = document.getElementById('annotatorBadgeName');
+    if (!badge) return;
+    const name = getAnnotatorName();
+    badge.textContent = name || '(set name)';
+    const container = document.getElementById('annotatorBadge');
+    if (container) {
+        container.style.borderStyle = name ? 'solid' : 'dashed';
+        container.style.color = name ? 'var(--accent-cyan)' : 'var(--text-muted)';
+    }
+}
+
+/**
+ * changeAnnotatorName()
+ * Quick inline name change via prompt — click the 👤 badge to trigger.
+ */
+function changeAnnotatorName() {
+    const current = getAnnotatorName();
+    const newName = prompt('Annotator name:', current || '');
+    if (newName === null) return;
+    if (newName.trim().length < 2) {
+        showToast('Name needs at least 2 characters!', 'error', 3000);
+        return;
+    }
+    setAnnotatorName(newName.trim());
+    updateAnnotatorBadge();
+    showToast(`👤 Annotator changed to "${newName.trim()}" ✨`, 'success', 3000);
 }
 
 // -----------------------------------------------------------------
@@ -8891,6 +9187,7 @@ function buildEntityHeatmapSection(perEntity, entityNames, data) {
 buildPalette();
 buildShortcutGrid();
 initAnnotatorName();   // 👤 Prompt for annotator name on first visit
+updateAnnotatorBadge(); // 👤 Show current annotator in header badge
 renderText();
 autoDetectIAAMode();   // 📏 Auto-enter IAA mode if activated from queue page
 

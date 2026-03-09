@@ -4459,7 +4459,8 @@ class AnnotationStorage:
                              function: Optional[str] = None, industry: Optional[str] = None,
                              hard_skills: Optional[List[str]] = None,
                              soft_skills: Optional[List[str]] = None,
-                             tags: Optional[List[str]] = None):
+                             tags: Optional[List[str]] = None,
+                             annotator: Optional[str] = None):
         """
         Update status and/or classification for a document.
 
@@ -4515,6 +4516,10 @@ class AnnotationStorage:
             if tags is not None:
                 updates.append("tags = ?")
                 params.append(json.dumps(tags, ensure_ascii=False))
+            # 👤 Track who saved this document (only if non-empty)
+            if annotator is not None and annotator.strip():
+                updates.append("annotator = ?")
+                params.append(annotator.strip())
             if not updates:
                 conn.commit()  # Commit the INSERT OR IGNORE at minimum
                 return
