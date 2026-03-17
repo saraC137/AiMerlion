@@ -2430,10 +2430,15 @@ class PreAnnotator:
         self.edge_handler = EdgeCaseHandler()
         
         # Initialize dictionaries for each entity type
+        # 💅 Fairy Codemother's EXPANDED dictionary system!
+        # Original 5 + 3 NEW dictionaries for richer pre-annotation coverage
         self._skill_dict: Set[str] = set()
+        self._soft_skill_dict: Set[str] = set()       # NEW: Separate soft skills
         self._institution_dict: Set[str] = set()
         self._location_dict: Set[str] = set()
         self._certification_dict: Set[str] = set()
+        self._degree_dict: Set[str] = set()            # NEW: Degree patterns
+        self._organization_dict: Set[str] = set()      # NEW: Known SG/MY companies
         self._section_headers: Set[str] = set()
         
         self._load_default_dictionaries()
@@ -2442,97 +2447,618 @@ class PreAnnotator:
         """
         📚 Load built-in dictionaries for pre-annotation.
         
-        These are curated for SG/MY resume formats. Additional terms
-        can be loaded from files or the database.
+        💅✨ FAIRY CODEMOTHER'S MEGA EXPANSION v2.0! ✨💅
+        
+        Curated for SG/MY resume formats with terms harvested from:
+          - ai_extractor.py tech_keywords (~300+ skills)
+          - ai_extractor.py soft_keywords (~200+ soft skills)
+          - ResumeClassifier.TAG_MAPPING (~180 skill→tag entries)
+          - EdgeCaseHandler location/org data
+          - Real SG/MY job market knowledge (your HR Queen knows! 👑)
+        
+        Additional terms can be loaded from files, the database,
+        or via the add_terms() method at runtime.
+        
+        Dictionary sizes (approx):
+          Skills:         ~250 terms  (was ~80)
+          Soft Skills:    ~100 terms  (NEW!)
+          Institutions:   ~80 terms   (was ~30)
+          Locations:      ~90 terms   (was ~30)
+          Certifications: ~60 terms   (was ~25)
+          Degrees:        ~40 terms   (NEW!)
+          Organizations:  ~70 terms   (NEW!)
+          Section Headers: ~40 terms  (was ~30)
         """
-        # -- Skills (subset — expand from ai_extractor.py as needed) --
+        
+        # ─────────────────────────────────────────────────────────────
+        # 💻 SKILLS (Technical / Hard Skills)
+        # Harvested from ai_extractor.py tech_keywords + TAG_MAPPING
+        # These get matched as entity type "SKILL"
+        # ─────────────────────────────────────────────────────────────
         self._skill_dict = {
-            # Programming
+            # ── Programming Languages ────────────────────────────────
             'python', 'java', 'javascript', 'typescript', 'c++', 'c#',
-            'go', 'rust', 'ruby', 'php', 'swift', 'kotlin', 'scala',
-            'html', 'css', 'sql', 'nosql', 'r', 'matlab', 'vba',
-            # Frameworks
-            'react', 'angular', 'vue', 'django', 'flask', 'spring',
-            'node.js', 'express', 'fastapi', '.net', 'laravel',
-            'next.js', 'nuxt.js', 'svelte', 'tailwind',
-            # Data / AI
+            'go', 'golang', 'rust', 'ruby', 'php', 'swift', 'kotlin',
+            'scala', 'perl', 'r', 'matlab', 'vba', 'bash', 'shell',
+            'powershell', 'dart', 'elixir', 'clojure', 'haskell', 'lua',
+            'groovy', 'objective-c', 'cobol', 'abap', 'apex', 'solidity',
+            'html', 'css', 'sass', 'sql', 'nosql', 'graphql',
+            
+            # ── Frontend Frameworks ──────────────────────────────────
+            'react', 'angular', 'vue', 'svelte', 'jquery', 'bootstrap',
+            'tailwind', 'material ui', 'chakra ui', 'ant design',
+            'next.js', 'nuxt.js', 'gatsby', 'remix', 'sveltekit', 'astro',
+            'redux', 'mobx', 'zustand', 'pinia', 'vuex',
+            
+            # ── Backend Frameworks ───────────────────────────────────
+            'node.js', 'express', 'fastify', 'nest.js', 'koa',
+            'django', 'flask', 'fastapi', 'tornado', 'aiohttp',
+            'spring', 'spring boot', 'hibernate', 'quarkus', 'micronaut',
+            '.net', 'asp.net', '.net core', 'blazor', 'entity framework',
+            'laravel', 'symfony', 'codeigniter', 'rails', 'sinatra',
+            'gin', 'echo', 'fiber',
+            
+            # ── AI / ML / Data Science ───────────────────────────────
             'machine learning', 'deep learning', 'natural language processing',
             'computer vision', 'data science', 'data analysis',
-            'tensorflow', 'pytorch', 'scikit-learn', 'pandas', 'numpy',
-            'tableau', 'power bi', 'excel', 'spss', 'sas',
-            # Cloud / DevOps
-            'aws', 'azure', 'gcp', 'docker', 'kubernetes',
-            'terraform', 'ansible', 'jenkins', 'gitlab ci', 'github actions',
-            # Databases
+            'tensorflow', 'pytorch', 'keras', 'scikit-learn', 'pandas',
+            'numpy', 'scipy', 'matplotlib', 'seaborn', 'plotly',
+            'huggingface', 'transformers', 'langchain', 'llamaindex',
+            'opencv', 'spacy', 'nltk', 'gensim',
+            'xgboost', 'lightgbm', 'catboost',
+            'prompt engineering', 'generative ai', 'rag',
+            'embeddings', 'vector database', 'pinecone', 'weaviate',
+            
+            # ── Data & Analytics Tools ───────────────────────────────
+            'tableau', 'power bi', 'looker', 'metabase', 'superset',
+            'excel', 'google sheets', 'spss', 'sas', 'stata',
+            'snowflake', 'databricks', 'bigquery', 'redshift',
+            'dbt', 'airflow', 'prefect', 'dagster', 'fivetran',
+            'etl', 'data warehouse', 'data lake', 'data pipeline',
+            'data modeling', 'data visualization',
+            
+            # ── Cloud & DevOps ───────────────────────────────────────
+            'aws', 'azure', 'gcp', 'google cloud',
+            'docker', 'kubernetes', 'k8s',
+            'terraform', 'ansible', 'puppet', 'chef', 'cloudformation',
+            'jenkins', 'gitlab ci', 'github actions', 'argocd',
+            'serverless', 'lambda', 'microservices',
+            'prometheus', 'grafana', 'datadog', 'splunk', 'elk',
+            'helm', 'kustomize', 'rancher', 'openshift',
+            'infrastructure as code',
+            
+            # ── Databases ────────────────────────────────────────────
             'mysql', 'postgresql', 'mongodb', 'redis', 'elasticsearch',
-            'oracle', 'sql server', 'dynamodb', 'cassandra',
-            # Other tech
-            'git', 'linux', 'agile', 'scrum', 'jira', 'confluence',
-            'figma', 'adobe photoshop', 'autocad', 'sap',
+            'oracle', 'sql server', 'sqlite', 'dynamodb', 'cassandra',
+            'neo4j', 'cosmos db', 'firestore', 'supabase',
+            'cockroachdb', 'clickhouse', 'influxdb', 'timescaledb',
+            
+            # ── Networking & Security ────────────────────────────────
+            'tcp/ip', 'cisco', 'juniper', 'palo alto', 'fortinet',
+            'penetration testing', 'vulnerability assessment',
+            'siem', 'firewall', 'vpn', 'encryption', 'ssl', 'tls',
+            'owasp', 'zero trust', 'endpoint security',
+            'cybersecurity', 'information security',
+            
+            # ── Mobile Development ───────────────────────────────────
+            'react native', 'flutter', 'xamarin', 'swiftui',
+            'jetpack compose', 'expo', 'ionic',
+            
+            # ── QA & Testing ─────────────────────────────────────────
+            'selenium', 'cypress', 'playwright', 'puppeteer',
+            'jest', 'junit', 'pytest', 'mocha', 'vitest',
+            'postman', 'jmeter', 'gatling', 'k6', 'locust',
+            'appium', 'cucumber', 'karate',
+            'test automation', 'manual testing', 'load testing',
+            'api testing', 'regression testing',
+            
+            # ── Design & Creative ────────────────────────────────────
+            'figma', 'sketch', 'adobe xd', 'photoshop', 'illustrator',
+            'indesign', 'premiere pro', 'after effects', 'canva',
+            'autocad', 'solidworks', 'revit', 'blender',
+            'ui/ux design', 'wireframing', 'prototyping',
+            
+            # ── Project & Collaboration Tools ────────────────────────
+            'git', 'github', 'gitlab', 'bitbucket',
+            'jira', 'confluence', 'trello', 'asana', 'monday.com',
+            'slack', 'microsoft teams', 'notion', 'clickup',
+            'sharepoint', 'servicenow', 'zendesk', 'freshdesk',
+            
+            # ── Enterprise / Business Software ───────────────────────
+            'sap', 'sap fico', 'sap mm', 'sap sd', 'sap hana',
+            'salesforce', 'hubspot', 'dynamics 365', 'netsuite',
+            'workday', 'successfactors', 'peoplesoft',
+            'microsoft office', 'microsoft 365',
+            
+            # ── Methodologies & Practices ────────────────────────────
+            'agile', 'scrum', 'kanban', 'lean', 'six sigma',
+            'design thinking', 'devops', 'devsecops',
+            'ci/cd', 'gitops', 'mlops',
+            
+            # ── Blockchain & Web3 ────────────────────────────────────
+            'blockchain', 'smart contract', 'solidity', 'web3',
+            'ethereum', 'hardhat', 'truffle',
+            
+            # ── SG-Specific Technical Skills ─────────────────────────
+            # Safety & Compliance (very common in SG job market)
+            'bizsafe', 'wsh', 'workplace safety', 'risk assessment',
+            'permit to work', 'confined space', 'working at height',
+            'fire safety', 'first aid', 'cpr', 'aed',
+            'iso 9001', 'iso 14001', 'iso 45001', 'iso 27001',
+            
+            # Financial (SG banking hub)
+            'kyc', 'aml', 'fatca', 'crs', 'sanctions screening',
+            'trade finance', 'treasury', 'forex', 'derivatives',
+            'wealth management', 'private banking', 'bancassurance',
+            'underwriting', 'claims processing',
+            'mas regulations', 'sgx', 'cpf', 'srs',
+            
+            # Logistics & Supply Chain (SG port hub)
+            'supply chain management', 'logistics', 'warehouse management',
+            'freight forwarding', 'customs clearance', 'incoterms',
+            'inventory management', 'procurement', 'vendor management',
+            
+            # Manufacturing & Engineering
+            'plc programming', 'scada', 'cnc', 'cad/cam',
+            'quality control', 'quality assurance', 'lean manufacturing',
+            'forklift', 'reach truck', 'crane operations',
         }
         
-        # -- Institutions (SG/MY focused) --
+        # ─────────────────────────────────────────────────────────────
+        # 🤝 SOFT SKILLS (NEW!)
+        # Interpersonal & transferable skills — separate from technical
+        # so the model learns the DIFFERENCE between SKILL vs SOFT_SKILL.
+        # Matched as entity type "SOFT_SKILL"
+        # ─────────────────────────────────────────────────────────────
+        self._soft_skill_dict = {
+            # Communication
+            'communication skills', 'public speaking', 'presentation skills',
+            'active listening', 'negotiation', 'persuasion', 'storytelling',
+            'written communication', 'verbal communication',
+            
+            # Leadership
+            'leadership', 'people management', 'team management',
+            'mentoring', 'coaching', 'delegation', 'decision making',
+            'strategic thinking', 'servant leadership',
+            
+            # Teamwork
+            'teamwork', 'collaboration', 'cross-functional collaboration',
+            'relationship building', 'stakeholder management',
+            'conflict resolution', 'consensus building',
+            
+            # Problem Solving & Thinking
+            'problem solving', 'critical thinking', 'analytical thinking',
+            'creative thinking', 'design thinking', 'systems thinking',
+            'attention to detail', 'troubleshooting',
+            
+            # Organization
+            'time management', 'project management', 'multitasking',
+            'prioritization', 'planning', 'organizational skills',
+            'goal setting', 'workload management',
+            
+            # Adaptability
+            'adaptability', 'flexibility', 'resilience',
+            'quick learner', 'fast learner', 'self-motivated',
+            'growth mindset', 'continuous learning', 'initiative',
+            
+            # Customer Focus
+            'customer service', 'client relations', 'customer experience',
+            'service excellence', 'empathy', 'rapport building',
+            
+            # Professionalism
+            'integrity', 'accountability', 'reliability',
+            'work ethic', 'confidentiality', 'professionalism',
+            
+            # Business Skills
+            'business development', 'account management',
+            'sales', 'lead generation', 'pipeline management',
+            'change management', 'risk management',
+            'budget management', 'resource allocation',
+            'process improvement', 'requirements gathering',
+        }
+        
+        # ─────────────────────────────────────────────────────────────
+        # 🎓 INSTITUTIONS (SG/MY Focused)
+        # Universities, polytechnics, ITE, international branches
+        # Matched as entity type "INSTITUTION"
+        # ─────────────────────────────────────────────────────────────
         self._institution_dict = {
+            # ── Singapore Autonomous Universities ────────────────────
             'national university of singapore', 'nus',
             'nanyang technological university', 'ntu',
             'singapore management university', 'smu',
             'singapore university of technology and design', 'sutd',
             'singapore institute of technology', 'sit',
             'singapore university of social sciences', 'suss',
-            'singapore polytechnic', 'ngee ann polytechnic',
-            'temasek polytechnic', 'republic polytechnic', 'nanyang polytechnic',
+            
+            # ── Singapore Polytechnics ───────────────────────────────
+            'singapore polytechnic', 'sp',
+            'ngee ann polytechnic', 'np',
+            'temasek polytechnic', 'tp',
+            'republic polytechnic', 'rp',
+            'nanyang polytechnic', 'nyp',
+            
+            # ── Singapore ITE Colleges ───────────────────────────────
             'ite college east', 'ite college central', 'ite college west',
+            'institute of technical education',
+            
+            # ── Singapore Arts & Specialised ─────────────────────────
             'lasalle college of the arts', 'nafa',
+            'nanyang academy of fine arts',
+            'singapore institute of management', 'sim',
+            'sim global education',
+            'kaplan singapore', 'kaplan higher education',
+            'james cook university singapore', 'jcu singapore',
+            'curtin singapore', 'murdoch university singapore',
+            'psi singapore', 'management development institute of singapore', 'mdis',
+            'dimensions international college',
+            'east asia institute of management', 'easb',
+            'singapore aviation academy',
+            'singapore maritime academy',
+            
+            # ── Singapore Secondary / Pre-U ──────────────────────────
             'raffles institution', 'hwa chong institution',
-            # Malaysia
-            'universiti malaya', 'um', 'universiti kebangsaan malaysia', 'ukm',
-            'universiti putra malaysia', 'upm', 'universiti teknologi malaysia', 'utm',
-            'universiti sains malaysia', 'usm', 'universiti teknologi mara', 'uitm',
-            'monash university malaysia', 'taylor\'s university',
-            'sunway university', 'help university', 'multimedia university',
+            'victoria junior college', 'anglo-chinese school',
+            'national junior college', 'temasek junior college',
+            'anderson serangoon junior college',
+            
+            # ── Singapore Professional Bodies ────────────────────────
+            'institute of singapore chartered accountants', 'isca',
+            'singapore institute of directors', 'sid',
+            'chartered institute of personnel and development', 'cipd',
+            'singapore human resources institute', 'shri',
+            'institute of banking and finance', 'ibf',
+            
+            # ── Malaysia Public Universities ─────────────────────────
+            'universiti malaya', 'um',
+            'universiti kebangsaan malaysia', 'ukm',
+            'universiti putra malaysia', 'upm',
+            'universiti teknologi malaysia', 'utm',
+            'universiti sains malaysia', 'usm',
+            'universiti teknologi mara', 'uitm',
+            'universiti utara malaysia', 'uum',
+            'universiti malaysia sabah', 'ums',
+            'universiti malaysia sarawak', 'unimas',
+            'universiti pendidikan sultan idris', 'upsi',
+            'universiti teknikal malaysia melaka', 'utem',
+            'universiti malaysia terengganu', 'umt',
+            'universiti malaysia pahang al-sultan abdullah',
+            'universiti malaysia perlis', 'unimap',
+            'universiti malaysia kelantan', 'umk',
+            'universiti pertahanan nasional malaysia',
+            
+            # ── Malaysia Private Universities ────────────────────────
+            'monash university malaysia',
+            "taylor's university", 'taylors university',
+            'sunway university', 'help university',
+            'multimedia university', 'mmu',
+            'asia pacific university', 'apu',
+            'ucsi university', 'ucsi',
+            'inti international university',
+            'segi university', 'limkokwing university',
+            'universiti tunku abdul rahman', 'utar',
+            'tunku abdul rahman university of management and technology', 'tarumt',
+            'universiti tenaga nasional', 'uniten',
+            'university of nottingham malaysia',
+            'heriot-watt university malaysia',
+            'curtin university malaysia',
+            'swinburne university of technology sarawak',
+            
+            # ── Common International (found on SG/MY resumes) ────────
+            'harvard university', 'stanford university', 'mit',
+            'university of oxford', 'university of cambridge',
+            'university of melbourne', 'university of sydney',
+            'university of london', 'london school of economics', 'lse',
+            'imperial college london', 'university college london', 'ucl',
+            'insead', 'london business school',
         }
         
-        # -- Locations (SG/MY regions) --
+        # ─────────────────────────────────────────────────────────────
+        # 📍 LOCATIONS (SG/MY Regions + Common International)
+        # Matched as entity type "LOCATION"
+        # ─────────────────────────────────────────────────────────────
         self._location_dict = {
-            'singapore', 'malaysia', 'kuala lumpur', 'penang', 'johor bahru',
-            'selangor', 'petaling jaya', 'subang jaya', 'shah alam', 'ipoh',
-            'malacca', 'melaka', 'kota kinabalu', 'kuching', 'putrajaya',
-            # SG Areas
+            # ── Countries ────────────────────────────────────────────
+            'singapore', 'malaysia', 'indonesia', 'thailand',
+            'philippines', 'vietnam', 'myanmar', 'cambodia', 'brunei',
+            'india', 'china', 'japan', 'south korea', 'taiwan',
+            'hong kong', 'australia', 'new zealand',
+            'united kingdom', 'united states', 'canada', 'germany',
+            
+            # ── Singapore Planning Areas / Towns ─────────────────────
             'ang mo kio', 'bedok', 'bishan', 'bukit batok', 'bukit merah',
-            'bukit timah', 'clementi', 'geylang', 'hougang', 'jurong east',
-            'jurong west', 'kallang', 'marine parade', 'pasir ris', 'punggol',
-            'queenstown', 'sembawang', 'sengkang', 'serangoon', 'tampines',
-            'toa payoh', 'woodlands', 'yishun', 'orchard', 'tanjong pagar',
-            'raffles place', 'marina bay', 'one-north', 'changi',
+            'bukit panjang', 'bukit timah', 'central area',
+            'choa chu kang', 'clementi', 'geylang', 'hougang',
+            'jurong east', 'jurong west', 'kallang', 'marine parade',
+            'novena', 'pasir ris', 'punggol', 'queenstown',
+            'sembawang', 'sengkang', 'serangoon', 'tampines',
+            'toa payoh', 'woodlands', 'yishun',
+            
+            # ── Singapore CBD / Business Districts ───────────────────
+            'orchard', 'tanjong pagar', 'raffles place', 'marina bay',
+            'one-north', 'changi', 'changi business park',
+            'mapletree business city', 'paya lebar',
+            'alexandra', 'harbourfront', 'sentosa',
+            'tai seng', 'ubi', 'macpherson',
+            'science park', 'biopolis', 'fusionopolis',
+            'international business park',
+            
+            # ── Malaysia States ──────────────────────────────────────
+            'selangor', 'johor', 'penang', 'perak', 'pahang',
+            'kelantan', 'terengganu', 'kedah', 'perlis',
+            'negeri sembilan', 'melaka', 'sabah', 'sarawak',
+            'labuan', 'putrajaya', 'kuala lumpur',
+            
+            # ── Malaysia Major Cities ────────────────────────────────
+            'johor bahru', 'george town', 'ipoh', 'shah alam',
+            'petaling jaya', 'subang jaya', 'cyberjaya',
+            'kota kinabalu', 'kuching', 'malacca',
+            'iskandar puteri', 'nusajaya', 'mont kiara',
+            'bangsar', 'damansara', 'ara damansara',
+            'puchong', 'klang', 'ampang', 'cheras',
+            'bukit jalil', 'sri hartamas', 'kl sentral',
+            
+            # ── Common International Cities (on APAC resumes) ────────
+            'hong kong', 'tokyo', 'shanghai', 'beijing', 'shenzhen',
+            'bangalore', 'mumbai', 'delhi', 'hyderabad', 'chennai',
+            'jakarta', 'bangkok', 'ho chi minh city', 'manila',
+            'sydney', 'melbourne', 'london', 'new york', 'san francisco',
+            'mountain view', 'seattle', 'toronto', 'dubai',
         }
         
-        # -- Certifications --
+        # ─────────────────────────────────────────────────────────────
+        # 📜 CERTIFICATIONS (SG/MY + International)
+        # Matched as entity type "CERTIFICATION"
+        # ─────────────────────────────────────────────────────────────
         self._certification_dict = {
+            # ── SG Financial (MAS-regulated) ─────────────────────────
             'cmfas module 1', 'cmfas module 1a', 'cmfas module 5',
-            'cmfas module 6', 'cmfas module 6a', 'cmfas module 8', 'cmfas module 9',
-            'aws certified solutions architect', 'aws certified developer',
-            'aws certified cloud practitioner', 'pmp', 'capm', 'prince2',
-            'cissp', 'cism', 'ceh', 'comptia security+', 'comptia network+',
-            'certified scrum master', 'csm', 'psm', 'safe agilist',
-            'google cloud certified', 'azure fundamentals',
+            'cmfas module 6', 'cmfas module 6a', 'cmfas module 6b',
+            'cmfas module 8', 'cmfas module 8a', 'cmfas module 9',
+            'cmfas module 9a', 'cmfas module 10',
             'cfa level i', 'cfa level ii', 'cfa level iii',
-            'acca', 'cpa', 'wsq advanced certificate',
+            'cfa charterholder',
+            'cfp certification', 'certified financial planner',
+            'frm certification', 'financial risk manager',
+            'chartered financial analyst',
+            
+            # ── Accounting & Audit ───────────────────────────────────
+            'acca', 'acca qualified', 'acca affiliate',
+            'cpa', 'cpa australia', 'cpa singapore',
+            'ca singapore', 'chartered accountant',
+            'cia', 'certified internal auditor',
+            'cma', 'certified management accountant',
+            
+            # ── SG Safety & Compliance ───────────────────────────────
+            'bizsafe level 1', 'bizsafe level 2', 'bizsafe level 3',
+            'bizsafe level 4', 'bizsafe star',
+            'wsq advanced certificate', 'wsq specialist diploma',
+            'wsq graduate diploma',
+            'nebosh igc', 'nebosh international general certificate',
+            'iosh managing safely', 'iosh working safely',
+            
+            # ── SG Government / Workforce ────────────────────────────
+            'skillsfuture credit',
+            'workforce skills qualifications', 'wsq',
+            
+            # ── Project Management ───────────────────────────────────
+            'pmp', 'project management professional',
+            'capm', 'certified associate in project management',
+            'prince2 foundation', 'prince2 practitioner', 'prince2',
+            'certified scrum master', 'csm',
+            'professional scrum master', 'psm', 'psm i', 'psm ii',
+            'certified scrum product owner', 'cspo',
+            'safe agilist', 'safe practitioner',
+            'scaled agile framework',
+            
+            # ── IT & Cloud ───────────────────────────────────────────
+            'aws certified solutions architect',
+            'aws certified developer', 'aws certified sysops',
+            'aws certified cloud practitioner',
+            'azure fundamentals', 'azure administrator',
+            'azure solutions architect', 'azure developer',
+            'google cloud certified',
+            'google cloud professional data engineer',
+            'google cloud professional cloud architect',
+            'comptia a+', 'comptia network+', 'comptia security+',
+            'comptia linux+', 'comptia cloud+',
+            'itil foundation', 'itil v4', 'itil',
+            'togaf certified',
+            'cobit foundation',
+            
+            # ── Cybersecurity ────────────────────────────────────────
+            'cissp', 'certified information systems security professional',
+            'cism', 'certified information security manager',
+            'cisa', 'certified information systems auditor',
+            'ceh', 'certified ethical hacker',
+            'oscp', 'offensive security certified professional',
+            'ccna', 'ccnp', 'ccie',
+            
+            # ── Data & AI ────────────────────────────────────────────
+            'google data analytics certificate',
+            'ibm data science professional certificate',
+            'tensorflow developer certificate',
+            'databricks certified',
+            
+            # ── HR & Others ──────────────────────────────────────────
+            'shrm-cp', 'shrm-scp', 'phr', 'sphr',
+            'ihrp-cp', 'ihrp-sp', 'ihrp-mp',
+            'six sigma green belt', 'six sigma black belt',
+            'lean six sigma', 'certified lean practitioner',
         }
         
-        # -- Section headers --
+        # ─────────────────────────────────────────────────────────────
+        # 🎓 DEGREES (NEW!)
+        # Common degree names found on SG/MY resumes.
+        # Matched as entity type "DEGREE"
+        # ─────────────────────────────────────────────────────────────
+        self._degree_dict = {
+            # ── Bachelor's ───────────────────────────────────────────
+            'bachelor of science', 'bachelor of arts',
+            'bachelor of engineering', 'bachelor of business',
+            'bachelor of business administration',
+            'bachelor of computing', 'bachelor of technology',
+            'bachelor of laws', 'bachelor of accountancy',
+            'bachelor of social science',
+            'bsc', 'ba', 'beng', 'bba', 'bcom', 'btech', 'llb',
+            
+            # ── Master's ────────────────────────────────────────────
+            'master of science', 'master of arts',
+            'master of business administration', 'mba',
+            'master of engineering', 'master of computing',
+            'master of technology', 'master of laws', 'llm',
+            'master of public administration', 'mpa',
+            'master of education', 'med',
+            'msc', 'ma', 'meng', 'mcom',
+            
+            # ── Doctoral ─────────────────────────────────────────────
+            'doctor of philosophy', 'phd', 'ph.d.',
+            'doctor of business administration', 'dba',
+            'doctor of education', 'edd',
+            
+            # ── SG/MY Specific ───────────────────────────────────────
+            'diploma', 'advanced diploma', 'specialist diploma',
+            'graduate diploma', 'postgraduate diploma',
+            'higher nitec', 'nitec', 'ite certificate',
+            'national ite certificate',
+            'foundation degree', 'associate degree',
+            
+            # ── Professional Qualifications ──────────────────────────
+            'postgraduate certificate', 'graduate certificate',
+            'executive diploma', 'executive certificate',
+        }
+        
+        # ─────────────────────────────────────────────────────────────
+        # 🏢 ORGANIZATIONS (NEW!)
+        # Well-known SG/MY employers commonly seen on resumes.
+        # Matched as entity type "ORGANIZATION"
+        # 
+        # Why this helps: The model sees "DBS" and KNOWS it's an
+        # organization even without context clues. These are the
+        # "celebrity names" of the SG/MY job market! 🌟
+        # ─────────────────────────────────────────────────────────────
+        self._organization_dict = {
+            # ── SG Government / Statutory Boards ─────────────────────
+            'ministry of manpower', 'mom',
+            'ministry of education', 'moe',
+            'ministry of health', 'moh',
+            'ministry of defence', 'mindef',
+            'ministry of home affairs', 'mha',
+            'housing development board', 'hdb',
+            'economic development board', 'edb',
+            'infocomm media development authority', 'imda',
+            'monetary authority of singapore', 'mas',
+            'national environment agency', 'nea',
+            'land transport authority', 'lta',
+            'urban redevelopment authority', 'ura',
+            'central provident fund', 'cpf board',
+            'inland revenue authority of singapore', 'iras',
+            'government technology agency', 'govtech',
+            'cyber security agency', 'csa',
+            'singapore armed forces', 'saf',
+            'singapore police force', 'spf',
+            
+            # ── SG Banks & Financial ─────────────────────────────────
+            'dbs bank', 'dbs group', 'ocbc bank', 'uob',
+            'united overseas bank', 'standard chartered',
+            'citibank singapore', 'hsbc singapore',
+            'maybank singapore', 'bank of singapore',
+            'great eastern', 'prudential', 'ntuc income',
+            'manulife', 'aia singapore', 'aviva singlife',
+            'jpmorgan', 'goldman sachs', 'morgan stanley',
+            'barclays', 'credit suisse', 'ubs',
+            
+            # ── SG Tech / Major Employers ────────────────────────────
+            'grab', 'grab holdings', 'shopee', 'sea limited', 'sea group',
+            'lazada', 'foodpanda', 'gojek',
+            'singtel', 'starhub', 'simba telecom', 'm1 limited',
+            'razer', 'garena', 'bytedance', 'tiktok',
+            'google singapore', 'meta singapore', 'apple singapore',
+            'microsoft singapore', 'amazon singapore', 'aws singapore',
+            'stripe', 'wise', 'revolut',
+            
+            # ── SG Conglomerates & GLCs ──────────────────────────────
+            'temasek holdings', 'gic', 'capitaland',
+            'keppel corporation', 'sembcorp',
+            'singapore airlines', 'sia', 'silkair', 'scoot',
+            'changi airport group', 'sats',
+            'psa international', 'neptune orient lines',
+            'singhealth', 'national university health system', 'nuhs',
+            'national healthcare group', 'nhg',
+            
+            # ── MY Government ────────────────────────────────────────
+            'petronas', 'khazanah nasional',
+            'permodalan nasional berhad', 'pnb',
+            'employees provident fund', 'epf', 'kwsp',
+            'tenaga nasional', 'tnb',
+            
+            # ── MY Banks & Major Companies ───────────────────────────
+            'maybank', 'malayan banking', 'cimb', 'cimb bank',
+            'public bank', 'rhb bank', 'hong leong bank',
+            'ambank', 'bank islam',
+            'airasia', 'malaysia airlines',
+            'axiata group', 'maxis', 'digi', 'celcom',
+            'genting', 'ioipg', 'sime darby',
+            'top glove', 'hartalega',
+            
+            # ── MNCs Common on SG/MY Resumes ─────────────────────────
+            'accenture', 'deloitte', 'ey', 'ernst & young',
+            'kpmg', 'pwc', 'pricewaterhousecoopers',
+            'mckinsey', 'bain', 'boston consulting group', 'bcg',
+            'ibm', 'dell', 'hp', 'hewlett packard',
+            'samsung', 'lg', 'sony', 'panasonic',
+            'procter & gamble', 'unilever', 'nestle',
+            'shell', 'exxonmobil', 'chevron', 'bp',
+        }
+        
+        # ─────────────────────────────────────────────────────────────
+        # 📑 SECTION HEADERS
+        # Resume section heading patterns for SECTION_HEADER entity.
+        # ─────────────────────────────────────────────────────────────
         self._section_headers = {
-            'work experience', 'professional experience', 'employment history',
-            'experience', 'career history', 'work history',
+            # ── Experience ───────────────────────────────────────────
+            'work experience', 'professional experience',
+            'employment history', 'experience', 'career history',
+            'work history', 'career summary',
+            
+            # ── Education ────────────────────────────────────────────
             'education', 'academic qualifications', 'qualifications',
-            'skills', 'technical skills', 'core competencies', 'key skills',
-            'professional summary', 'summary', 'objective', 'profile',
+            'educational background', 'academic background',
+            
+            # ── Skills ───────────────────────────────────────────────
+            'skills', 'technical skills', 'core competencies',
+            'key skills', 'professional skills', 'relevant skills',
+            'skills and abilities', 'competencies',
+            'skills summary', 'areas of expertise',
+            
+            # ── Summary / Objective ──────────────────────────────────
+            'professional summary', 'summary', 'objective',
+            'profile', 'about me', 'career objective',
+            'personal statement', 'executive summary',
+            
+            # ── Certifications ───────────────────────────────────────
             'certifications', 'certificates', 'licenses',
-            'languages', 'language proficiency',
+            'professional certifications', 'accreditations',
+            'credentials',
+            
+            # ── Languages ────────────────────────────────────────────
+            'languages', 'language proficiency', 'language skills',
+            
+            # ── Projects ─────────────────────────────────────────────
             'projects', 'key projects', 'personal projects',
+            'academic projects', 'notable projects',
+            
+            # ── Other Sections ───────────────────────────────────────
             'achievements', 'awards', 'honors', 'accomplishments',
             'references', 'referees',
             'hobbies', 'interests', 'personal interests',
             'volunteer', 'community service', 'extracurricular',
+            'publications', 'presentations', 'patents',
+            'personal particulars', 'personal data',
+            'additional information', 'others',
+            'training', 'professional development',
+            'memberships', 'professional memberships',
+            'affiliations', 'professional affiliations',
         }
     
     def pre_annotate(
@@ -2576,17 +3102,35 @@ class PreAnnotator:
         annotations.extend(self._detect_github(text))
         
         # --- Dictionary matching ---
+        # 💅 Expanded with 3 NEW dictionary categories!
+        # Confidence levels tuned per category:
+        #   0.95 = Almost certain (section headers)
+        #   0.90 = Very high (certifications — distinctive terms)
+        #   0.85 = High (institutions, degrees — formal names)
+        #   0.80 = Good (organizations — common company names)
+        #   0.75 = Solid (skills — broad vocabulary, some noise)
+        #   0.70 = Moderate (locations — names overlap with people)
+        #   0.65 = Lower (soft skills — easily confused with description text)
         annotations.extend(self._match_dictionary(
             text, text_lower, self._skill_dict, "SKILL", 0.75
+        ))
+        annotations.extend(self._match_dictionary(
+            text, text_lower, self._soft_skill_dict, "SOFT_SKILL", 0.65
         ))
         annotations.extend(self._match_dictionary(
             text, text_lower, self._institution_dict, "INSTITUTION", 0.85
         ))
         annotations.extend(self._match_dictionary(
-            text, text_lower, self._location_dict, "LOCATION", 0.7
+            text, text_lower, self._location_dict, "LOCATION", 0.70
         ))
         annotations.extend(self._match_dictionary(
-            text, text_lower, self._certification_dict, "CERTIFICATION", 0.9
+            text, text_lower, self._certification_dict, "CERTIFICATION", 0.90
+        ))
+        annotations.extend(self._match_dictionary(
+            text, text_lower, self._degree_dict, "DEGREE", 0.85
+        ))
+        annotations.extend(self._match_dictionary(
+            text, text_lower, self._organization_dict, "ORGANIZATION", 0.80
         ))
         annotations.extend(self._match_dictionary(
             text, text_lower, self._section_headers, "SECTION_HEADER", 0.95
@@ -2793,10 +3337,12 @@ class PreAnnotator:
         
         dict_map = {
             "SKILL": self._skill_dict,
-            "SOFT_SKILL": self._skill_dict,
+            "SOFT_SKILL": self._soft_skill_dict,       # Now routes to its OWN dict!
             "INSTITUTION": self._institution_dict,
             "LOCATION": self._location_dict,
             "CERTIFICATION": self._certification_dict,
+            "DEGREE": self._degree_dict,                # NEW
+            "ORGANIZATION": self._organization_dict,    # NEW
             "SECTION_HEADER": self._section_headers,
         }
         
@@ -2805,6 +3351,116 @@ class PreAnnotator:
             target.update(term_set)
             logger.info(f"➕ Added {len(term_set)} terms to {entity_type} dictionary")
 
+    def load_from_annotations(self, db_path: str):
+        """
+        🧠 Auto-expand dictionaries from your existing annotations!
+        
+        💅 THIS IS THE SECRET WEAPON, darling! ✨
+        
+        Scans the ner_annotations table for all human-verified entity
+        texts and adds them to the matching dictionaries. This means
+        every resume you annotate makes the pre-annotator SMARTER
+        for the NEXT resume — a virtuous cycle! 🔄
+        
+        Think of it like a makeup artist building a personal kit:
+        every job teaches them a new technique, and they bring that
+        knowledge to the NEXT client! 💄🎭
+        
+        Args:
+            db_path: Path to resume_extractions.db
+            
+        Returns:
+            Dict with counts of terms loaded per entity type
+        """
+        if not os.path.exists(db_path):
+            logger.warning(f"Database not found: {db_path} — skipping annotation loading")
+            return {}
+        
+        # Map entity types to their target dictionaries
+        dict_map = {
+            "SKILL": self._skill_dict,
+            "SOFT_SKILL": self._soft_skill_dict,
+            "INSTITUTION": self._institution_dict,
+            "LOCATION": self._location_dict,
+            "CERTIFICATION": self._certification_dict,
+            "DEGREE": self._degree_dict,
+            "ORGANIZATION": self._organization_dict,
+        }
+        
+        counts = {}
+        
+        try:
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            
+            for entity_type, target_dict in dict_map.items():
+                # ── Query all unique annotation texts for this type ───
+                # Only from documents marked 'completed' (human-verified!)
+                # Minimum 2 characters to avoid junk
+                rows = conn.execute("""
+                    SELECT DISTINCT LOWER(TRIM(a.text)) as term
+                    FROM ner_annotations a
+                    JOIN ner_documents d ON a.doc_id = d.doc_id
+                    WHERE a.entity_type = ?
+                      AND d.status = 'completed'
+                      AND LENGTH(TRIM(a.text)) >= 2
+                    ORDER BY term
+                """, (entity_type,)).fetchall()
+                
+                new_terms = set()
+                for row in rows:
+                    term = row["term"]
+                    if term and term not in target_dict:
+                        new_terms.add(term)
+                
+                if new_terms:
+                    target_dict.update(new_terms)
+                    counts[entity_type] = len(new_terms)
+                    logger.info(
+                        f"🧠 Loaded {len(new_terms)} new {entity_type} terms "
+                        f"from annotations (total: {len(target_dict)})"
+                    )
+            
+            conn.close()
+            
+        except sqlite3.OperationalError as e:
+            logger.warning(f"Could not load annotations: {e}")
+            logger.info("This is normal if no annotations exist yet!")
+        except Exception as e:
+            logger.error(f"Error loading annotation terms: {e}")
+        
+        total = sum(counts.values())
+        if total > 0:
+            logger.info(
+                f"🧠 Loaded {total} total terms from annotations: "
+                f"{', '.join(f'{k}={v}' for k, v in counts.items())}"
+            )
+        
+        return counts
+
+    def get_dict_stats(self) -> Dict[str, int]:
+        """
+        📊 Return the current size of each dictionary.
+        
+        Handy for checking how many terms are loaded and whether
+        load_from_annotations() added anything useful!
+        """
+        return {
+            "SKILL": len(self._skill_dict),
+            "SOFT_SKILL": len(self._soft_skill_dict),
+            "INSTITUTION": len(self._institution_dict),
+            "LOCATION": len(self._location_dict),
+            "CERTIFICATION": len(self._certification_dict),
+            "DEGREE": len(self._degree_dict),
+            "ORGANIZATION": len(self._organization_dict),
+            "SECTION_HEADER": len(self._section_headers),
+            "_total": (
+                len(self._skill_dict) + len(self._soft_skill_dict) +
+                len(self._institution_dict) + len(self._location_dict) +
+                len(self._certification_dict) + len(self._degree_dict) +
+                len(self._organization_dict) + len(self._section_headers)
+            ),
+        }
 
 # =============================================================================
 # 📤 TRAINING DATA EXPORTER
@@ -4265,6 +4921,23 @@ class AnnotationStorage:
                 )
             """)
 
+            # ----------------------------------------------------------
+            # TABLE 6: annotators
+            #
+            # 👥 Registered annotators for the system.
+            # Tracks who is allowed to annotate and their assigned role
+            # (primary = Annotator A, iaa = Annotator B, or both).
+            # Names here populate the dropdown on the dashboard! 💅
+            # ----------------------------------------------------------
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS annotators (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                    role TEXT DEFAULT 'both',
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
             conn.commit()
             logger.info("🗄️ NER annotation tables initialized")
         except sqlite3.Error as e:

@@ -83,6 +83,11 @@ schema = EntitySchema()
 tokenizer = ResumeTokenizer()
 tagger = BIOTagger(schema)
 pre_annotator = PreAnnotator(schema)
+# 🧠 Auto-expand dictionaries from existing completed annotations!
+# Every annotated resume makes the pre-annotator smarter for the next one.
+# This is safe to call even if no annotations exist yet — it simply skips.
+pre_annotator.load_from_annotations(DATABASE_PATH)
+logger.info(f"📊 PreAnnotator dict stats: {pre_annotator.get_dict_stats()}")
 nested_handler = NestedEntityLayer(schema)
 edge_handler = EdgeCaseHandler()
 exporter = TrainingExporter(schema)
@@ -134,10 +139,19 @@ def get_candidates_for_annotation(
             rows = conn.execute("""
                 SELECT s.candidate_id, s.name, s.email,
                        s.extraction_status, nd.status as ann_status,
-                       nd.annotator as ann_by
+                       nd.annotator as ann_by,
+                       iaa_sub.iaa_annotators,
+                       iaa_sub.iaa_spans
                 FROM structured_extractions s
                 INNER JOIN ner_documents nd
                     ON 'doc_' || s.candidate_id = nd.doc_id
+                LEFT JOIN (
+                    SELECT doc_id,
+                           GROUP_CONCAT(DISTINCT annotator_name) as iaa_annotators,
+                           COUNT(*) as iaa_spans
+                    FROM iaa_annotations
+                    GROUP BY doc_id
+                ) iaa_sub ON iaa_sub.doc_id = 'doc_' || s.candidate_id
                 ORDER BY s.candidate_id
                 LIMIT ? OFFSET ?
             """, (per_page, offset)).fetchall()
@@ -145,7 +159,9 @@ def get_candidates_for_annotation(
             rows = conn.execute("""
                 SELECT s.candidate_id, s.name, s.email,
                        s.extraction_status, NULL as ann_status,
-                       NULL as ann_by
+                       NULL as ann_by,
+                       NULL as iaa_annotators,
+                       NULL as iaa_spans
                 FROM structured_extractions s
                 WHERE NOT EXISTS (
                     SELECT 1 FROM ner_documents nd
@@ -158,10 +174,19 @@ def get_candidates_for_annotation(
             rows = conn.execute("""
                 SELECT s.candidate_id, s.name, s.email,
                        s.extraction_status, nd.status as ann_status,
-                       nd.annotator as ann_by
+                       nd.annotator as ann_by,
+                       iaa_sub.iaa_annotators,
+                       iaa_sub.iaa_spans
                 FROM structured_extractions s
                 LEFT JOIN ner_documents nd
                     ON 'doc_' || s.candidate_id = nd.doc_id
+                LEFT JOIN (
+                    SELECT doc_id,
+                           GROUP_CONCAT(DISTINCT annotator_name) as iaa_annotators,
+                           COUNT(*) as iaa_spans
+                    FROM iaa_annotations
+                    GROUP BY doc_id
+                ) iaa_sub ON iaa_sub.doc_id = 'doc_' || s.candidate_id
                 ORDER BY s.candidate_id
                 LIMIT ? OFFSET ?
             """, (per_page, offset)).fetchall()
@@ -949,6 +974,119 @@ def api_stats():
         conn.close()
 
     return jsonify(stats)
+
+# =============================================================================
+# 👥 ANNOTATOR MANAGEMENT CRUD
+# Add, list, delete registered annotators.
+# Like a VIP guest list — only the approved names get in! 💅👑
+# =============================================================================
+ 
+@app.route("/api/annotators", methods=["GET"])
+def api_annotators_list():
+    #👥 List all registered annotators.
+    conn = get_db()
+    try:
+        # ── Ensure table exists (safe for first run) ──────────────
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS annotators (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                role TEXT DEFAULT 'both',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+ 
+        rows = conn.execute('''
+            SELECT a.id, a.name, a.role, a.created_at,
+                   -- Count how many docs this person annotated as primary
+                   (SELECT COUNT(*) FROM ner_documents nd
+                    WHERE nd.annotator = a.name) as primary_docs,
+                   -- Count how many IAA docs
+                   (SELECT COUNT(DISTINCT doc_id) FROM iaa_annotations ia
+                    WHERE ia.annotator_name = a.name) as iaa_docs
+            FROM annotators a
+            ORDER BY a.name COLLATE NOCASE
+        ''').fetchall()
+ 
+        annotators = []
+        for r in rows:
+            annotators.append({
+                "id": r["id"],
+                "name": r["name"],
+                "role": r["role"],
+                "created_at": r["created_at"],
+                "primary_docs": r["primary_docs"],
+                "iaa_docs": r["iaa_docs"],
+            })
+ 
+        return jsonify({"annotators": annotators})
+    except Exception as e:
+        logger.error(f"❌ Annotators list failed: {e}")
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
+ 
+ 
+@app.route("/api/annotators", methods=["POST"])
+def api_annotators_add():
+    #👥 Add a new annotator.
+    data = request.get_json()
+    name = (data.get("name") or "").strip()
+    role = (data.get("role") or "both").strip()
+ 
+    if not name or len(name) < 2:
+        return jsonify({"error": "Name must be at least 2 characters!"}), 400
+ 
+    if role not in ("primary", "iaa", "both"):
+        role = "both"
+ 
+    conn = get_db()
+    try:
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS annotators (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                role TEXT DEFAULT 'both',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        conn.execute(
+            "INSERT INTO annotators (name, role) VALUES (?, ?)",
+            (name, role)
+        )
+        conn.commit()
+        logger.info(f"👥 Annotator added: {name} (role={role})")
+        return jsonify({"success": True, "name": name, "role": role})
+    except sqlite3.IntegrityError:
+        return jsonify({"error": f"'{name}' already exists!"}), 409
+    except Exception as e:
+        logger.error(f"❌ Add annotator failed: {e}")
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
+ 
+ 
+@app.route("/api/annotators/<int:annotator_id>", methods=["DELETE"])
+def api_annotators_delete(annotator_id: int):
+    #👥 Delete an annotator (does NOT delete their annotations).
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT name FROM annotators WHERE id = ?", (annotator_id,)
+        ).fetchone()
+        if not row:
+            return jsonify({"error": "Annotator not found"}), 404
+ 
+        name = row["name"]
+        conn.execute("DELETE FROM annotators WHERE id = ?", (annotator_id,))
+        conn.commit()
+        logger.info(f"👥 Annotator deleted: {name} (id={annotator_id})")
+        return jsonify({"success": True, "deleted": name})
+    except Exception as e:
+        logger.error(f"❌ Delete annotator failed: {e}")
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
 
 
 @app.route("/api/annotator-tracker")
@@ -2505,9 +2643,13 @@ INDEX_TEMPLATE = """
         <button class="btn" onclick="openStats()" id="statsBtn" title="View annotation statistics dashboard">
             📊 Stats
         </button>
-        <button class="btn" onclick="openAnnotatorTracker()" title="See who annotated what"
+         <button class="btn" onclick="openAnnotatorManager()" title="Add, select, or remove annotators"
                 style="border-color:var(--accent-purple); color:var(--accent-purple);">
             👥 Annotators
+        </button>
+        <button class="btn" onclick="openAnnotatorTracker()" title="See annotation progress per annotator"
+                style="font-size:0.75rem; padding:6px 12px;">
+            📊 Progress
         </button>
         <!-- Profile exports: recruiter-friendly talent DB format -->
         <button class="btn btn-success" onclick="exportProfiles('csv')" title="Export as Excel-compatible CSV (talent database format)">
@@ -2584,6 +2726,7 @@ INDEX_TEMPLATE = """
                 <th>Extraction</th>
                 <th>Annotation</th>
                 <th>Annotator</th>
+                <th class="iaa-col" style="display:none;">IAA Status</th>
                 <th>Action</th>
             </tr>
         </thead>
@@ -2616,6 +2759,19 @@ INDEX_TEMPLATE = """
                 <td>
                     {% if c.ann_by %}
                         <span style="font-size:0.75rem; color:var(--accent-purple);">👤 {{ c.ann_by }}</span>
+                    {% else %}
+                        <span style="font-size:0.72rem; color:var(--text-muted);">—</span>
+                    {% endif %}
+                </td>
+                <td class="iaa-col" style="display:none;">
+                    {% if c.iaa_annotators %}
+                        <span style="display:inline-flex; align-items:center; gap:5px;
+                                     font-size:0.72rem; padding:3px 10px; border-radius:6px;
+                                     background:rgba(247,120,186,0.12); color:var(--accent-pink);
+                                     border:1px solid rgba(247,120,186,0.3);">
+                            📏 {{ c.iaa_annotators }}
+                            <span style="font-size:0.6rem; opacity:0.7;">({{ c.iaa_spans }} spans)</span>
+                        </span>
                     {% else %}
                         <span style="font-size:0.72rem; color:var(--text-muted);">—</span>
                     {% endif %}
@@ -2734,6 +2890,119 @@ INDEX_TEMPLATE = """
         <div class="spin">⚙️</div>
         <div>Loading annotator data…</div>
       </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ================================================================
+     👥 ANNOTATOR MANAGER MODAL — Add / Select / Delete
+     💅 Fairy Codemother's Glow-Up Edition v2.0! ✨
+     ================================================================ -->
+<style>
+    .am-card{display:flex;align-items:center;gap:12px;padding:12px 14px;
+        border:1px solid var(--border);border-radius:10px;margin-bottom:8px;
+        transition:border-color 0.2s,background 0.2s;}
+    .am-card:hover{background:rgba(126,232,250,0.04);}
+    .am-card.am-active-a{border-color:var(--accent-cyan);background:rgba(126,232,250,0.06);}
+    .am-card.am-active-b{border-color:var(--accent-pink);background:rgba(247,120,186,0.06);}
+    .am-card.am-active-ab{border-color:var(--accent-purple);background:rgba(238,184,255,0.06);}
+    .am-avatar{width:38px;height:38px;border-radius:50%;display:flex;
+        align-items:center;justify-content:center;font-weight:700;font-size:0.8rem;
+        flex-shrink:0;letter-spacing:0.5px;}
+    .am-avatar-a{background:rgba(126,232,250,0.18);color:var(--accent-cyan);}
+    .am-avatar-b{background:rgba(247,120,186,0.18);color:var(--accent-pink);}
+    .am-avatar-ab{background:rgba(238,184,255,0.18);color:var(--accent-purple);}
+    .am-avatar-none{background:var(--bg-secondary);color:var(--text-muted);}
+    .am-name{font-size:0.88rem;font-weight:600;color:var(--text-primary);}
+    .am-meta{font-size:0.7rem;color:var(--text-muted);margin-top:1px;}
+    .am-pills{display:flex;gap:4px;flex-shrink:0;}
+    .am-pill{font-size:0.68rem;padding:4px 10px;border-radius:6px;cursor:pointer;
+        border:1px solid var(--border);background:transparent;color:var(--text-secondary);
+        transition:all 0.15s;font-weight:500;white-space:nowrap;}
+    .am-pill:hover{background:var(--bg-secondary);}
+    .am-pill-a-on{background:rgba(126,232,250,0.18)!important;border-color:var(--accent-cyan)!important;color:var(--accent-cyan)!important;}
+    .am-pill-b-on{background:rgba(247,120,186,0.18)!important;border-color:var(--accent-pink)!important;color:var(--accent-pink)!important;}
+    .am-del{font-size:0.68rem;padding:4px 8px;border-radius:6px;cursor:pointer;
+        border:1px solid transparent;background:transparent;color:var(--text-muted);
+        transition:all 0.15s;opacity:0;}
+    .am-card:hover .am-del{opacity:1;}
+    .am-del:hover{border-color:var(--accent-red);color:var(--accent-red);background:rgba(218,54,51,0.08);}
+    .am-add-row{display:flex;gap:8px;margin-bottom:20px;align-items:stretch;}
+    .am-add-input{flex:1;padding:10px 14px;background:var(--bg-secondary);
+        border:1px solid var(--border);border-radius:8px;
+        color:var(--text-primary);font-size:0.85rem;outline:none;
+        transition:border-color 0.15s;}
+    .am-add-input:focus{border-color:var(--accent-cyan);}
+    .am-add-input::placeholder{color:var(--text-muted);}
+    .am-add-btn{padding:10px 20px;border-radius:8px;border:1px solid var(--accent-cyan);
+        background:rgba(126,232,250,0.1);color:var(--accent-cyan);font-weight:600;
+        font-size:0.85rem;cursor:pointer;transition:all 0.15s;white-space:nowrap;}
+    .am-add-btn:hover{background:rgba(126,232,250,0.2);}
+    .am-status{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px;}
+    .am-status-card{background:var(--bg-secondary);border-radius:8px;padding:10px 14px;
+        display:flex;align-items:center;gap:10px;}
+    .am-status-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;}
+    .am-status-label{font-size:0.7rem;color:var(--text-muted);}
+    .am-status-name{font-size:0.82rem;font-weight:600;margin-top:1px;}
+    .am-empty{text-align:center;padding:40px 20px;color:var(--text-muted);}
+    .am-confirm{display:flex;align-items:center;gap:6px;background:rgba(218,54,51,0.08);
+        border-radius:6px;padding:4px 6px;animation:amFadeIn 0.15s;}
+    @keyframes amFadeIn{from{opacity:0;transform:translateX(4px);}to{opacity:1;transform:none;}}
+    .am-confirm-btn{font-size:0.65rem;padding:3px 8px;border-radius:4px;cursor:pointer;border:none;font-weight:600;}
+    .am-confirm-yes{background:var(--accent-red);color:#fff;}
+    .am-confirm-yes:hover{opacity:0.85;}
+    .am-confirm-no{background:transparent;color:var(--text-muted);border:1px solid var(--border);}
+    .am-confirm-no:hover{background:var(--bg-secondary);}
+    .am-section-label{font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;
+        letter-spacing:0.5px;margin-bottom:8px;padding-left:2px;}
+</style>
+
+<div class="stats-overlay" id="annotatorManagerOverlay" onclick="closeAnnotatorManagerOnBackdrop(event)">
+  <div class="stats-modal" role="dialog" aria-modal="true" style="max-width:520px;">
+    <div class="stats-header">
+      <div>
+        <h2>👥 Manage <span>Annotators</span></h2>
+        <div class="subtitle" id="annotatorManagerSubtitle">Add, select, or remove annotators</div>
+      </div>
+      <button class="stats-close" onclick="closeAnnotatorManager()" title="Close">✕</button>
+    </div>
+    <div class="stats-body" style="max-height:75vh; overflow-y:auto; padding:16px 24px;">
+
+      <!-- ── Active A/B status cards ──────────────────────────── -->
+      <div class="am-status">
+        <div class="am-status-card">
+          <div class="am-status-dot" style="background:var(--accent-cyan);"></div>
+          <div>
+            <div class="am-status-label">Annotator A (Primary)</div>
+            <div class="am-status-name" id="currentALabel" style="color:var(--accent-cyan);">—</div>
+          </div>
+        </div>
+        <div class="am-status-card">
+          <div class="am-status-dot" style="background:var(--accent-pink);"></div>
+          <div>
+            <div class="am-status-label">Annotator B (IAA)</div>
+            <div class="am-status-name" id="currentBLabel" style="color:var(--accent-pink);">—</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Add new annotator ────────────────────────────────── -->
+      <div class="am-section-label">Add new</div>
+      <div class="am-add-row">
+        <input type="text" id="newAnnotatorInput" class="am-add-input"
+               placeholder="Enter name (e.g. Soraya, Ahmad...)"
+               maxlength="50" autocomplete="off"
+               onkeydown="if(event.key==='Enter')addAnnotatorFromModal()">
+        <button class="am-add-btn" onclick="addAnnotatorFromModal()">+ Add</button>
+      </div>
+
+      <!-- ── Annotator list ───────────────────────────────────── -->
+      <div class="am-section-label">Team (<span id="amCount">0</span>)</div>
+      <div id="annotatorListContainer">
+        <div class="am-empty">Loading...</div>
+      </div>
+
     </div>
   </div>
 </div>
@@ -3367,6 +3636,224 @@ function showToast(msg, type = 'success', duration = 4000) {
 }
 
 // ================================================================
+// 👥 ANNOTATOR MANAGER — Add / Select / Delete
+// 💅 Fairy Codemother's Glow-Up Edition v2.0! ✨
+// ================================================================
+
+/** Track which card is in "confirm delete" mode */
+let amDeletePending = null;
+
+function openAnnotatorManager() {
+    document.getElementById('annotatorManagerOverlay').classList.add('open');
+    document.addEventListener('keydown', closeAnnotatorManagerOnEscape);
+    amDeletePending = null;
+    refreshAnnotatorManagerList();
+    // Auto-focus the add input after a beat
+    setTimeout(() => document.getElementById('newAnnotatorInput').focus(), 200);
+}
+
+function closeAnnotatorManager() {
+    document.getElementById('annotatorManagerOverlay').classList.remove('open');
+    document.removeEventListener('keydown', closeAnnotatorManagerOnEscape);
+    amDeletePending = null;
+}
+
+function closeAnnotatorManagerOnEscape(e) {
+    if (e.key === 'Escape') closeAnnotatorManager();
+}
+
+function closeAnnotatorManagerOnBackdrop(e) {
+    if (e.target === document.getElementById('annotatorManagerOverlay')) closeAnnotatorManager();
+}
+
+function refreshAnnotatorManagerList() {
+    const container = document.getElementById('annotatorListContainer');
+    const currentA = localStorage.getItem('annotator_name') || '';
+    const currentB = localStorage.getItem('iaa_annotator_name') || '';
+
+    // ── Update status cards ──────────────────────────────────────
+    document.getElementById('currentALabel').textContent = currentA || '(click Set A below)';
+    document.getElementById('currentBLabel').textContent = currentB || '(click Set B below)';
+    if (!currentA) document.getElementById('currentALabel').style.opacity = '0.5';
+    else document.getElementById('currentALabel').style.opacity = '1';
+    if (!currentB) document.getElementById('currentBLabel').style.opacity = '0.5';
+    else document.getElementById('currentBLabel').style.opacity = '1';
+
+    fetch('/api/annotators')
+        .then(r => r.json())
+        .then(data => {
+            const list = data.annotators || [];
+            document.getElementById('amCount').textContent = list.length;
+
+            if (list.length === 0) {
+                container.innerHTML = `
+                    <div class="am-empty">
+                        <div style="font-size:2rem; margin-bottom:8px;">🎭</div>
+                        <div style="font-size:0.85rem; margin-bottom:4px;">No annotators yet!</div>
+                        <div style="font-size:0.72rem;">Type a name above and click <strong>+ Add</strong> to begin.</div>
+                    </div>`;
+                return;
+            }
+
+            let html = '';
+            list.forEach(a => {
+                const isA = currentA && currentA.toLowerCase() === a.name.toLowerCase();
+                const isB = currentB && currentB.toLowerCase() === a.name.toLowerCase();
+                const isAB = isA && isB;  // Edge: shouldn't happen but handle gracefully
+
+                // ── Avatar class + initials ──────────────────────
+                const initials = a.name.split(/\\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 2);
+                const avatarClass = isAB ? 'am-avatar-ab' : isA ? 'am-avatar-a' : isB ? 'am-avatar-b' : 'am-avatar-none';
+
+                // ── Card border class ────────────────────────────
+                const cardClass = isAB ? 'am-active-ab' : isA ? 'am-active-a' : isB ? 'am-active-b' : '';
+
+                // ── Stats line ───────────────────────────────────
+                const stats = [];
+                if (a.primary_docs > 0) stats.push(`${a.primary_docs} doc${a.primary_docs !== 1 ? 's' : ''} annotated`);
+                if (a.iaa_docs > 0) stats.push(`${a.iaa_docs} IAA`);
+                const statsText = stats.length > 0 ? stats.join(' · ') : 'No activity yet';
+
+                // ── Delete area (inline confirm) ─────────────────
+                const isDeleting = amDeletePending === a.id;
+                const deleteHTML = isDeleting
+                    ? `<div class="am-confirm">
+                         <span style="font-size:0.63rem;color:var(--accent-red);">Delete?</span>
+                         <button class="am-confirm-btn am-confirm-yes"
+                                 onclick="event.stopPropagation();confirmDeleteAnnotator(${a.id},'${escapeHtml(a.name)}')">Yes</button>
+                         <button class="am-confirm-btn am-confirm-no"
+                                 onclick="event.stopPropagation();cancelDeleteAnnotator()">No</button>
+                       </div>`
+                    : `<button class="am-del"
+                               onclick="event.stopPropagation();startDeleteAnnotator(${a.id})"
+                               title="Remove ${escapeHtml(a.name)}">🗑</button>`;
+
+                html += `
+                <div class="am-card ${cardClass}">
+                    <div class="am-avatar ${avatarClass}">${initials}</div>
+                    <div style="flex:1;min-width:0;">
+                        <div class="am-name">${escapeHtml(a.name)}</div>
+                        <div class="am-meta">${statsText}</div>
+                    </div>
+                    <div class="am-pills">
+                        <button class="am-pill ${isA ? 'am-pill-a-on' : ''}"
+                                onclick="selectAnnotatorAs('A','${escapeHtml(a.name)}')"
+                                title="Set as Annotator A (primary)">
+                            ${isA ? '✓ A' : 'Set A'}
+                        </button>
+                        <button class="am-pill ${isB ? 'am-pill-b-on' : ''}"
+                                onclick="selectAnnotatorAs('B','${escapeHtml(a.name)}')"
+                                title="Set as Annotator B (IAA)">
+                            ${isB ? '✓ B' : 'Set B'}
+                        </button>
+                    </div>
+                    ${deleteHTML}
+                </div>`;
+            });
+
+            container.innerHTML = html;
+        })
+        .catch(err => {
+            container.innerHTML = `<div class="am-empty" style="color:var(--accent-red);">
+                Failed to load: ${err}</div>`;
+        });
+}
+
+function addAnnotatorFromModal() {
+    const input = document.getElementById('newAnnotatorInput');
+    const name = input.value.trim();
+
+    if (!name || name.length < 2) {
+        showToast('Name must be at least 2 characters!', 'error', 3000);
+        input.focus();
+        return;
+    }
+
+    // ── Disable button during request to prevent double-add ──────
+    const btn = input.nextElementSibling?.nextElementSibling || null;
+
+    fetch('/api/annotators', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name, role: 'both' })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            input.value = '';
+            showToast(`👥 "${name}" added! ✨`, 'success', 3000);
+            refreshAnnotatorManagerList();
+            input.focus();
+        } else {
+            showToast('❌ ' + (data.error || 'Failed to add'), 'error', 4000);
+            input.focus();
+        }
+    })
+    .catch(err => showToast('❌ Network error: ' + err, 'error', 4000));
+}
+
+function selectAnnotatorAs(role, name) {
+    const currentA = localStorage.getItem('annotator_name') || '';
+    const currentB = localStorage.getItem('iaa_annotator_name') || '';
+
+    if (role === 'A') {
+        if (currentB && name.toLowerCase() === currentB.toLowerCase()) {
+            showToast(`❌ "${name}" is already set as B! A and B must be different! 👯`, 'error', 4000);
+            return;
+        }
+        localStorage.setItem('annotator_name', name);
+        showToast(`👤 Annotator A → "${name}" ✨`, 'success', 2500);
+    } else {
+        if (currentA && name.toLowerCase() === currentA.toLowerCase()) {
+            showToast(`❌ "${name}" is already set as A! A and B must be different! 👯`, 'error', 4000);
+            return;
+        }
+        localStorage.setItem('iaa_annotator_name', name);
+        showToast(`📏 Annotator B → "${name}" ✨`, 'success', 2500);
+    }
+
+    refreshAnnotatorManagerList();
+}
+
+/** Step 1: Show inline confirm on the card */
+function startDeleteAnnotator(id) {
+    amDeletePending = id;
+    refreshAnnotatorManagerList();
+}
+
+/** Cancel: hide inline confirm */
+function cancelDeleteAnnotator() {
+    amDeletePending = null;
+    refreshAnnotatorManagerList();
+}
+
+/** Step 2: Actually delete after confirm */
+function confirmDeleteAnnotator(id, name) {
+    const currentA = localStorage.getItem('annotator_name') || '';
+    const currentB = localStorage.getItem('iaa_annotator_name') || '';
+
+    fetch(`/api/annotators/${id}`, { method: 'DELETE' })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            // Clear from localStorage if they were the active annotator
+            if (currentA.toLowerCase() === name.toLowerCase()) {
+                localStorage.removeItem('annotator_name');
+            }
+            if (currentB.toLowerCase() === name.toLowerCase()) {
+                localStorage.removeItem('iaa_annotator_name');
+            }
+            amDeletePending = null;
+            showToast(`🗑 "${name}" removed`, 'success', 3000);
+            refreshAnnotatorManagerList();
+        } else {
+            showToast('❌ ' + (data.error || 'Delete failed'), 'error', 4000);
+        }
+    })
+    .catch(err => showToast('❌ Network error: ' + err, 'error', 4000));
+}
+
+// ================================================================
 // 📏 IAA GLOBAL TOGGLE — Queue page on/off switch
 // ================================================================
 // ================================================================
@@ -3492,18 +3979,34 @@ function toggleIAAGlobal() {
         updateIAAQueueUI(false);
         showToast('📏 IAA Mode deactivated. Normal annotation restored.', 'success', 4000);
     } else {
-        let name = localStorage.getItem('annotator_name') || '';
+        // ── Check if Annotator B was already set via Annotator Manager ──
+        let name = localStorage.getItem('iaa_annotator_name') || '';
+        const primaryName = localStorage.getItem('annotator_name') || '';
+
+        // Only prompt if no Annotator B has been chosen yet
         if (!name) {
-            name = prompt('Enter your annotator name (e.g. Soraya, Ahmad):');
-            if (!name || name.trim().length < 2) {
-                showToast('Need a name (2+ chars) to activate IAA!', 'error', 4000);
-                return;
-            }
-            localStorage.setItem('annotator_name', name.trim());
+            showToast(
+                '📏 Set Annotator B first! Open 👥 Annotators and click "Set B" on a name.',
+                'error', 5000
+            );
+            // Auto-open the manager so they can pick
+            openAnnotatorManager();
+            return;
         }
+
+        // Guard: A and B must be different
+        if (primaryName && name.toLowerCase() === primaryName.toLowerCase()) {
+            showToast(
+                `❌ Annotator A and B are both "${name}"! Open 👥 Annotators and set a DIFFERENT person as B.`,
+                'error', 5000
+            );
+            openAnnotatorManager();
+            return;
+        }
+
         localStorage.setItem('iaa_mode_active', 'true');
         updateIAAQueueUI(true);
-        showToast(`📏 IAA ON! Annotating as "${name.trim()}". Open any candidate for a clean slate!`, 'success', 5000);
+        showToast(`📏 IAA ON! Annotating as "${name}" (Annotator B). Open any candidate for a clean slate!`, 'success', 5000);
     }
 }
 
@@ -3511,8 +4014,14 @@ function updateIAAQueueUI(active) {
     const btn = document.getElementById('iaaToggleBtn');
     const banner = document.getElementById('iaaQueueBanner');
     const nameEl = document.getElementById('iaaQueueName');
+
+    // ── Show/hide the IAA Status column in the table ─────────────
+    document.querySelectorAll('.iaa-col').forEach(el => {
+        el.style.display = active ? '' : 'none';
+    });
+
     if (active) {
-        const name = localStorage.getItem('annotator_name') || '?';
+        const name = localStorage.getItem('iaa_annotator_name') || '?';
         if (btn) { btn.textContent = '📏 IAA ON'; btn.style.background = 'rgba(247,120,186,0.2)'; btn.style.fontWeight = '700'; }
         if (banner) banner.style.display = 'flex';
         if (nameEl) nameEl.textContent = name;
@@ -5422,11 +5931,16 @@ ANNOTATE_TEMPLATE = """
             </span>
             <!-- 👤 Current annotator — shows who's working, click to change -->
             <span id="annotatorBadge"
-                  style="font-size:0.65rem; color:var(--text-muted); cursor:pointer;
-                         padding:2px 8px; border:1px dashed var(--border); border-radius:4px;"
+                  style="font-size:0.75rem; color:var(--accent-cyan); cursor:pointer;
+                         padding:4px 12px; border:1px solid var(--accent-cyan);
+                         border-radius:12px; display:inline-flex; align-items:center; gap:4px;
+                         transition: background 0.15s, color 0.15s;"
+                  onmouseenter="this.style.background='rgba(126,232,250,0.12)'"
+                  onmouseleave="this.style.background='transparent'"
                   onclick="changeAnnotatorName()"
                   title="Click to change annotator name">
                 👤 <span id="annotatorBadgeName">—</span>
+                <span style="font-size:0.6rem; opacity:0.6;">✎</span>
             </span>
         </div>
         <div style="display:flex; gap:6px;" id="normalSaveButtons">
@@ -5479,7 +5993,16 @@ ANNOTATE_TEMPLATE = """
      ================================================================ -->
 <div id="iaaBanner" class="iaa-mode-banner" style="display:none;">
     <span class="iaa-badge">IAA MODE</span>
-    <span>Annotating as <strong id="iaaBannerName">—</strong> (Annotator B).
+    <span>Annotating as <strong id="iaaBannerName"
+          style="cursor:pointer; border-bottom:2px dashed var(--accent-pink);
+                 padding-bottom:1px; transition: opacity 0.15s;"
+          onmouseenter="this.style.opacity='0.7'"
+          onmouseleave="this.style.opacity='1'"
+          onclick="changeIAAAnnotatorName()"
+          title="Click to change Annotator B name">—</strong>
+          <span style="font-size:0.55rem; opacity:0.5; cursor:pointer;"
+                onclick="changeIAAAnnotatorName()">✎ edit</span>
+          (Annotator B).
           Primary annotations hidden · Label from scratch.</span>
     <!-- Save status indicator — shows ✅ after successful save, ⚠️ if unsaved changes -->
     <span id="iaaSaveStatus" style="font-size:0.72rem; color:var(--text-muted);
@@ -8638,15 +9161,73 @@ function updateAnnotatorBadge() {
  */
 function changeAnnotatorName() {
     const current = getAnnotatorName();
-    const newName = prompt('Annotator name:', current || '');
+    const newName = prompt('Annotator A (primary) name:', current || '');
     if (newName === null) return;
     if (newName.trim().length < 2) {
         showToast('Name needs at least 2 characters!', 'error', 3000);
         return;
     }
+    // ── Guard: can't match Annotator B if IAA is active ──────────
+    const iaaName = localStorage.getItem('iaa_annotator_name') || '';
+    if (iaaMode && iaaName && newName.trim().toLowerCase() === iaaName.toLowerCase()) {
+        showToast(
+            `❌ "${newName.trim()}" is already Annotator B! ` +
+            `A and B must be different people! 👯`,
+            'error', 5000
+        );
+        return;
+    }
     setAnnotatorName(newName.trim());
     updateAnnotatorBadge();
-    showToast(`👤 Annotator changed to "${newName.trim()}" ✨`, 'success', 3000);
+    showToast(`👤 Annotator A changed to "${newName.trim()}" ✨`, 'success', 3000);
+}
+
+/**
+ * changeIAAAnnotatorName()
+ *
+ * 📏 Change Annotator B's name while IAA mode is active.
+ * Click the name on the pink IAA banner to trigger.
+ *
+ * Guards:
+ *   - Must be different from Annotator A (the whole point of IAA!)
+ *   - At least 2 characters
+ *   - Updates banner display immediately
+ *
+ * 💅 Like swapping out a drag name mid-show — the performance
+ * continues, just under a new spotlight! 🌟
+ */
+function changeIAAAnnotatorName() {
+    const currentB = localStorage.getItem('iaa_annotator_name') || '';
+    const primaryA = getAnnotatorName() || '(unknown)';
+
+    const newName = prompt(
+        `Change Annotator B name.\n\n` +
+        `Annotator A (primary): "${primaryA}"\n` +
+        `Annotator B (current): "${currentB}"\n\n` +
+        `Enter new name for Annotator B:`,
+        currentB
+    );
+
+    if (newName === null) return;  // Cancelled
+    if (newName.trim().length < 2) {
+        showToast('Name needs at least 2 characters!', 'error', 3000);
+        return;
+    }
+
+    // ── Guard: B must NOT equal A ────────────────────────────────
+    if (newName.trim().toLowerCase() === primaryA.toLowerCase()) {
+        showToast(
+            `❌ "${newName.trim()}" is Annotator A! ` +
+            `IAA needs a DIFFERENT person — two judges, not one! 👯`,
+            'error', 5000
+        );
+        return;
+    }
+
+    // ── Apply the change ─────────────────────────────────────────
+    localStorage.setItem('iaa_annotator_name', newName.trim());
+    document.getElementById('iaaBannerName').textContent = newName.trim();
+    showToast(`📏 Annotator B changed to "${newName.trim()}" ✨`, 'success', 3000);
 }
 
 // -----------------------------------------------------------------
@@ -8667,11 +9248,35 @@ let primaryAnnotationsBackup = null;
  *   5. Stores state in localStorage (persists across candidates)
  */
 function enterIAAMode() {
-    const annotatorName = getAnnotatorName();
+    // ── IAA needs a SEPARATE Annotator B name ─────────────────────
+    // The primary annotator is already saved with the doc.
+    // IAA compares TWO DIFFERENT people — so we need a DIFFERENT name!
+    // We store it in its own localStorage key to avoid conflicts. 💅
+    let annotatorName = localStorage.getItem('iaa_annotator_name') || '';
+
     if (!annotatorName) {
-        document.getElementById('annotatorPromptOverlay').classList.add('open');
-        setTimeout(() => document.getElementById('annotatorNameInput').focus(), 200);
-        return;
+        const primaryName = getAnnotatorName() || '(unknown)';
+        const input = prompt(
+            `📏 IAA Mode: Enter ANNOTATOR B name.\\n\\n` +
+            `Primary annotator (A) is "${primaryName}".\\n` +
+            `You must use a DIFFERENT name for the second annotator!\\n\\n` +
+            `Example: If A is "Soraya", B could be "Ahmad" or "Reviewer2".`
+        );
+        if (!input || input.trim().length < 2) {
+            showToast('Need a name (2+ chars) to activate IAA!', 'error', 4000);
+            return;
+        }
+        // ── Guard: Annotator B must NOT be Annotator A ───────────
+        if (input.trim().toLowerCase() === (getAnnotatorName() || '').toLowerCase()) {
+            showToast(
+                `❌ "${input.trim()}" is your primary annotator name! ` +
+                `IAA needs a DIFFERENT person — two judges, not one judge twice! 👯`,
+                'error', 6000
+            );
+            return;
+        }
+        annotatorName = input.trim();
+        localStorage.setItem('iaa_annotator_name', annotatorName);
     }
 
     iaaMode = true;
@@ -8761,6 +9366,8 @@ function exitIAAMode() {
     document.getElementById('iaaBanner').style.display = 'none';
 
     localStorage.removeItem('iaa_mode_active');
+    // 💅 Clear IAA annotator name so next IAA session prompts fresh
+    localStorage.removeItem('iaa_annotator_name');
 
     showToast('📏 IAA Mode OFF — primary annotations restored! ✨', 'success', 3000);
 }
@@ -8787,7 +9394,8 @@ function autoDetectIAAMode() {
  * Edge case: If annotations array is empty, warns and bails.
  */
 function saveIAAAnnotations() {
-    const annotatorName = getAnnotatorName();
+    // ── Use the IAA-specific name, NOT the primary annotator name ──
+    const annotatorName = localStorage.getItem('iaa_annotator_name') || '';
     if (!annotatorName) {
         showToast('❌ No annotator name set — please enter your name first!', 'error', 4000);
         return;
