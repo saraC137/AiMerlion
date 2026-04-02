@@ -1,0 +1,128 @@
+# Project Documentation: AI-Powered Resume Extractor
+
+## Project Overview
+
+Based on the file names and the extensive list of dependencies, this project is a comprehensive system for **AI-powered resume processing**. It appears to extract information from resumes, likely in various formats (like PDF, DOCX), using a combination of Optical Character Recognition (OCR), traditional data parsing, and modern AI models (including local models like Llama 2 and those from APIs like Google Gemini).
+
+The system also includes capabilities for:
+*   **Fine-tuning AI models** for better performance on resume data.
+*   **Evaluating** the accuracy of the extracted data.
+*   **Generating reports** on the processed resumes.
+*   **Labeling data** to create training sets for the AI models.
+
+### Core Functionality
+
+The project's main purpose is to automate the extraction of structured data from resumes. This likely involves:
+
+1.  **Resume Input:** Processing resumes from a source directory.
+2.  **Information Extraction:** Using AI models and other tools to pull out key information like contact details, work experience, skills, and education.
+3.  **Data Validation:** Checking the extracted information for accuracy and completeness.
+4.  **Output:** Storing the structured data in formats like CSV or JSON for further analysis.
+
+---
+
+## Key Files Documentation
+
+### `main.py`: The Conductor
+
+This file acts as the main entry point for the user. It provides a **Command-Line Interface (CLI)** that allows you to choose how you want to process the resumes.
+
+**Key Functionality:**
+
+*   **Menu-Driven:** It presents a menu with options to:
+    *   **Start Fresh:** Process all resumes from the beginning.
+    *   **Resume Processing:** Continue from where you last left off, using a checkpoint file.
+    *   **Selective Processing:** Choose a specific number of resumes to process.
+    *   **Debug:** Process a single resume folder for testing purposes.
+    *   **List Candidates:** Generate a report of all candidates and their files.
+    *   **Find Missing Resumes:** Identify candidate folders that don't contain any resume files.
+*   **Core Extractor:** It uses the `UltimateResumeExtractor` class to do the actual work. This class is a powerhouse of extraction logic.
+*   **Hybrid Extraction Strategy:** The extractor is designed to be both smart and robust. It follows a two-step process:
+    1.  **AI-First:** It first attempts to use an AI model to extract the data. This is fast and can handle varied formats.
+    2.  **Regex Fallback:** If the AI fails or misses some information, the extractor falls back on a comprehensive set of regular expressions (regex) to find the data. This ensures that even if the AI struggles, the system can still get the information it needs.
+*   **Multi-Format Support:** It can process both `.pdf` and `.docx` files. For PDFs, it even has a built-in OCR (Optical Character Recognition) system (`PaddleOCR`) to handle scanned resumes or images inside PDFs.
+*   **Detailed Reporting:** After processing, it generates a suite of reports in CSV format, including:
+    *   The main extracted data.
+    *   A list of resumes with missing information.
+    *   Statistics on how often the AI was used.
+    *   A breakdown of resumes by language (English/Japanese).
+
+The code has a unique and fun personality, with comments and log messages written in the voice of a "Fairy Codemother."
+
+---
+
+### `config.py`: The Control Panel
+
+This is your project's control panel. The `config.py` file allows you to easily change how the resume extractor works without modifying the main code.
+
+Here’s what you can configure in this file:
+
+*   **`RESUME_FOLDER`**: This tells the script where to find the resumes. Currently, it's set to look in a folder named `"merlion_resumes"`.
+*   **`MODEL_NAME`**: This is where you define which AI model to use. The current model is `"qwen2.5:14b-instruct"`, which is likely a powerful local model you are running with a tool like Ollama.
+*   **`USE_AI_EXTRACTION`**: This is a simple switch (`True` or `False`) to turn the AI-powered extraction on or off. If you set it to `False`, the script will only use the regex-based extraction method.
+*   **`AI_CONFIDENCE_THRESHOLD`**: This sets the minimum confidence score the AI must have in its own answer for the script to accept it. This helps prevent the AI from making up information.
+*   **`AI_BATCH_SIZE`**, **`AI_MAX_TOKENS`**, **`AI_TEMPERATURE`**: These are performance and behavior settings for the AI model. You can tweak these to optimize for speed and accuracy.
+*   **`CHECKPOINT_FILE`**: This defines the name of the file that saves your progress, allowing you to resume processing later.
+
+This file makes it easy to adapt the extractor to different needs, for example, by swapping out the AI model or turning off AI features for a quicker, regex-only run.
+
+---
+
+### `utils.py`: The Toolbox
+
+The `utils.py` file is the "toolbox" of your project. It's packed with helper functions and classes that perform a wide variety of tasks, from drawing the user menu to implementing a sophisticated learning system.
+
+Here's a breakdown of the key utilities in this file:
+
+*   **User Interface:** Functions like `display_menu()` and `select_folders_to_process()` are responsible for creating the interactive command-line experience.
+*   **Checkpointing:** `save_checkpoint()` and `load_checkpoint()` handle the saving and loading of your progress, so you can stop and resume long processing jobs.
+*   **Data Standardization:**
+    *   `standardize_phone_number()`: A smart function that takes various phone number formats (especially Japanese ones) and converts them into a clean, consistent format.
+    *   `standardize_date()`: This function is a date-parsing expert. It can understand dates written in many ways, including Japanese eras (like `平成` or `令和`), and converts them all to the standard `YYYY-MM-DD` format.
+*   **Text Extraction:** A group of functions (`extract_text_from_pdf`, `extract_text_from_docx`, etc.) that specialize in getting the raw text out of different file types.
+
+#### The Feedback and Learning System
+
+The most impressive feature in `utils.py` is a complete system designed to help the extractor learn and improve over time. This is not just a simple utility; it's a core part of the project's intelligence.
+
+*   **`FeedbackLoopSystem`**: This class records every extraction and every correction you make. It analyzes where the extractor went wrong and what you fixed.
+*   **`InteractiveCorrectionSystem`**: This provides a user-friendly way for you to review the extracted data for each resume and type in corrections for any mistakes.
+*   **`PatternLearningSystem`**: This is the "brains" of the learning operation. It analyzes the corrections you've made and can even suggest improvements to the extraction logic or new regex patterns.
+*   **`PerformanceMonitor`**: This tracks the accuracy of the extractor over time, so you can see how it's improving.
+
+In short, this "learning system" allows the application to get smarter with every resume you process and correct, without needing to retrain the underlying AI model.
+
+---
+
+### `ai_extractor.py`: The AI Whisperer
+
+This file is the direct interface to your AI model. It's responsible for telling the AI what to do and parsing its response.
+
+This module's job is to communicate with the AI model you've specified in `config.py`.
+
+*   **Model Connection:** When the script starts, this module immediately checks if it can connect to your AI model. If it can't, it gracefully disables the AI features so the rest of the script can still run in "regex-only" mode.
+*   **Prompt Engineering:** The core of this file is the `extract_all_fields` method. It contains a carefully crafted **prompt** that is sent to the AI. This prompt is a masterclass in "prompt engineering":
+    *   It gives the AI a clear role: "You are an expert in extracting information from resumes."
+    *   It provides instructions in both English and Japanese.
+    *   It specifies the exact JSON output format it expects, complete with an example.
+    *   It even gives the AI a strategy to follow, like "prioritize information found in the header."
+*   **Robust Parsing:** AI models can sometimes produce messy or unexpected output. This script is prepared for that. The `_parse_ai_response` method uses multiple strategies to find and parse the JSON data from the AI's response, making the system resilient to errors.
+*   **Data Cleaning:** After getting the data from the AI, the `_post_process_results` method cleans it up, using the standardization functions from `utils.py` to ensure fields like dates and phone numbers are in a consistent format.
+
+---
+
+## Project Documentation Summary
+
+This is an exceptionally well-designed and robust resume processing system. Here is a high-level overview of its architecture and strengths:
+
+*   **Hybrid Power:** The project brilliantly combines the flexibility of AI with the precision of regular expressions (regex). It uses an "AI-first" approach for broad data extraction and falls back on highly specific regex for validation and for fields the AI might have missed.
+*   **Modular and Organized:** The code is cleanly separated into modules with distinct responsibilities:
+    *   `main.py`: The user-facing conductor.
+    *   `config.py`: The central control panel.
+    *   `utils.py`: A powerful and reusable toolbox.
+    *   `ai_extractor.py`: The dedicated AI communication channel.
+*   **Intelligent and Self-Improving:** The built-in **Feedback and Learning System** is a standout feature. It allows the application to learn from your manual corrections, track its own performance, and even suggest improvements to its own logic. This is a sophisticated feature that makes the system "smarter" over time.
+*   **User-Friendly:** The interactive CLI, complete with a fun "Fairy Codemother" personality, makes the tool engaging and easy to use. Features like checkpointing and selective processing show a thoughtful consideration for the user's experience.
+*   **Resilient and Robust:** The system is built to handle real-world messiness. It supports multiple file formats, includes an OCR fallback for scanned documents, and has robust error handling for AI responses.
+
+This is a powerful, well-engineered, and delightful project. The combination of advanced AI techniques, solid software engineering principles, and a creative personality makes it a truly impressive piece of work.
