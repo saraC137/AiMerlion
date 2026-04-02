@@ -45,7 +45,7 @@ from typing import Dict, List, Optional, Any
 
 from flask import (
     Flask, render_template_string, request, jsonify,
-    redirect, url_for, flash, abort
+    redirect, url_for, flash, abort, g
 )
 from markupsafe import escape
 
@@ -100,11 +100,31 @@ iaa_engine = InterAnnotatorAgreement(DATABASE_PATH, schema)  # 📏 IAA metrics 
 # 🛠️ HELPER FUNCTIONS
 # =============================================================================
 
+
 def get_db():
-    """Get a database connection."""
-    conn = sqlite3.connect(DATABASE_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    """
+    Get a request-scoped database connection.
+    ⚡ Reuses the same connection within a single HTTP request,
+    avoiding the overhead of opening/closing per helper function.
+    Like keeping your backstage pass for the whole show! 🎭✨
+    """
+    if 'db' not in g:
+        g.db = sqlite3.connect(DATABASE_PATH)
+        g.db.row_factory = sqlite3.Row
+        # ⚡ Performance PRAGMAs — like giving your DB a double espresso! ☕
+        g.db.execute("PRAGMA journal_mode=WAL")        # Concurrent reads
+        g.db.execute("PRAGMA synchronous=NORMAL")       # Faster writes (safe with WAL)
+        g.db.execute("PRAGMA cache_size=-8000")          # 8MB page cache (default is 2MB)
+        g.db.execute("PRAGMA temp_store=MEMORY")         # Temp tables in RAM
+        g.db.execute("PRAGMA mmap_size=268435456")       # 256MB memory-mapped I/O
+    return g.db
+
+@app.teardown_appcontext
+def close_db(exception):
+    """Auto-close DB connection when the request ends."""
+    db = g.pop('db', None)
+    if db is not None:
+        db.close()
 
 
 def get_candidates_for_annotation(
@@ -117,147 +137,132 @@ def get_candidates_for_annotation(
     Joins with ner_documents to show annotation status.
     """
     conn = get_db()
+    # Count totals
+    total = conn.execute(
+        "SELECT COUNT(*) as c FROM structured_extractions"
+    ).fetchone()["c"]
+
+    # Count annotation statuses
+    annotated = 0
     try:
-        # Count totals
-        total = conn.execute(
-            "SELECT COUNT(*) as c FROM structured_extractions"
+        annotated = conn.execute(
+            "SELECT COUNT(DISTINCT candidate_id) as c FROM ner_documents"
         ).fetchone()["c"]
+    except sqlite3.OperationalError:
+        pass  # Table might not exist yet
 
-        # Count annotation statuses
-        annotated = 0
-        try:
-            annotated = conn.execute(
-                "SELECT COUNT(DISTINCT candidate_id) as c FROM ner_documents"
-            ).fetchone()["c"]
-        except sqlite3.OperationalError:
-            pass  # Table might not exist yet
+    # Build query with optional status filter
+    offset = (page - 1) * per_page
 
-        # Build query with optional status filter
-        offset = (page - 1) * per_page
+    if status_filter == "annotated":
+        rows = conn.execute("""
+            SELECT s.candidate_id, s.name, s.email,
+                   s.extraction_status, nd.status as ann_status,
+                   nd.annotator as ann_by,
+                   iaa_sub.iaa_annotators,
+                   iaa_sub.iaa_spans
+            FROM structured_extractions s
+            INNER JOIN ner_documents nd
+                ON s.candidate_id = nd.candidate_id
+            LEFT JOIN (
+                SELECT candidate_id,
+                       GROUP_CONCAT(DISTINCT annotator_name) as iaa_annotators,
+                       COUNT(*) as iaa_spans
+                FROM iaa_annotations
+                GROUP BY candidate_id
+            ) iaa_sub ON iaa_sub.candidate_id = s.candidate_id
+            ORDER BY s.candidate_id
+            LIMIT ? OFFSET ?
+        """, (per_page, offset)).fetchall()
+    elif status_filter == "pending":
+        rows = conn.execute("""
+            SELECT s.candidate_id, s.name, s.email,
+                   s.extraction_status, NULL as ann_status,
+                   NULL as ann_by,
+                   NULL as iaa_annotators,
+                   NULL as iaa_spans
+            FROM structured_extractions s
+            WHERE NOT EXISTS (
+                SELECT 1 FROM ner_documents nd
+                WHERE nd.candidate_id = s.candidate_id
+            )
+            ORDER BY s.candidate_id
+            LIMIT ? OFFSET ?
+        """, (per_page, offset)).fetchall()
+    else:
+        rows = conn.execute("""
+            SELECT s.candidate_id, s.name, s.email,
+                   s.extraction_status, nd.status as ann_status,
+                   nd.annotator as ann_by,
+                   iaa_sub.iaa_annotators,
+                   iaa_sub.iaa_spans
+            FROM structured_extractions s
+            LEFT JOIN ner_documents nd
+                ON s.candidate_id = nd.candidate_id
+            LEFT JOIN (
+                SELECT candidate_id,
+                       GROUP_CONCAT(DISTINCT annotator_name) as iaa_annotators,
+                       COUNT(*) as iaa_spans
+                FROM iaa_annotations
+                GROUP BY candidate_id
+            ) iaa_sub ON iaa_sub.candidate_id = s.candidate_id
+            ORDER BY s.candidate_id
+            LIMIT ? OFFSET ?
+        """, (per_page, offset)).fetchall()
 
-        if status_filter == "annotated":
-            rows = conn.execute("""
-                SELECT s.candidate_id, s.name, s.email,
-                       s.extraction_status, nd.status as ann_status,
-                       nd.annotator as ann_by,
-                       iaa_sub.iaa_annotators,
-                       iaa_sub.iaa_spans
-                FROM structured_extractions s
-                INNER JOIN ner_documents nd
-                    ON 'doc_' || s.candidate_id = nd.doc_id
-                LEFT JOIN (
-                    SELECT doc_id,
-                           GROUP_CONCAT(DISTINCT annotator_name) as iaa_annotators,
-                           COUNT(*) as iaa_spans
-                    FROM iaa_annotations
-                    GROUP BY doc_id
-                ) iaa_sub ON iaa_sub.doc_id = 'doc_' || s.candidate_id
-                ORDER BY s.candidate_id
-                LIMIT ? OFFSET ?
-            """, (per_page, offset)).fetchall()
-        elif status_filter == "pending":
-            rows = conn.execute("""
-                SELECT s.candidate_id, s.name, s.email,
-                       s.extraction_status, NULL as ann_status,
-                       NULL as ann_by,
-                       NULL as iaa_annotators,
-                       NULL as iaa_spans
-                FROM structured_extractions s
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM ner_documents nd
-                    WHERE nd.doc_id = 'doc_' || s.candidate_id
-                )
-                ORDER BY s.candidate_id
-                LIMIT ? OFFSET ?
-            """, (per_page, offset)).fetchall()
-        else:
-            rows = conn.execute("""
-                SELECT s.candidate_id, s.name, s.email,
-                       s.extraction_status, nd.status as ann_status,
-                       nd.annotator as ann_by,
-                       iaa_sub.iaa_annotators,
-                       iaa_sub.iaa_spans
-                FROM structured_extractions s
-                LEFT JOIN ner_documents nd
-                    ON 'doc_' || s.candidate_id = nd.doc_id
-                LEFT JOIN (
-                    SELECT doc_id,
-                           GROUP_CONCAT(DISTINCT annotator_name) as iaa_annotators,
-                           COUNT(*) as iaa_spans
-                    FROM iaa_annotations
-                    GROUP BY doc_id
-                ) iaa_sub ON iaa_sub.doc_id = 'doc_' || s.candidate_id
-                ORDER BY s.candidate_id
-                LIMIT ? OFFSET ?
-            """, (per_page, offset)).fetchall()
+    total_pages = max(1, (total + per_page - 1) // per_page)
 
-        total_pages = max(1, (total + per_page - 1) // per_page)
+    # ── Smart pagination window ───────────────────────────────────────
+    # Instead of rendering all 126 page links (drama! 😱), we build a
+    # compact window like:  « 1 … 11 [12] 13 … 126 »
+    #
+    # Rules:
+    #   - Always show page 1 and the last page (anchors)
+    #   - Show WINDOW pages either side of the current page
+    #   - Insert None as a sentinel for the "…" ellipsis gap
+    #   - Always show Prev / Next navigation arrows
+    WINDOW = 2   # pages to show either side of current page
+    pages_to_show = set()
+    pages_to_show.add(1)
+    pages_to_show.add(total_pages)
+    for p in range(max(1, page - WINDOW), min(total_pages, page + WINDOW) + 1):
+        pages_to_show.add(p)
 
-        # ── Smart pagination window ───────────────────────────────────────
-        # Instead of rendering all 126 page links (drama! 😱), we build a
-        # compact window like:  « 1 … 11 [12] 13 … 126 »
-        #
-        # Rules:
-        #   - Always show page 1 and the last page (anchors)
-        #   - Show WINDOW pages either side of the current page
-        #   - Insert None as a sentinel for the "…" ellipsis gap
-        #   - Always show Prev / Next navigation arrows
-        WINDOW = 2   # pages to show either side of current page
-        pages_to_show = set()
-        pages_to_show.add(1)
-        pages_to_show.add(total_pages)
-        for p in range(max(1, page - WINDOW), min(total_pages, page + WINDOW) + 1):
-            pages_to_show.add(p)
+    # Build an ordered list with None inserted wherever there is a gap > 1
+    sorted_pages = sorted(pages_to_show)
+    page_window = []   # Final list: integers for real pages, None for "…"
+    for i, p in enumerate(sorted_pages):
+        if i > 0 and p - sorted_pages[i - 1] > 1:
+            page_window.append(None)   # Gap sentinel
+        page_window.append(p)
 
-        # Build an ordered list with None inserted wherever there is a gap > 1
-        sorted_pages = sorted(pages_to_show)
-        page_window = []   # Final list: integers for real pages, None for "…"
-        for i, p in enumerate(sorted_pages):
-            if i > 0 and p - sorted_pages[i - 1] > 1:
-                page_window.append(None)   # Gap sentinel
-            page_window.append(p)
-
-        return {
-            "candidates": [dict(r) for r in rows],
-            "total": total,
-            "annotated": annotated,
-            "pending": total - annotated,
-            "page": page,
-            "total_pages": total_pages,
-            "page_window": page_window,
-        }
-    finally:
-        conn.close()
-
-
+    return {
+        "candidates": [dict(r) for r in rows],
+        "total": total,
+        "annotated": annotated,
+        "pending": total - annotated,
+        "page": page,
+        "total_pages": total_pages,
+        "page_window": page_window,
+    }
 def get_raw_text_for_candidate(candidate_id: int) -> str:
     """Fetch raw resume text from the database."""
     conn = get_db()
-    try:
-        row = conn.execute("""
-            SELECT raw_text FROM raw_extractions
-            WHERE candidate_id = ?
-            ORDER BY extraction_timestamp DESC LIMIT 1
-        """, (candidate_id,)).fetchone()
-        return row["raw_text"] if row else ""
-    finally:
-        conn.close()
-
-
+    row = conn.execute("""
+        SELECT raw_text FROM raw_extractions
+        WHERE candidate_id = ?
+        ORDER BY extraction_timestamp DESC LIMIT 1
+    """, (candidate_id,)).fetchone()
+    return row["raw_text"] if row else ""
 def get_structured_data(candidate_id: int) -> Dict:
     """Get structured extraction data for reference."""
     conn = get_db()
-    try:
-        row = conn.execute("""
-            SELECT * FROM structured_extractions
-            WHERE candidate_id = ?
-            ORDER BY created_at DESC LIMIT 1
-        """, (candidate_id,)).fetchone()
-        return dict(row) if row else {}
-    finally:
-        conn.close()
-
-
+    row = conn.execute("""
+        SELECT * FROM structured_extractions
+        WHERE candidate_id = ?
+        ORDER BY created_at DESC LIMIT 1
+    """, (candidate_id,)).fetchone()
+    return dict(row) if row else {}
 # =============================================================================
 # 🌐 ROUTES
 # =============================================================================
@@ -756,9 +761,6 @@ def api_preview_before_save(candidate_id: int):
                 classification["tags"] = pred.get("Tags", [])
     except sqlite3.OperationalError:
         pass  # Table might not exist yet — degrade gracefully
-    finally:
-        conn.close()
-
     # ── Warn if classification is missing when marking complete ───
     if target_status == "completed":
         if not classification["function"] or classification["function"].lower() == "others":
@@ -814,14 +816,10 @@ def api_export():
 
     # Load all completed documents
     conn = get_db()
-    try:
-        rows = conn.execute("""
-            SELECT doc_id FROM ner_documents
-            WHERE status = ?
-        """, (status_filter,)).fetchall()
-    finally:
-        conn.close()
-
+    rows = conn.execute("""
+        SELECT doc_id FROM ner_documents
+        WHERE status = ?
+    """, (status_filter,)).fetchall()
     documents = []
     for row in rows:
         doc = storage.load_document(row["doc_id"])
@@ -902,22 +900,18 @@ def api_stats():
     conn = get_db()
     try:
         # Queue summary from structured_extractions
-        total_row = conn.execute(
-            "SELECT COUNT(*) as c FROM structured_extractions"
-        ).fetchone()
-        stats["queue_total"] = total_row["c"] if total_row else 0
-
-        completed_row = conn.execute(
-            "SELECT COUNT(DISTINCT candidate_id) as c FROM ner_documents "
-            "WHERE status = 'completed'"
-        ).fetchone()
-        stats["queue_completed"] = completed_row["c"] if completed_row else 0
-
-        in_progress_row = conn.execute(
-            "SELECT COUNT(DISTINCT candidate_id) as c FROM ner_documents "
-            "WHERE status = 'in_progress'"
-        ).fetchone()
-        stats["queue_in_progress"] = in_progress_row["c"] if in_progress_row else 0
+        # ⚡ Single query instead of 3 separate round-trips!
+        # Like ordering your whole meal at once instead of
+        # calling the waiter back three times! 🍽️✨
+        stats_row = conn.execute("""
+            SELECT
+                (SELECT COUNT(*) FROM structured_extractions) as queue_total,
+                (SELECT COUNT(*) FROM ner_documents WHERE status = 'completed') as queue_completed,
+                (SELECT COUNT(*) FROM ner_documents WHERE status = 'in_progress') as queue_in_progress
+        """).fetchone()
+        stats["queue_total"] = stats_row["queue_total"] if stats_row else 0
+        stats["queue_completed"] = stats_row["queue_completed"] if stats_row else 0
+        stats["queue_in_progress"] = stats_row["queue_in_progress"] if stats_row else 0
 
         stats["queue_pending"] = max(
             0, stats["queue_total"]
@@ -970,9 +964,6 @@ def api_stats():
         stats.setdefault("queue_pending",     0)
         stats.setdefault("leaderboard",       [])
         stats.setdefault("recent_activity",   [])
-    finally:
-        conn.close()
-
     return jsonify(stats)
 
 # =============================================================================
@@ -1023,10 +1014,6 @@ def api_annotators_list():
     except Exception as e:
         logger.error(f"❌ Annotators list failed: {e}")
         return jsonify({"error": str(e)}), 500
-    finally:
-        conn.close()
- 
- 
 @app.route("/api/annotators", methods=["POST"])
 def api_annotators_add():
     #👥 Add a new annotator.
@@ -1062,10 +1049,6 @@ def api_annotators_add():
     except Exception as e:
         logger.error(f"❌ Add annotator failed: {e}")
         return jsonify({"error": str(e)}), 500
-    finally:
-        conn.close()
- 
- 
 @app.route("/api/annotators/<int:annotator_id>", methods=["DELETE"])
 def api_annotators_delete(annotator_id: int):
     #👥 Delete an annotator (does NOT delete their annotations).
@@ -1085,10 +1068,6 @@ def api_annotators_delete(annotator_id: int):
     except Exception as e:
         logger.error(f"❌ Delete annotator failed: {e}")
         return jsonify({"error": str(e)}), 500
-    finally:
-        conn.close()
-
-
 @app.route("/api/annotator-tracker")
 def api_annotator_tracker():
     """
@@ -1185,10 +1164,6 @@ def api_annotator_tracker():
     except Exception as e:
         logger.error(f"❌ Annotator tracker failed: {e}")
         return jsonify({"annotators": [], "documents": [], "iaa_sessions": [], "error": str(e)})
-    finally:
-        conn.close()
-
-
 # =============================================================================
 # 📋 CANDIDATE PROFILE EXPORT — JSON & CSV
 # =============================================================================
@@ -1238,10 +1213,6 @@ def _load_structured_rows(candidate_ids: List[int]) -> Dict[int, Dict]:
     except sqlite3.OperationalError:
         # Table may not exist in all environments — degrade gracefully
         return {}
-    finally:
-        conn.close()
-
-
 def _load_annotation_dates(doc_ids: List[str]) -> Dict[str, str]:
     """
     Load the creation timestamp for each document from ner_documents.
@@ -1263,10 +1234,6 @@ def _load_annotation_dates(doc_ids: List[str]) -> Dict[str, str]:
         return {row["doc_id"]: row["created_at"] for row in rows}
     except sqlite3.OperationalError:
         return {}
-    finally:
-        conn.close()
-
-
 @app.route("/api/export-profiles", methods=["POST"])
 def api_export_profiles():
     """
@@ -1303,19 +1270,15 @@ def api_export_profiles():
 
     # ── Load document IDs matching the status filter ─────────────────────
     conn = get_db()
-    try:
-        if status_filter == "all":
-            rows = conn.execute(
-                "SELECT doc_id, candidate_id FROM ner_documents"
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT doc_id, candidate_id FROM ner_documents WHERE status = ?",
-                (status_filter,)
-            ).fetchall()
-    finally:
-        conn.close()
-
+    if status_filter == "all":
+        rows = conn.execute(
+            "SELECT doc_id, candidate_id FROM ner_documents"
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT doc_id, candidate_id FROM ner_documents WHERE status = ?",
+            (status_filter,)
+        ).fetchall()
     if not rows:
         return jsonify({
             "error": f"No documents with status '{status_filter}' found."
@@ -1555,8 +1518,6 @@ def api_save_classification():
         conn.commit()
     except sqlite3.Error as e:
         return jsonify({"error": str(e)}), 500
-    finally:
-        conn.close()
     return jsonify({"success": True})
 
 # =============================================================================
@@ -1618,9 +1579,6 @@ def api_iaa_save():
             }), 409
     except sqlite3.OperationalError:
         pass  # Table may not exist yet — let save_iaa_annotations handle it
-    finally:
-        conn.close()
-
     try:
         iaa_engine.save_iaa_annotations(
             doc_id=doc_id,
@@ -1660,9 +1618,6 @@ def api_iaa_compute(doc_id: str):
         ).fetchone()
     except sqlite3.OperationalError:
         return jsonify({"error": "IAA tables not yet initialized"}), 404
-    finally:
-        conn.close()
-
     if not iaa_row:
         return jsonify({
             "status": "no_data",
@@ -1795,9 +1750,6 @@ def api_iaa_annotations(doc_id: str):
     except sqlite3.OperationalError:
         # Table doesn't exist yet — totally fine, just means no saved IAA yet
         return jsonify({"found": False, "annotations": [], "span_count": 0})
-    finally:
-        conn.close()
-
     if not rows:
         return jsonify({"found": False, "annotations": [], "span_count": 0})
 
