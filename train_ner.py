@@ -694,13 +694,22 @@ def train_ner_model(
                 entities.append((ann.char_start, ann.char_end, ann.entity_type))
                 seen_spans.append((ann.char_start, ann.char_end, ann.entity_type))
 
-            # Create the spaCy Example
+            # ── BULLETPROOF: Wrap in try/except and skip bad docs ───
+            # If ANY entity in this doc causes E024, we skip the
+            # entire doc rather than crashing the whole pipeline.
+            # Like a casting director — if an actor can't perform,
+            # we recast, we don't cancel the show! 🎭
             try:
                 doc = nlp_model.make_doc(adoc.raw_text)
                 example = Example.from_dict(doc, {"entities": entities})
+
+                # Test that this example can actually train
+                # by doing a dry-run prediction
+                nlp_model.update([example], sgd=None, losses={}, drop=0.0)
+
                 examples.append(example)
             except Exception as e:
-                logger.warning(f"Failed to create Example for {adoc.doc_id}: {e}")
+                logger.warning(f"Skipping doc {adoc.doc_id}: {e}")
                 skipped += 1
 
         if skipped > 0:

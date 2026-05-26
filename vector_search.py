@@ -10,7 +10,7 @@ who actually UNDERSTANDS what the job needs! 💘🎯
 
 Architecture:
   - Qdrant     → High-performance vector database (ChromaDB's stable, drama-free cousin!)
-  - Ollama     → Local embedding model (nomic-embed-text, 768 dimensions)
+  - Ollama     → Local embedding model (mxbai-embed-large, 1024 dimensions)
   - SQLite     → Reads candidates from your existing resume_extractions.db
 
 How It Works:
@@ -27,7 +27,7 @@ Data Flow:
 
 Setup (one-time):
     pip install qdrant-client --break-system-packages
-    ollama pull nomic-embed-text
+    ollama pull mxbai-embed-large
 
 Usage:
     from vector_search import VectorSearchEngine
@@ -38,7 +38,7 @@ Usage:
 
 Dependencies:
     pip install qdrant-client --break-system-packages
-    ollama pull nomic-embed-text
+    ollama pull mxbai-embed-large
 
 Migration note (ChromaDB → Qdrant):
     💅 WHY WE SWITCHED — The Great Migration of 2026! 🎭
@@ -65,6 +65,13 @@ import logging
 import hashlib
 from typing import Dict, List, Optional, Any, Tuple
 
+# 🆕 Traditional Method: Hybrid Role Predictor (.pkl + Keywords)
+try:
+    from job_role_predictor import HybridClassifier
+    JOB_ROLE_PREDICTOR_AVAILABLE = True
+except ImportError:
+    JOB_ROLE_PREDICTOR_AVAILABLE = False
+
 # =============================================================================
 # 🔧 LOGGING
 # =============================================================================
@@ -84,9 +91,9 @@ logger = logging.getLogger(__name__)
 RESUME_DB_PATH = os.environ.get("RESUME_DB_PATH", "resume_extractions.db")
 QDRANT_PERSIST_DIR = os.environ.get("QDRANT_DIR", "qdrant_db")
 
-# Embedding model — nomic-embed-text is free, local, and good quality!
-# Other options: mxbai-embed-large, all-minilm (via sentence-transformers)
-EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "nomic-embed-text")
+# Embedding model — mxbai-embed-large is high quality and supports embeddings!
+# Other options: nomic-embed-text (768d), all-minilm
+EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "mxbai-embed-large")
 
 # Collection name in Qdrant
 COLLECTION_NAME = "candidate_profiles"
@@ -95,9 +102,9 @@ COLLECTION_NAME = "candidate_profiles"
 DEFAULT_TOP_K = 10
 MAX_TOP_K = 50
 
-# Embedding dimensions — nomic-embed-text = 768, mxbai-embed-large = 1024
+# Embedding dimensions — mxbai-embed-large = 1024, nomic-embed-text = 768.
 # Auto-detected at runtime from the test embedding, but this is the fallback.
-DEFAULT_EMBEDDING_DIM = 768
+DEFAULT_EMBEDDING_DIM = 1024
 
 
 # =============================================================================
@@ -392,20 +399,11 @@ def build_candidate_profile(structured: Dict) -> str:
     profile = profile.strip()
 
     # ── HARD CHARACTER CAP — The Context Window Bouncer! 🚪 ────────
-    # nomic-embed-text has an 8192 token limit (~1 token ≈ 4 chars).
-    # That's ~32K chars theoretically, BUT Ollama applies a stricter
-    # limit in practice — very long resumes (walls of skills, 10-year
-    # experience dumps) blow past it and get a 400 Bad Request.
-    #
-    # Think of it as the bouncer at the embedding club: "Sorry honey,
-    # the venue only holds 5000 characters. Anything more and we're
-    # shutting the doors!" 🚫✨
-    #
-    # 5000 chars ≈ ~1250 tokens — well within the safe zone for
-    # nomic-embed-text, and still captures the most important
-    # semantic content of a candidate's profile. Quality over
-    # quantity, darling! 💅
-    MAX_PROFILE_CHARS = 5000
+    # mxbai-embed-large has a 512 token limit (~1 token ≈ 4 chars).
+    # 1500 chars ≈ ~375 tokens — safely below the 512-token ceiling.
+    # Previously at 2000 chars some profiles hit the limit (dense text,
+    # multi-byte chars, or short words all inflate token count vs chars).
+    MAX_PROFILE_CHARS = 1500
     if len(profile) > MAX_PROFILE_CHARS:
         profile = profile[:MAX_PROFILE_CHARS]
         # ── Snap to last complete line to avoid cutting mid-sentence ─
@@ -419,7 +417,7 @@ def build_candidate_profile(structured: Dict) -> str:
     return profile
 
 
-def build_candidate_metadata(structured: Dict) -> Dict[str, Any]:
+def build_candidate_metadata(structured: Dict, predictor: Optional[Any] = None) -> Dict[str, Any]:
     """
     Build metadata dict for Qdrant payload storage.
 
@@ -427,13 +425,13 @@ def build_candidate_metadata(structured: Dict) -> Dict[str, Any]:
     We store key fields as payload so we can filter results
     (e.g., "only show candidates with Python skills").
 
-    💅 UPGRADE NOTE from ChromaDB:
-    Qdrant payloads are MORE flexible than ChromaDB metadata!
-    ChromaDB restricted values to str/int/float/bool only.
-    Qdrant accepts nested dicts, lists, and arbitrary JSON! 🎉
-    But we keep it flat for simplicity and compatibility.
+    💅 TRADITIONAL METHOD INTEGRATION:
+    We use the .pkl-powered JobRolePredictor to assign a Role and Function
+    to the candidate based on their profile text.
     """
-    return {
+    profile_text = build_candidate_profile(structured)
+    
+    metadata = {
         "candidate_id": int(structured.get("candidate_id", 0)),
         "name": (structured.get("name") or "Unknown")[:100],
         "email": (structured.get("email") or "")[:100],
@@ -442,7 +440,25 @@ def build_candidate_metadata(structured: Dict) -> Dict[str, Any]:
         "skills": (structured.get("skills_raw") or "")[:500],
         "extraction_status": (structured.get("extraction_status") or "")[:50],
         "ai_assisted": bool(structured.get("ai_assisted")),
+        "profile_text": profile_text,
     }
+
+    # ── Enrich with Traditional ML Role Prediction ────────────────
+    if predictor and profile_text:
+        try:
+            # Using Hybrid prediction for better accuracy! ✨
+            prediction = predictor.classify_text_only(profile_text)
+            metadata["predicted_role"] = prediction.get("predicted_role") or "Unknown"
+            metadata["function"] = prediction.get("function") or "Others"
+        except Exception as e:
+            logger.warning(f"⚠️ Metadata role prediction failed: {e}")
+            metadata["predicted_role"] = "Unknown"
+            metadata["function"] = "Others"
+    else:
+        metadata["predicted_role"] = "Unknown"
+        metadata["function"] = "Others"
+
+    return metadata
 
 
 def _candidate_id_to_point_id(candidate_id: Any) -> str:
@@ -536,6 +552,25 @@ class VectorSearchEngine:
         # to Qdrant's upsert/query methods. Clean separation! 💅
         self.embed_fn = OllamaEmbeddingFunction(model_name=self.embedding_model)
 
+        # ── Initialize Traditional Role Predictor ──────────────────
+        self.predictor = None
+        if JOB_ROLE_PREDICTOR_AVAILABLE:
+            try:
+                # Use absolute paths for the .pkl files to ensure they load
+                # regardless of where the script is called from. 📂✨
+                base_dir = os.path.dirname(os.path.abspath(__file__))
+                model_path = os.path.join(base_dir, "job_role_prediction_model.pkl")
+                vectorizer_path = os.path.join(base_dir, "combined_tfidf_vectorizer1__1_.pkl")
+                
+                # Using HybridClassifier for better accuracy (ML + Keywords!) 🤝✨
+                self.predictor = HybridClassifier(
+                    model_path=model_path,
+                    vectorizer_path=vectorizer_path
+                )
+                logger.info("✨ Hybrid Role Predictor (ML + Keywords) loaded successfully!")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to load Role Predictor: {e}")
+
         # ── Initialize Qdrant client (local persistent mode) ───────
         # 💅 QDRANT LOCAL MODE — The Backstage Storage Room! 🗄️
         # QdrantClient(path=...) stores everything on disk, just like
@@ -561,6 +596,9 @@ class VectorSearchEngine:
         # resume in the filing cabinet instead of checking the labels! 🏷️
         self._ensure_text_index()
 
+        # ── Create role index for fast filtering ───────────────────
+        self._ensure_payload_indexes()
+
         count = self._get_count()
         logger.info(
             f"✨ VectorSearchEngine initialized! "
@@ -577,6 +615,8 @@ class VectorSearchEngine:
         are facing the same career destination, not whether they're the
         same height! 🧭✨
         """
+        self._dim_mismatch = False  # reset flag each call
+
         try:
             if not self.client.collection_exists(COLLECTION_NAME):
                 self.client.create_collection(
@@ -591,21 +631,36 @@ class VectorSearchEngine:
                     f"({self.embed_fn.dimensions}D, cosine distance)"
                 )
             else:
-                # ── Validate existing collection dimensions match ───
-                # If someone switched embedding models without rebuilding,
-                # the dimensions won't match and everything silently breaks.
-                # Better to catch it NOW with a clear error message! 🚨
                 info = self.client.get_collection(COLLECTION_NAME)
                 existing_dim = info.config.params.vectors.size
                 if existing_dim != self.embed_fn.dimensions:
-                    logger.warning(
-                        f"⚠️ Dimension mismatch! Collection has {existing_dim}D "
-                        f"but embedding model produces {self.embed_fn.dimensions}D. "
-                        f"Run rebuild_index() to fix this!"
+                    self._dim_mismatch = True
+                    logger.error(
+                        f"❌ Dimension mismatch! Collection has {existing_dim}D "
+                        f"but '{self.embedding_model}' produces {self.embed_fn.dimensions}D. "
+                        f"Use 'Rebuild All' to fix."
                     )
         except Exception as e:
             logger.error(f"❌ Failed to ensure collection: {e}")
             raise
+
+    def _ensure_payload_indexes(self):
+        """Create indexes for frequently filtered fields."""
+        try:
+            # Predicted Role (Keyword match)
+            self.client.create_payload_index(
+                collection_name=COLLECTION_NAME,
+                field_name="predicted_role",
+                field_schema="keyword",
+            )
+            # Function (Keyword match)
+            self.client.create_payload_index(
+                collection_name=COLLECTION_NAME,
+                field_name="function",
+                field_schema="keyword",
+            )
+        except Exception:
+            pass
 
     def _ensure_text_index(self):
         """
@@ -648,55 +703,132 @@ class VectorSearchEngine:
     # 📥 INDEXING — Load candidates into the vector database
     # ─────────────────────────────────────────────────────────────────
 
-    def index_all_candidates(self, batch_size: int = 50) -> Dict[str, Any]:
+    def _upsert_batch(
+        self,
+        ids: List[str],
+        docs: List[str],
+        metas: List[Dict],
+        existing_ids: set,
+    ) -> Tuple[int, int]:
+        """
+        Embed and upsert one batch. Returns (indexed_count, error_count).
+
+        On context-length errors the batch is retried one document at a time
+        so only the genuinely oversized profiles are skipped, not the whole
+        batch of 50.
+        """
+        try:
+            embeddings = self.embed_fn(docs)
+            points = [
+                PointStruct(id=ids[i], vector=embeddings[i], payload=metas[i])
+                for i in range(len(ids))
+            ]
+            self.client.upsert(collection_name=COLLECTION_NAME, points=points)
+            existing_ids.update(ids)
+            return len(ids), 0
+        except RuntimeError as e:
+            # context-length errors come through as RuntimeError from OllamaEmbeddingFunction
+            if "context length" in str(e).lower() or "input length" in str(e).lower():
+                logger.warning(
+                    f"⚠️ Batch of {len(ids)} hit context limit — retrying one-by-one to preserve quality..."
+                )
+                indexed, errors = 0, 0
+                for i in range(len(ids)):
+                    try:
+                        # ── Step 1: Try at FULL length first ───────────────────
+                        # Most items in a failed batch are actually fine; only
+                        # one or two usually cause the batch overflow.
+                        emb = self.embed_fn([docs[i]])
+                        self.client.upsert(
+                            collection_name=COLLECTION_NAME,
+                            points=[PointStruct(
+                                id=ids[i], vector=emb[0], payload=metas[i]
+                            )],
+                        )
+                        existing_ids.add(ids[i])
+                        indexed += 1
+                    except RuntimeError as inner_e:
+                        # ── Step 2: Fallback to truncation ONLY if needed ──────
+                        if "context length" in str(inner_e).lower() or "input length" in str(inner_e).lower():
+                            logger.info(f"✂️ Truncating oversized profile for candidate {metas[i].get('candidate_id')}")
+                            try:
+                                # mxbai-embed-large supports 512 tokens (~2000 chars)
+                                # 1200 is very safe and much better than 800! ✨
+                                short_doc = docs[i][:1200]
+                                emb = self.embed_fn([short_doc])
+                                self.client.upsert(
+                                    collection_name=COLLECTION_NAME,
+                                    points=[PointStruct(
+                                        id=ids[i], vector=emb[0], payload=metas[i]
+                                    )],
+                                )
+                                existing_ids.add(ids[i])
+                                indexed += 1
+                            except Exception as final_e:
+                                logger.error(f"❌ Failed even after truncation for {metas[i].get('candidate_id')}: {final_e}")
+                                errors += 1
+                        else:
+                            logger.error(f"❌ Individual indexing error for {metas[i].get('candidate_id')}: {inner_e}")
+                            errors += 1
+                    except Exception as inner_e:
+                        logger.error(
+                            f"❌ Skipping candidate {metas[i].get('candidate_id')}: {inner_e}"
+                        )
+                        errors += 1
+                return indexed, errors
+            # Other errors — skip the whole batch
+            logger.error(f"❌ Batch indexing error: {e}")
+            return 0, len(ids)
+        except Exception as e:
+            logger.error(f"❌ Batch indexing error: {e}")
+            return 0, len(ids)
+
+    def index_all_candidates(self, batch_size: int = 50, force_refresh: bool = False) -> Dict[str, Any]:
         """
         Index ALL candidates from resume_extractions.db into Qdrant.
 
-        This reads every candidate's structured extraction, builds a
-        profile text, embeds it, and stores it in Qdrant.
-
-        Think of this as the casting call — every candidate gets
-        their headshot and resume filed in the talent database! 📸💼
-
         Args:
-            batch_size: How many candidates to embed at once.
-                        Larger = faster but uses more memory.
+            batch_size:    How many candidates to embed at once.
+            force_refresh: If True, re-embed and update all candidates even if they exist.
 
         Returns:
             Dict with stats: {indexed, skipped, errors, total_time}
         """
+        if getattr(self, "_dim_mismatch", False):
+            raise RuntimeError(
+                f"Dimension mismatch: the Qdrant collection was built with a different "
+                f"embedding model. Use 'Rebuild All' (POST /api/search/index with "
+                f"{{\"rebuild\": true}}) to drop and re-index from scratch."
+            )
+
         start_time = time.time()
         stats = {"indexed": 0, "skipped": 0, "errors": 0, "already_indexed": 0}
 
-        # ── Get existing IDs to avoid re-indexing ──────────────────
-        # 🚀 PERFORMANCE: Use scroll() with no payload/vectors to get
-        # just the point IDs. Like asking the filing clerk for folder
-        # labels only, not the entire contents! 📁✨
+        # ── Get existing IDs ───────────────────────────────────────
         existing_ids = set()
-        try:
-            offset = None
-            while True:
-                # Qdrant scroll returns (points, next_offset)
-                # next_offset is None when there are no more results
-                points, next_offset = self.client.scroll(
-                    collection_name=COLLECTION_NAME,
-                    limit=1000,  # Fetch in chunks of 1000
-                    offset=offset,
-                    with_payload=False,
-                    with_vectors=False,
-                )
-                existing_ids.update(str(p.id) for p in points)
-                if next_offset is None:
-                    break
-                offset = next_offset
+        if not force_refresh:
+            try:
+                offset = None
+                while True:
+                    points, next_offset = self.client.scroll(
+                        collection_name=COLLECTION_NAME,
+                        limit=1000,
+                        offset=offset,
+                        with_payload=False,
+                        with_vectors=False,
+                    )
+                    existing_ids.update(str(p.id) for p in points)
+                    if next_offset is None:
+                        break
+                    offset = next_offset
 
-            stats["already_indexed"] = len(existing_ids)
-            if existing_ids:
-                logger.info(f"📋 Found {len(existing_ids)} already-indexed candidates — skipping them!")
-        except Exception as e:
-            # Non-fatal: if we can't fetch existing IDs, we'll just
-            # upsert everything (Qdrant handles duplicates gracefully).
-            logger.warning(f"⚠️ Could not fetch existing IDs (non-fatal): {e}")
+                stats["already_indexed"] = len(existing_ids)
+                if existing_ids:
+                    logger.info(f"📋 Found {len(existing_ids)} already-indexed candidates — skipping them!")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not fetch existing IDs (non-fatal): {e}")
+        else:
+            logger.info("🔄 Force refresh enabled — re-indexing all candidates!")
 
         # ── Read candidates from SQLite ────────────────────────────
         conn = sqlite3.connect(self.db_path, timeout=15)
@@ -734,9 +866,12 @@ class VectorSearchEngine:
             cid = str(candidate.get("candidate_id", ""))
             point_id = _candidate_id_to_point_id(cid)
 
-            # Skip if already indexed in a previous run
-            if point_id in existing_ids:
-                continue
+            # 💅 REFRESH LOGIC: We no longer skip existing IDs! 
+            # This ensures that when you run indexing, the new Hybrid Role 
+            # logic is applied to every candidate, updating their "Unknown" pills.
+            # Qdrant handles the 'upsert' (update if exists) automatically. 🔄✨
+            
+            # (Deleted the skip check that was here)
 
             # ── Skip if already queued in THIS batch run ───────────
             # Edge case: if two rows somehow share the same candidate_id
@@ -747,19 +882,15 @@ class VectorSearchEngine:
                 logger.warning(f"⚠️ Skipping duplicate point_id in batch: {point_id}")
                 continue
 
-            # Build profile text
-            profile = build_candidate_profile(candidate)
+            # Build metadata (Qdrant calls it "payload")
+            # This now includes the .pkl role prediction! ✨
+            metadata = build_candidate_metadata(candidate, predictor=self.predictor)
+            profile = metadata.get("profile_text", "")
+
             if not profile or len(profile) < 20:
                 stats["skipped"] += 1
                 logger.debug(f"⏭️ Skipping candidate {cid}: profile too short")
                 continue
-
-            # Build metadata (Qdrant calls it "payload")
-            metadata = build_candidate_metadata(candidate)
-            # ── Store profile text in payload for text filtering ────
-            # This lets us use MatchText filters on skill_filter and
-            # location_filter without needing a separate index table! 📝
-            metadata["profile_text"] = profile
 
             batch_ids.append(point_id)
             batch_docs.append(profile)
@@ -767,77 +898,39 @@ class VectorSearchEngine:
 
             # ── Process batch when full ────────────────────────────
             if len(batch_ids) >= batch_size:
-                try:
-                    batch_embeddings = self.embed_fn(batch_docs)
-
-                    # ── Build Qdrant PointStruct objects ───────────
-                    # Each point = (id, vector, payload). Simple and clean!
-                    points = [
-                        PointStruct(
-                            id=batch_ids[i],
-                            vector=batch_embeddings[i],
-                            payload=batch_metas[i],
-                        )
-                        for i in range(len(batch_ids))
-                    ]
-
-                    self.client.upsert(
-                        collection_name=COLLECTION_NAME,
-                        points=points,
-                    )
-                    stats["indexed"] += len(batch_ids)
-                    # ── Track newly indexed IDs ────────────────────
-                    # Add to existing_ids so if this function is ever
-                    # called in a loop, we don't re-add them! 🔒
-                    existing_ids.update(batch_ids)
-                    logger.info(
-                        f"📥 Indexed batch: {stats['indexed']} candidates so far..."
-                    )
-                except Exception as e:
-                    stats["errors"] += len(batch_ids)
-                    logger.error(f"❌ Batch indexing error: {e}")
-                finally:
-                    # ── ALWAYS clear the batch, success OR failure! ─
-                    # 🚨 CRITICAL: Without `finally`, a failed batch
-                    # carries its IDs into the NEXT batch, causing
-                    # duplicate errors! `finally` runs whether try
-                    # succeeded or except fired.
-                    # Like clearing the stage between acts — ALWAYS! 🎭✨
-                    batch_ids, batch_docs, batch_metas = [], [], []
+                n, e = self._upsert_batch(batch_ids, batch_docs, batch_metas, existing_ids)
+                stats["indexed"] += n
+                stats["errors"] += e
+                if n:
+                    logger.info(f"📥 Indexed batch: {stats['indexed']} candidates so far...")
+                batch_ids, batch_docs, batch_metas = [], [], []
 
         # ── Process remaining final batch ──────────────────────────
         if batch_ids:
-            try:
-                batch_embeddings = self.embed_fn(batch_docs)
-                points = [
-                    PointStruct(
-                        id=batch_ids[i],
-                        vector=batch_embeddings[i],
-                        payload=batch_metas[i],
-                    )
-                    for i in range(len(batch_ids))
-                ]
-                self.client.upsert(
-                    collection_name=COLLECTION_NAME,
-                    points=points,
-                )
-                stats["indexed"] += len(batch_ids)
-                existing_ids.update(batch_ids)
-            except Exception as e:
-                stats["errors"] += len(batch_ids)
-                logger.error(f"❌ Final batch error: {e}")
-            finally:
-                batch_ids, batch_docs, batch_metas = [], [], []
+            n, e = self._upsert_batch(batch_ids, batch_docs, batch_metas, existing_ids)
+            stats["indexed"] += n
+            stats["errors"] += e
+            batch_ids, batch_docs, batch_metas = [], [], []
 
         conn.close()
 
         stats["total_time"] = round(time.time() - start_time, 2)
         stats["total_in_collection"] = self._get_count()
+        
+        # ── Calculate real math for the user ───────────────────────
+        # We need to distinguish between truly NEW candidates and those
+        # we just UPDATED with new metadata (like Hybrid Roles).
+        # Math: total_now - total_at_start = truly_new
+        # Math: total_processed - truly_new = updated
+        total_at_start = stats["already_indexed"]
+        total_now = stats["total_in_collection"]
+        truly_new = max(0, total_now - total_at_start)
+        updated = max(0, stats["indexed"] - truly_new)
 
         logger.info(
             f"✅ Indexing complete! "
-            f"{stats['indexed']} new + {stats['already_indexed']} existing = "
-            f"{stats['total_in_collection']} total candidates in vector DB "
+            f"{truly_new} new + {updated} updated = "
+            f"{total_now} total candidates in vector DB "
             f"({stats['total_time']}s)"
         )
 
@@ -872,14 +965,13 @@ class VectorSearchEngine:
             return False
 
         candidate = dict(row)
-        profile = build_candidate_profile(candidate)
+        metadata = build_candidate_metadata(candidate, predictor=self.predictor)
+        profile = metadata.get("profile_text", "")
+        
         if not profile or len(profile) < 20:
             logger.warning(f"⚠️ Candidate {candidate_id} profile too short")
             return False
 
-        metadata = build_candidate_metadata(candidate)
-        # Store profile text in payload for text filtering
-        metadata["profile_text"] = profile
         point_id = _candidate_id_to_point_id(candidate_id)
 
         try:
@@ -913,27 +1005,41 @@ class VectorSearchEngine:
         top_k: int = DEFAULT_TOP_K,
         skill_filter: Optional[List[str]] = None,
         location_filter: Optional[str] = None,
+        use_role_filter: bool = False,
     ) -> Dict[str, Any]:
         """
         Search for candidates matching a job description.
 
-        This is the MAIN EVENT, darling! 🌟 You paste a job description,
-        and the engine finds the most relevant candidates using semantic
-        similarity — not just keyword matching!
+        💅✨ HYBRID SEARCH UPGRADE ✨💅
+        1. VECTOR (Ollama): Finds candidates who "feel" like the JD semantically.
+        2. TRADITIONAL (.pkl): Analyzes the JD to predict the intended Role/Function.
+        3. FILTER (Optional): Narrow results to candidates who match the predicted Role.
 
         Args:
             job_description: The job description text to match against.
             top_k:           Number of top results to return (default 10).
             skill_filter:    Optional list of must-have skills (keyword filter).
             location_filter: Optional location string to filter by.
+            use_role_filter: If True, automatically filter by detected Job Role.
 
         Returns:
-            Dict with:
-              - results: List of matched candidates with scores
-              - query_info: Metadata about the search
-              - total_candidates: How many are in the DB
+            Dict with results and detected job role info.
         """
         collection_count = self._get_count()
+
+        if getattr(self, "_dim_mismatch", False):
+            return {
+                "results": [],
+                "query_info": {
+                    "error": (
+                        f"Dimension mismatch: the Qdrant collection was built with a different "
+                        f"embedding model ({self.embedding_model} produces "
+                        f"{self.embed_fn.dimensions}D but the collection expects a different size). "
+                        f"Use 'Rebuild All' to fix."
+                    )
+                },
+                "total_candidates": collection_count,
+            }
 
         if not job_description or len(job_description.strip()) < 10:
             return {
@@ -945,26 +1051,21 @@ class VectorSearchEngine:
         top_k = min(top_k, MAX_TOP_K)
         start_time = time.time()
 
+        # ── Detect Role of JD (Traditional Method) ────────────────
+        jd_prediction = {}
+        if self.predictor:
+            try:
+                # Use classify_text_only() for HybridClassifier! ✨
+                jd_prediction = self.predictor.classify_text_only(job_description)
+                logger.info(f"🎯 JD Role Detected: {jd_prediction.get('predicted_role')}")
+            except Exception as e:
+                logger.warning(f"⚠️ JD role prediction failed: {e}")
+
         # ── Build Qdrant filter ────────────────────────────────────
-        # 💅 QDRANT'S FILTERING — Clean and Drama-Free! 🎭
-        #
-        # Unlike ChromaDB's confusing where vs where_document split
-        # (and the $contains eviction of 1.x), Qdrant has ONE filter
-        # system that works on payload fields. We use MatchText on
-        # the profile_text field — same effect as ChromaDB's old
-        # where_document={$contains: ...}, but with a stable API! 💪✨
-        #
-        # MatchText does tokenized full-text search:
-        #   "Python" matches "Python developer", "python scripting", etc.
-        # This is actually BETTER than ChromaDB's substring match
-        # because it handles case and word boundaries properly! 🎯
         query_filter = None
         filter_conditions = []
 
         if skill_filter:
-            # Each skill must appear somewhere in the candidate profile.
-            # We limit to 5 to avoid over-constraining the search — more
-            # filters = fewer results, which can be TOO restrictive! 🎯
             for skill in skill_filter[:5]:
                 skill_clean = skill.strip()
                 if skill_clean:
@@ -976,8 +1077,6 @@ class VectorSearchEngine:
                     )
 
         if location_filter:
-            # Location text is embedded in the profile as "Location: ..."
-            # so MatchText will find it naturally! 📍
             location_clean = location_filter.strip()
             if location_clean:
                 filter_conditions.append(
@@ -987,54 +1086,46 @@ class VectorSearchEngine:
                     )
                 )
 
-        # ── Assemble the filter ────────────────────────────────────
+        # ── New: Traditional Role Filter ──────────────────────────
+        if use_role_filter and jd_prediction.get("predicted_role"):
+            from qdrant_client.models import MatchValue
+            filter_conditions.append(
+                FieldCondition(
+                    key="predicted_role",
+                    match=MatchValue(value=jd_prediction["predicted_role"])
+                )
+            )
+
         if filter_conditions:
-            # ALL conditions must match (AND logic) — the candidate must
-            # have ALL required skills AND be in the right location! 💼
             query_filter = Filter(must=filter_conditions)
 
         # ── Safety check: empty collection ─────────────────────────
         if collection_count == 0:
-            logger.warning("⚠️ Vector collection is empty! Run index_all_candidates() first.")
             return {
                 "results": [],
                 "query_info": {
                     "error": "Collection is empty. Please index candidates first.",
-                    "top_k": top_k,
-                    "skill_filter": skill_filter,
-                    "location_filter": location_filter,
-                    "search_time_seconds": round(time.time() - start_time, 3),
-                    "jd_length": len(job_description),
+                    "jd_role": jd_prediction,
                 },
                 "total_candidates": 0,
             }
 
         # ── Pre-compute query embedding ────────────────────────────
-        # We embed the job description ourselves and pass the raw vector
-        # to Qdrant's query. Same cosine space as indexed docs! 🍎
         try:
             query_vectors = self.embed_fn([job_description])
-            if not query_vectors or len(query_vectors) == 0:
-                raise RuntimeError("Ollama returned empty embedding for query!")
         except Exception as e:
-            logger.error(f"❌ Failed to embed job description: {e}")
             return {
                 "results": [],
                 "query_info": {"error": f"Query embedding failed: {e}"},
                 "total_candidates": collection_count,
             }
 
-        # ── Query Qdrant with pre-computed vector ──────────────────
+        # ── Query Qdrant ───────────────────────────────────────────
         try:
-            # ── Clamp top_k to collection size ─────────────────────
-            # Qdrant is more forgiving than ChromaDB here (it just
-            # returns fewer results instead of erroring), but let's
-            # be explicit about it for cleaner logging! 🎯
             safe_limit = min(top_k, collection_count)
-
             search_results = self.client.query_points(
                 collection_name=COLLECTION_NAME,
-                query=query_vectors[0],  # Single query vector
+                query=query_vectors[0],
                 limit=safe_limit,
                 query_filter=query_filter,
                 with_payload=True,
@@ -1043,7 +1134,7 @@ class VectorSearchEngine:
             logger.error(f"❌ Search failed: {e}")
             return {
                 "results": [],
-                "query_info": {"error": str(e)},
+                "query_info": {"error": str(e), "jd_role": jd_prediction},
                 "total_candidates": collection_count,
             }
 
@@ -1052,46 +1143,29 @@ class VectorSearchEngine:
         if search_results and search_results.points:
             for i, point in enumerate(search_results.points):
                 payload = point.payload or {}
-
-                # ── Qdrant cosine similarity score ─────────────────
-                # Qdrant returns SIMILARITY directly (0.0 → 1.0 for cosine):
-                #   1.0 = identical vectors (perfect match! 💯)
-                #   0.0 = orthogonal (completely unrelated)
-                #  <0.0 = opposite (theoretically possible but rare)
-                #
-                # Convert to 0-100% for human-friendly display:
                 similarity = max(0.0, min(100.0, point.score * 100.0))
-
-                # ── Extract profile preview from payload ───────────
                 profile_text = payload.get("profile_text", "")
-                preview = profile_text[:300] if profile_text else ""
 
                 results.append({
                     "rank": i + 1,
                     "candidate_id": int(payload.get("candidate_id", 0)),
                     "name": payload.get("name", "Unknown"),
                     "email": payload.get("email", ""),
-                    "phone": payload.get("phone", ""),
                     "location": payload.get("location", ""),
                     "skills": payload.get("skills", ""),
+                    "predicted_role": payload.get("predicted_role", "Unknown"),
+                    "function": payload.get("function", "Others"),
                     "similarity_score": round(similarity, 1),
-                    "distance": round(1.0 - point.score, 4),  # For backward compat
-                    "profile_preview": preview,
+                    "profile_preview": profile_text[:300] if profile_text else "",
                 })
 
         search_time = round(time.time() - start_time, 3)
-
-        logger.info(
-            f"🔍 Search complete: {len(results)} results in {search_time}s "
-            f"(top score: {results[0]['similarity_score'] if results else 0}%)"
-        )
 
         return {
             "results": results,
             "query_info": {
                 "top_k": top_k,
-                "skill_filter": skill_filter,
-                "location_filter": location_filter,
+                "jd_role": jd_prediction,
                 "search_time_seconds": search_time,
                 "jd_length": len(job_description),
             },
@@ -1118,28 +1192,63 @@ class VectorSearchEngine:
         Completely rebuild the vector index from scratch.
 
         Drops the existing collection and re-indexes everything.
-        Use after major changes to the extraction pipeline.
-        Like a complete wardrobe overhaul! 👗🔄
+        Use after major changes to the extraction pipeline or after
+        switching embedding models (e.g. 768D → 1024D).
 
-        💅 QDRANT UPGRADE NOTE:
-        Unlike ChromaDB's rebuild (which triggered the `.name()` error
-        on get_or_create_collection with a custom embedding function),
-        Qdrant's rebuild is clean: delete collection → create fresh →
-        re-index. No protocol drama, no AttributeError ambush! ✨
+        Unlike delete_collection(), we nuke the entire qdrant_dir on disk
+        because Qdrant local mode can leave stale HNSW segment files behind
+        after a collection delete. Those stale files keep the old dimension
+        (e.g. 768D) and cause numpy broadcast errors when the new model
+        produces 1024D vectors. Wiping the folder guarantees a clean slate.
         """
-        logger.info("🔄 Rebuilding vector index from scratch...")
-        try:
-            if self.client.collection_exists(COLLECTION_NAME):
-                self.client.delete_collection(COLLECTION_NAME)
-                logger.info(f"🗑️ Deleted old collection '{COLLECTION_NAME}'")
-        except Exception as e:
-            logger.warning(f"⚠️ Could not delete old collection (non-fatal): {e}")
+        import shutil
 
-        # ── Recreate collection with fresh config ──────────────────
+        logger.info("🔄 Rebuilding vector index from scratch...")
+
+        # ── Close the client before touching the filesystem ────────
+        try:
+            self.client.close()
+        except Exception:
+            pass
+
+        # ── Nuke the entire storage folder ────────────────────────
+        # delete_collection() alone leaves stale HNSW segment files on disk
+        # which causes "(1024,) into shape (768,)" numpy errors on upsert.
+        if os.path.exists(self.qdrant_dir):
+            max_retries = 5
+            deletion_successful = False
+            for i in range(max_retries):
+                try:
+                    shutil.rmtree(self.qdrant_dir)
+                    logger.info(f"🗑️ Deleted Qdrant storage dir '{self.qdrant_dir}'")
+                    deletion_successful = True
+                    break
+                except PermissionError as e:
+                    if i < max_retries - 1:
+                        logger.warning(f"⚠️ PermissionError while deleting {self.qdrant_dir} (attempt {i+1}/{max_retries}). Retrying in 1s...")
+                        time.sleep(1)
+                    else:
+                        logger.error(f"❌ Failed to delete Qdrant storage dir after {max_retries} attempts: {e}")
+                        # Don't raise yet, we want to re-init the client so the engine isn't broken
+                except Exception as e:
+                    logger.error(f"❌ Unexpected error deleting Qdrant storage dir: {e}")
+                    # Re-init client before raising
+                    self.client = QdrantClient(path=self.qdrant_dir)
+                    raise
+
+        # ── Reinitialize client + collection ──────────────────────
+        # We MUST re-init even if deletion failed, otherwise the engine
+        # stays in a "closed" state and breaks all subsequent requests!
+        self.client = QdrantClient(path=self.qdrant_dir)
         self._ensure_collection()
         self._ensure_text_index()
+        self._ensure_payload_indexes()
 
-        return self.index_all_candidates()
+        if os.path.exists(self.qdrant_dir) and not deletion_successful:
+             logger.warning("⚠️ Re-initialized client on existing directory because deletion failed.")
+
+        # ── Force refresh to re-index everything ───────────────────
+        return self.index_all_candidates(force_refresh=True)
 
     def clear_index(self):
         """Delete all documents from the vector database."""
@@ -1191,14 +1300,19 @@ if __name__ == "__main__":
 
         if choice == "1":
             stats = engine.index_all_candidates()
-            print(f"\n✅ Indexed: {stats['indexed']} new, "
-                  f"{stats['already_indexed']} existing, "
+            total_at_start = stats.get("already_indexed", 0)
+            total_now = stats.get("total_in_collection", 0)
+            truly_new = max(0, total_now - total_at_start)
+            updated = max(0, stats.get("indexed", 0) - truly_new)
+            
+            print(f"\n✅ Indexing complete: {truly_new} new, "
+                  f"{updated} updated, "
                   f"{stats['errors']} errors "
                   f"({stats['total_time']}s)")
 
         elif choice == "2":
             stats = engine.rebuild_index()
-            print(f"\n✅ Rebuilt: {stats['indexed']} candidates ({stats['total_time']}s)")
+            print(f"\n✅ Rebuilt: {stats['indexed']} total candidates ({stats['total_time']}s)")
 
         elif choice == "3":
             print("\nPaste your job description (press Enter twice when done):")
