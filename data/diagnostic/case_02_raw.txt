@@ -1,0 +1,673 @@
+# Case 02 | Candidate ID: 100118
+# Annotated name (if any): Li Jing Qiang (Mr)
+# Ethnicity tag: chinese
+# Raw text length: 21348 chars
+# ============================================================
+
+![](_page_0_Picture_0.jpeg)
+
+10, Ang Mo Kio St 65 #03-12 Techpoint Singapore 569059 Tel: (65) 6323-8100
+
+Fax: (65) 6323-3345
+
+# **Li Jing Qiang (Mr)**
+
+# Junior System and Network Administrator
+
+Age: 39yrs old
+
+Nationality: Singaporean
+
+Availability: Immediate
+
+# **EDUCATION**
+
+**2016**
+
+**ITE Choa Chu Kang** 
+
+Higher Nitec in Information Technology
+
+**2005**
+
+**ITE Yishun** 
+
+Nitec in Electronics Engineering
+
+#### **CERTIFICATIONS**
+
+- Certified in Cisco Network Associate (CCNA) 2020
+- C4-iwf System Engineering voice communication, network fundamental, transmission 2015
+- WSQ Certified in Service Professional 2015
+- WSQ Implement Operations for Service Excellence 2014
+
+![](_page_1_Picture_0.jpeg)
+
+10, Ang Mo Kio St 65 #03-12 Techpoint Singapore 569059
+
+Tel: (65) 6323-8100 Fax: (65) 6323-3345
+
+## **SKILLS**
+
+**Cisco Devices:** Nexus 9000, C800, C9300, ISO9000, 9580
+
+**Firewall Configuration:** FortiGate 600E, Palo Alto 1420
+
+**VPN:** FortiClient, RSA
+
+VM Backup/Restore (ESXi), SQL basic edits
+
+**Tools:** SolarWinds, Zabbix, Grafana, WiSX
+
+**Active Directory:** User management, OU updates
+
+**OS:** Windows 7/10, macOS, Server OS
+
+**Ticketing & Monitoring:** ITSM tools, remote support, FTP firmware uploads
+
+## **PROFESSIONAL EXPERIENCES**
+
+**MTS global**
+
+**junior network engineer**
+
+**February 2025 – September 2025 (Completion of Contract)**
+
+#### **Roles & Responsibilities:**
+
+- Installing and Configure network devices such as c9407,9300,1100 router and switches
+- Decom device for switch and router and asset tally.
+- Validation Fibre cable and patching.
+
+![](_page_2_Picture_0.jpeg)
+
+10, Ang Mo Kio St 65 #03-12 Techpoint Singapore 569059
+
+Tel: (65) 6323-8100 Fax: (65) 6323-3345
+
+#### **NTT Pte Ltd**
+
+### **Implementation / System Engineer**
+
+#### **November 2022 – February 2025**
+
+- Backup VM from Exsi Host and restore and update docket.
+- Configure for fortigate 600e ha, policies, objects and upgrade firmware.
+- Configure palo alto 1420 ha, policies, object and upgrade firmware
+- Doing onsite ATM installation of router for DBS and UOB.
+- Mux changes for UOB bank.
+- Stagging of Cisco switch device N900 Nexus and ISO9000 router and other Cisco device, C800.
+- Input iOS version support other brands and Arista.
+- Experienced in burn in test, power failure test switches over, rack and stack.
+- Firmware upgrade.
+- Configuration device for router and switches.
+- Check Cisco licensing applicable for client side.
+- Using VPN to remote to switches using FortiClient.
+- Upload software firmware through ftp.
+- Support client ATM new installation, decom, mux change.
+- Rack and stack activities, burn in test, power failure test.
+- Device such as Cisco switch device n900 Nexus and iso9000 router and c9300 switch device and chassis 9580 10 port, Cisco device, c800 and other brands, e.g. Arista.
+- Migration project activity for MBFC.
+- Tech refresh project in random client company.
+
+![](_page_3_Picture_0.jpeg)
+
+10, Ang Mo Kio St 65 #03-12 Techpoint Singapore 569059
+
+Tel: (65) 6323-8100 Fax: (65) 6323-3345
+
+#### **IT Can Pte Ltd/NCS Pte Ltd**
+
+#### **Desktop Engineer**
+
+#### **August 2020 – October 2022**
+
+#### MINDEF, GOVTECH, Ministry of Health.
+
+- On site/helpdesk configuration, troubleshooting & support on PC, notebooks, printers, peripherals etc.
+- Software and application support for standard MS Office 2016-365 and Windows OS, Outlook email, RSA VPN and various in-house and web-based applications.
+- Co-ordinate with external vendors for hardware servicing & maintenance.
+- Co-ordinate and liaise with helpdesk/service desk and application teams for escalation of cases.
+- Tech refresh of PCs & peripherals.
+- 1st level support for network/server equipment (switches, server, UPS etc.) at remote sites.
+- Management of AD for account creation, password reset and join/unjoin of domain machines.
+- IT Administration and Logistic Support.
+- Provide logistic services such as desktop equipment relocation, video conference, presentation and training equipment.
+- Assets and inventory management.
+- Creation of documentation and test plans.
+
+![](_page_4_Picture_0.jpeg)
+
+10, Ang Mo Kio St 65 #03-12 Techpoint Singapore 569059
+
+Tel: (65) 6323-8100 Fax: (65) 6323-3345
+
+#### **PCCW Solutions Pte Ltd**
+
+**Network Operation Centre/Service Desk**
+
+**November 2019 – May 2020**
+
+**Project: GovTech Infrastructure Operation Command Centre.**
+
+- Monitors the Network Monitoring System and responds to and addresses system generated alerts as needed.
+- Performs various network management and administration tasks remotely on client and FPA networks based on FPA best practices.
+- Manages and maintains the health and "uptime" of client and FPA workstations, servers, routers, switches, firewalls, and related infrastructure operating systems and applications (i.e.: User Management, Backup, Anti-Virus, Email, etc.).
+- Using SolarWinds monitoring for device fault in server host IP address system. Creation of tickets for escalation for down devices.
+- Using Zabbix monitoring tools to identify root problems regarding UPS, ESW, CAMERA, WAP, DOOR, RTU, BOXTEMP, IGX, RSU, GNSS, and RTR status in lamp post project.
+- Using Grafana monitoring tool to check online and offline and no data to verify device status and status condition.
+- Using WISX monitoring tools to trace OG box details and device condition for accuracy of fault related to Door Contact, Circuit Breaker, Water Leakage, temperature plus number for water leakage and temperature to trace last update status.
+- Create incident tickets and inform service desk with device id type and status to inform device fault status and follow up status till field engineer closed status.
+- Optimizes client and FPA's network performance meeting QOC metrics per client SLA's
+
+10, Ang Mo Kio St 65 #03-12 Techpoint Singapore 569059
+
+Tel: (65) 6323-8100 Fax: (65) 6323-3345
+
+- Monitors and ensures the stability of the network infrastructure hosting FPA's Network Monitoring System.
+- Provides after-hours and weekend on-call support.
+- Prepare incident tickets, status reports and recap emails as required.
+- Update procedures and documentation when necessary.
+
+#### **CTC Global Pte Ltd**
+
+#### **Desktop Engineer**
+
+**September 2018 – September 2019 (Completion of Contract)**
+
+**Projects: National Cancer Hospital, Changi General Hospital, Alexandra Hospital, Geylang & Queenstown Polyclinics.**
+
+- PC/Tech Refresh Deployment from Window 7 environment to Window 10.
+- Hardware Break fix for Lenovo & HP PC and laptops.
+- Updating machines into OU Using Active Directory Admin PC.
+- Setup new machine to prepare for software to be install domain registration, install MS Office2016 activate window encryption for laptop using cloning for window 10 with images.
+
+# **NCS**
+
+#### **Desktop Engineer**
+
+**Augst 2017 – August 2018 (Completion of Contract)**
+
+**Project: National Library Board.**
+
+- Perform troubleshooting for client platform-related problems and escalation to L2 and vendors when necessary.
+- Respond promptly to incident, investigate & provide temporary or Permanent resolution of incidents escalated.
+- Monitor the agreed service level, document and maintain the configuration of the system; provide regular reporting to relevant parties.
+
+![](_page_6_Picture_1.jpeg)
+
+10, Ang Mo Kio St 65 #03-12 Techpoint Singapore 569059
+
+Tel: (65) 6323-8100 Fax: (65) 6323-3345
+
+• Install Application, Troubleshoot Application on public station and configure from window 7 andWindow 10 and format pc machine such as Printer, Scanner, configure device port number for Scanner and connection of ENETS devices Membership card and iPad devices for using web app ShareDrive, Multimedia station, Audio video station.
+
+- Reimage Window 10 application for public station reader corner such as e newspaper, OPAC, and counter desk pc and hardening program application.
+- Remote troubleshooting by using remote login such as Bomgar to onsite services and configure
+- Symantec Endpoint Protection Manager group and clear pass setting to trouble shoot software issues.
+- Deploying new machine on new NLB side.
+- Network Patching and Checking Lan Port for active internet connection, set up new station on for reimaging and deploying.
+- Attended to public station such as ekiosk, reservation locker, scanning book station, gate panel, book borrowing station, book drop station, Power cycle, testing hardware, Rewire and reconnecting cable, configure device port number and ENETS devices.
+
+#### **Ezworld Pte Ltd**
+
+#### **Sales and Support Executive**
+
+#### **September 2016 – August 2017**
+
+- Replace hardware such as power supply, graphic card on desktop machine and checking on the motherboard capabilities for the appropriate devices and implement to customer with a quotes format and install application such as Symantec endpoint or trend net antivirus, MS office and relevant software.
+- Mac OS replace hardware install application and format and upgrade OS.
+- Test out graphic application and test the temperature of the PC system.
+
+![](_page_7_Picture_0.jpeg)
+
+10, Ang Mo Kio St 65 #03-12 Techpoint Singapore 569059
+
+Tel: (65) 6323-8100 Fax: (65) 6323-3345
+
+• Set up CCTV system on ad hoc basis for the new office and manage vendor for cabling works.
+
+Promote POS system accounting software and View Quest.
+
+### **ST Electronics Info-Communication System**
+
+**Service Engineer**
+
+**August 2014 – September 2016**
+
+**Projects: Pasir Laba Army Camp**.
+
+- Write reports operation duties in ops room doing administrative duties.
+- Pass hand over duties to next shift.
+- Troubleshooting and configuration of system such as small radio CCTV or small cisco switch, using ping and in web portal configure setting and frequency.
+- Monitoring dangerous area gates and report timely status in what's app n through wacky talkies for clearance area.
+
+**Sktsys Pte Ltd**
+
+**IT Desktop Support**
+
+**December 2011 – July 2014**
+
+**Projects: Lasalle College of the Arts.**
+
+- Software installation and configure printer setting, for Windows 7 and below and Mac from OS 10.5 above.
+- Perform Helpdesk functions such as call handling, advising students on student portal or webmail.
+- Create cases in ticketing system, and other related IT issues relating to Windows and Mac.
+- Setup Audio-Video (AV) systems and projectors and WIFI for students and staff.
+
+![](_page_8_Picture_0.jpeg)
+
+10, Ang Mo Kio St 65 #03-12 Techpoint Singapore 569059 Tel: (65) 6323-8100
+
+Fax: (65) 6323-3345
+
+- Oracle website and HR Systems troubleshooting.
+- Network configuration such as Static IP address and application issues such as mail merge.
+
+**Aetos Security Consultant Pte Ltd**
+
+**Protection Officer**
+
+**January 2008 – January 2010**
+
+================================================================================
+=== FULL OCR TEXT (may contain duplicates) ===
+================================================================================
+
+~) Combuilder Pte Ltd
+(© 10, Ang Mo Kio St 65
+#03-12 Techpoint
+
+COMBUILDER Singapore 569059
+Tel: (65) 6323-8100
+
+Fax: (65) 6323-3345
+
+Li Jing Qiang (Mr)
+Junior System and Network Administrator
+Age: 39yrs old
+Nationality: Singaporean
+
+Availability: Immediate
+
+EDUCATION
+
+2016
+ITE Choa Chu Kang
+
+Higher Nitec in Information Technology
+
+2005
+ITE Yishun
+
+Nitec in Electronics Engineering
+
+CERTIFICATIONS
+e Certified in Cisco Network Associate (CCNA) 2020
+
+e C4-iwf System Engineering voice communication, network fundamental,
+transmission 2015
+
+e WSQ Certified in Service Professional 2015
+
+e WSQ Implement Operations for Service Excellence 2014
+
+1
+
+~) Combuilder Pte Ltd
+) 10, Ang Mo Kio St 65
+#03-12 Techpoint
+
+COMBUILDER Singapore 569059
+Tel: (65) 6323-8100
+
+Fax: (65) 6323-3345
+
+SKILLS
+
+Cisco Devices: Nexus 9000, C800, C9300, ISO9000, 9580
+Firewall Configuration: FortiGate 600E, Palo Alto 1420
+VPN: FortiClient, RSA
+
+VM Backup/Restore (ESXi), SQL basic edits
+
+Tools: SolarWinds, Zabbix, Grafana, WiSX
+
+Active Directory: User management, OU updates
+
+OS: Windows 7/10, macOS, Server OS
+
+Ticketing & Monitoring: ITSM tools, remote support, FTP firmware uploads
+
+PROFESSIONAL EXPERIENCES
+
+MITS global
+
+junior network engineer
+
+February 2025 - September 2025 (Completion of Contract)
+Roles & Responsibilities:
+
+e Installing and Configure network devices such as c9407,9300,1100 router and
+switches
+
+e Decom device for switch and router and asset tally.
+
+e Validation Fibre cable and patching.
+
+Combuilder Pte Ltd
+
+©& 10, Ang Mo Kio St 65
+
+#03-12 Techpoint
+
+COMBUILDER Singapore 569059
+
+Tel: (65) 6323-8100
+Fax: (65) 6323-3345
+
+NTT Pte Ltd
+
+Implementation / System Engineer
+
+November 2022 - February 2025
+
+Backup VM from Exsi Host and restore and update docket.
+
+Configure for fortigate 600e ha, policies, objects and upgrade firmware.
+Configure palo alto 1420 ha, policies, object and upgrade firmware
+Doing onsite ATM installation of router for DBS and UOB.
+
+Mux changes for UOB bank.
+
+Stagging of Cisco switch device N900 Nexus and ISO9000 router and other Cisco
+device, C800.
+
+Input iOS version support other brands and Arista.
+
+Experienced in burn in test, power failure test switches over, rack and stack.
+Firmware upgrade.
+
+Configuration device for router and switches.
+
+Check Cisco licensing applicable for client side.
+
+Using VPN to remote to switches using FortiClient.
+
+Upload software firmware through ftp.
+
+Support client ATM new installation, decom, mux change.
+
+Rack and stack activities, burn in test, power failure test.
+
+Device such as Cisco switch device n900 Nexus and iso9000 router and c9300 switch
+device and chassis 9580 10 port, Cisco device, c800 and other brands, e.g. Arista.
+
+Migration project activity for MBFC.
+
+Tech refresh project in random client company.
+
+~) Combuilder Pte Ltd
+) 10, Ang Mo Kio St 65
+#03-12 Techpoint
+
+COMBUILDER Singapore 569059
+Tel: (65) 6323-8100
+
+Fax: (65) 6323-3345
+
+IT Can Pte Ltd/NCS Pte Ltd
+Desktop Engineer
+August 2020 - October 2022
+
+MINDEF, GOVTECH, Ministry of Health.
+
+e Onsite/helpdesk configuration, troubleshooting & support on PC, notebooks,
+printers, peripherals etc.
+
+e Software and application support for standard MS Office 2016-365 and Windows OS,
+Outlook email, RSA VPN and various in-house and web-based applications.
+
+e Co-ordinate with external vendors for hardware servicing & maintenance.
+
+e Co-ordinate and liaise with helpdesk/service desk and application teams for
+escalation of cases.
+
+e Tech refresh of PCs & peripherals.
+
+e ist level support for network/server equipment (switches, server, UPS etc.) at
+remote sites.
+
+e Management of AD for account creation, password reset and join/unjoin of domain
+machines.
+
+e IT Administration and Logistic Support.
+
+e Provide logistic services such as desktop equipment relocation, video conference,
+presentation and training equipment.
+
+e Assets and inventory management.
+
+e Creation of documentation and test plans.
+
+Combuilder Pte Ltd
+
+©& 10, Ang Mo Kio St 65
+
+#03-12 Techpoint
+
+COMBUILDER Singapore 569059
+
+Tel: (65) 6323-8100
+Fax: (65) 6323-3345
+
+PCCW Solutions Pte Ltd
+
+Network Operation Centre/Service Desk
+
+November 2019 - May 2020
+
+Project: GovTech Infrastructure Operation Command Centre.
+
+Monitors the Network Monitoring System and responds to and addresses system
+generated alerts as needed.
+
+Performs various network management and administration tasks remotely on client
+and FPA networks based on FPA best practices.
+
+Manages and maintains the health and "uptime" of client and FPA workstations,
+servers, routers, switches, firewalls, and related infrastructure operating systems
+and applications (i.e.: User Management, Backup, Anti-Virus, Email, etc.).
+
+Using SolarWinds monitoring for device fault in server host IP address system.
+Creation of tickets for escalation for down devices.
+
+Using Zabbix monitoring tools to identify root problems regarding UPS, ESW,
+CAMERA, WAP, DOOR, RTU, BOXTEMP, IGX, RSU, GNSS, and RTR status in lamp post
+project.
+
+Using Grafana monitoring tool to check online and offline and no data to verify
+device status and status condition.
+
+Using WISX monitoring tools to trace OG box details and device condition for
+accuracy of fault related to Door Contact, Circuit Breaker, Water Leakage,
+temperature plus number for water leakage and temperature to trace last update
+status.
+
+Create incident tickets and inform service desk with device id type and status to
+inform device fault status and follow up status till field engineer closed status.
+
+Optimizes client and FPA's network performance meeting QOC metrics per client
+SLA's
+
+~) Combuilder Pte Ltd
+(© 10, Ang Mo Kio St 65
+#03-12 Techpoint
+
+COMBUILDER Singapore 569059
+Tel: (65) 6323-8100
+
+Fax: (65) 6323-3345
+
+e Monitors and ensures the stability of the network infrastructure hosting FPA's
+Network Monitoring System.
+
+e Provides after-hours and weekend on-call support.
+e Prepare incident tickets, status reports and recap emails as required.
+
+e Update procedures and documentation when necessary.
+
+CTC Global Pte Ltd
+Desktop Engineer
+September 2018 - September 2019 (Completion of Contract)
+
+Projects: National Cancer Hospital, Changi General Hospital, Alexandra Hospital, Geylang
+& Queenstown Polyclinics.
+
+e PC/Tech Refresh Deployment from Window 7 environment to Window 10.
+
+Hardware Break fix for Lenovo & HP PC and laptops.
+e Updating machines into OU Using Active Directory Admin PC.
+
+e Setup new machine to prepare for software to be install domain registration, install
+MS Office2016 activate window encryption for laptop using cloning for window 10
+with images.
+
+NCS
+
+Desktop Engineer
+
+Augst 2017 - August 2018 (Completion of Contract)
+Project: National Library Board.
+
+e Perform troubleshooting for client platform-related problems and escalation to L2
+and vendors when necessary.
+
+e Respond promptly to incident, investigate & provide temporary or Permanent
+resolution of incidents escalated.
+
+e Monitor the agreed service level, document and maintain the configuration of the
+system; provide regular reporting to relevant parties.
+6
+
+Combuilder Pte Ltd
+
+©& 10, Ang Mo Kio St 65
+
+#03-12 Techpoint
+
+COMBUILDER Singapore 569059
+
+Tel: (65) 6323-8100
+Fax: (65) 6323-3345
+
+Install Application, Troubleshoot Application on public station and configure from
+window 7 andWindow 10 and format pc machine such as Printer, Scanner, configure
+device port number for Scanner and connection of ENETS devices Membership card
+and iPad devices for using web app ShareDrive, Multimedia station, Audio video
+station.
+
+Reimage Window 10 application for public station reader corner such as e
+newspaper, OPAC, and counter desk pc and hardening program application.
+
+Remote troubleshooting by using remote login such as Bomgar to onsite services and
+configure
+
+Symantec Endpoint Protection Manager group and clear pass setting to trouble
+shoot software issues.
+
+Deploying new machine on new NLB side.
+
+Network Patching and Checking Lan Port for active internet connection, set up new
+station on for reimaging and deploying.
+
+Attended to public station such as ekiosk, reservation locker, scanning book station,
+gate panel, book borrowing station, book drop station, Power cycle, testing
+hardware, Rewire and reconnecting cable, configure device port number and ENETS
+devices.
+
+Ezworld Pte Ltd
+
+Sales and Support Executive
+
+September 2016 - August 2017
+
+Replace hardware such as power supply, graphic card on desktop machine and
+checking on the motherboard capabilities for the appropriate devices and implement
+to customer with a quotes format and install application such as Symantec endpoint
+or trend net antivirus, MS office and relevant software.
+
+Mac OS replace hardware install application and format and upgrade OS.
+
+Test out graphic application and test the temperature of the PC system.
+
+~) Combuilder Pte Ltd
+(© 10, Ang Mo Kio St 65
+#03-12 Techpoint
+
+COMBUILDER Singapore 569059
+Tel: (65) 6323-8100
+
+Fax: (65) 6323-3345
+
+e Set up CCTV system on ad hoc basis for the new office and manage vendor for
+cabling works.
+
+Promote POS system accounting software and View Quest.
+
+ST Electronics Info-Communication System
+
+Service Engineer
+
+August 2014 - September 2016
+
+Projects: Pasir Laba Army Camp.
+e Write reports operation duties in ops room doing administrative duties.
+e Pass hand over duties to next shift.
+
+e Troubleshooting and configuration of system such as small radio CCTV or small cisco
+switch, using ping and in web portal configure setting and frequency.
+
+e Monitoring dangerous area gates and report timely status in what’s app n through
+wacky talkies for clearance area.
+
+Sktsys Pte Ltd
+
+IT Desktop Support
+
+December 2011 - July 2014
+Projects: Lasalle College of the Arts.
+
+e Software installation and configure printer setting, for Windows 7 and below and
+Mac from OS 10.5 above.
+
+e Perform Helpdesk functions such as call handling, advising students on student
+portal or webmail.
+
+e Create cases in ticketing system, and other related IT issues relating to Windows and
+Mac.
+
+e Setup Audio-Video (AV) systems and projectors and WIFI for students and staff.
+
+@
+
+COMBUILDER
+
+Combuilder Pte Ltd
+10, Ang Mo Kio St 65
+#03-12 Techpoint
+Singapore 569059
+Tel: (65) 6323-8100
+Fax: (65) 6323-3345
+
+e Oracle website and HR Systems troubleshooting.
+
+e Network configuration such as Static IP address and application issues such as mail
+
+merge.
+
+Aetos Security Consultant Pte Ltd
+Protection Officer
+
+January 2008 - January 2010
+

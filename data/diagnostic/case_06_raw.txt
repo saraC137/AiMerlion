@@ -1,0 +1,240 @@
+# Case 06 | Candidate ID: 60628
+# Annotated name (if any): Mhd Hafiz bin Ismail
+# Ethnicity tag: malay
+# Raw text length: 18645 chars
+# ============================================================
+
+Desktop Support Engineer | Orange Business Services Pte Ltd Singapore 
+(+65) 9295 5665 | mhdhafiz24434@gmail.com | 42 years old | Bedok, Singapore
+Education	MCSE 2000, MCDBA, CCNA, LINUX, CEH / IT Level 2 (MLVK cert) (2003) 
+Nationality	Malaysian
+Summary
+A focused, determined and resourceful engineer with experience in remote and onsite troubleshooting, IT deployment and upgrades to servers and workstations.
+Implementation of all server and workstation upgrades in a timely and efficient manner.
+Key capabilities include:
+Vast experience in management and office relocations and setup of network, servers and PCs.
+Competent in resolving issues efficiently while managing any risks along the way while ensuring a high quality of work.
+Great management and interpersonal skills to motivate and lead those around me.
+Able to learn, absorb and adapt to new information and implement it to environment seamlessly.
+Efficient in suggestion of networking, workstation and server upgrades to an infrastructure.
+Education / Certification
+MCSE 2000			2003
+CCNA				2003
+LINUX				2003
+MLVK Level 2 (certificate)	2003
+Employment History
+Desktop Support Engineer | Orange Business Services Pte Ltd (outsource by Axiom Technologies Pte Ltd) | 23rd October 2025 – Current | SGD 3,600
+Perform stock and asset inventory.
+Assist daily ServiceNow ticket request.
+Troubleshoot onsite IT related issues (monitor, laptop, docking)
+Assist user mobile phone related to work (MobilePass, Microsoft Authenticator, Intune, Company portal)
+Perform an L1 to L3 troubleshoot (reimage, deployed, resolving both software and hardware issues)
+Desktop Support Field Engineer | Total IT Global Pte Ltd – Munich RE | 24th May 2022 – 23rd May 2024 | SGD 3,200
+Assist daily IT related issue through ServiceNow.
+Configure Active directory for multiple client accounts.
+Rebuild / reimage windows through DDWI.
+Perform Windows Operating System migrations.
+Assist on other IT hardware (SMR, mobile phone, printers, monitors, etc.)
+Prepare monthly IT reports.
+Perform hardware replacement for Dell laptop (lcd, battery, heatsink etc.)
+Software installation through System Centre Configuration Manager (SCCM)
+Assist user on Citrix HVD virtual machine.
+System Engineer | First-Tel Tech Pte Ltd | 18th October 2021 – 20th May 2022 | Salary SGD 2750+200 fix allowance
+Server (windows) maintenance and inventory.
+Configure Active directory for multiple client accounts.
+Configure Office 365 admin portal for multiple client accounts.
+Perform Windows Operating System migrations.
+Troubleshoot IT related issues (printer, monitors, access point, etc.)
+Helpdesk and onsite support rotations.
+Perform daily troubleshooting on MacOS and Windows (7 and 10) on daily basis.
+Key technical competencies include:
+Microsoft (Excel, Word, Presentation, Access, One Drive, Teams & Outlook (MacOS and Windows)
+Active Directory
+Azure
+Shadow Protect
+Sophos Endpoint Agent
+Forticlient VPN, Stormshield SSL VPN, Sophos SSL VPN
+Times Pay8
+IT Engineer | SERVLINK Technology Resources Pte Ltd | 4th November 2019 – 4th November 2020 | Salary SGD 2650
+Handling seat refresh and decomissioning projects.
+Training engineers for projects (Decommission and seat refresh)
+Training engineers to troubleshoot/resolve common pc/laptop issues.
+Training engineers to troubleshoot/resolve common printer issues.
+Key technical competencies include:
+Microsoft (Excel, Word, Presentation, Access, Teams & Outlook)
+VPN (BigIP, FortiClient, Juniper, Cisco AnyConnect, OpenVPN, Citrix)
+IBM (Lotus Notes and BigFix)
+Active Directory.
+System Centre Configuration Manager (SCCM)
+Symantec, Panda, Sentinel and Fortinet.
+Skype for Business, Zoom and Webex.
+AnyDesk and Teamviewer.
+Xerox, HP and Canon printers web configurations.
+Key accomplishment includes:
+Create an installation manual for clients.
+Create an installation manual for engineers.
+Setup, troubleshoot and resolve Windows/Mac issues.
+Setup, troubleshoot and resolve email issues (outlook and lotus notes)
+Setup, troubleshoot and resolve Microsoft Office issues.
+Setup, troubleshoot and resolve video conferencing issues.
+Setup, troubleshoot and resolve Virtual Private Network issues.
+Reimage Windows Operating System.
+Installing, configuring and testing installed programs for clients (Singapore Airlines, WorldVision, Panasonic, Singtel and TeleDirect).
+IT Support Engineer | Aviva Asia Pte Ltd (outsource by Adventus Pte Ltd) | 1st May 2019 – 31st October 2019 (6 months contract) | Salary SGD 2500
+I was part of deployment team performing system migration for more than 1500 Notebook and desktop to the new SOE environment.
+I was assigned to assist L1 helpdesk to resolve IT issues through phone calls, remote and emails.
+Perform a level 1 to level 3 support for 100 users at level 1 and level 2 floor of Mezzanine, SGX Centre 2 Singapore on a daily basis.
+Update and send reports to the Manager of Customer and Call Center (not part of SOP) on any IT related outstanding issues.
+Key technical competencies include:
+Troubleshoot and resolved Microsoft Office Issue (Excel, Word, Presentation, Access & Outlook).
+Troubleshoot and resolved printer issue (HP Laser Jet E55040, M602, M608, M527, M426FDN, P4015, Canon ir-ADV 4245, 4251, 6255, C5250, C5560 and Brothers DCP-7030)
+Troubleshoot and resolved real-time IT issues (monitor, software and hardware).
+Assist network team on a basic network issue.
+Assist server team on a basic server issue.
+Hands on troubleshooting and resolving issues with individual user.
+Troubleshoot and resolve real-time MAC book issues.
+Changing server backup tape.
+Configuring active directory for all user.
+Configure, setup and resolve office issues.
+Configure, setup and resolve remote desktop issues.
+Configure, setup and resolve network issues.
+Configuring and installing software (Apache Jmeter, Apache Directory Studio, Apache Tomcat, Cisco AMP endpoint, Cisco WebEx Meetings, Phishme, Titus Enterprise Client Service, Red Hat JBoss Developer, Accelio Designer and Oracle SQL developer).
+Key accomplishment includes:
+Manage to compile and resolved all outstanding issues left by previous engineer.
+Perform housekeeping for both windows and MAC user once being assigned to support Aviva SGX Level 1 and 2 users (not part of job scope and /or SOP).
+Perform housekeeping for all printers.
+Send a weekly email to HOD on IT outstanding issue (not part of job scope and /or SOP). 
+Assist senior engineer on cases that they are not able to resolved.
+Assist and train L1 helpdesk, deployment and support team.
+Always giving out opinion during monthly meeting on how to improve the services (i.e implementing of ticketing system, to create SOP for L1 helpdesk and L2 engineer steps or manual).
+Was praised by the Manager for good performances through email.
+Managed to resolve issue regarding IBM® Access Client Solutions, IBM® iSeries etc.
+Build up a good relationship with vendor in short period of time.
+Customer Engineer, Retail Practice Infrastructure Services and Solutions | Fujitsu Singapore Pte Ltd | 
+11th June 2018 – 28th February 2019 | Salary SGD 2400
+Monitor retail Point of Sale (i.e. McDonalds, Takashimaya, Long John Silver, Smiggle) on daily basis.
+Monitor retail network connections and internet usage of retail on daily basis.
+Monitor retail server of any disruptions and/or failure on daily basis.
+Configure, setup and troubleshoot wireless equipment for retails if an issue was reported.
+Configure, setup and troubleshoot for retails if an issue was reported.
+Configure, setup and troubleshoot kitchen clients for retails if an issue was reported.
+Provide advice, guide and recommends the end user on resolving any encounter issues.
+Perform onsite repair of devices i.e. Dell client, Point of Sales equipment, Self-Ordering Kiosk device, printers, cash drawers and others even though it is not in the job scope (self-initiative on resolving the issue).
+Working on shift environment and willing to work overtime and/or extra hours if required.
+Build up a good relationship with all retail store clients (i.e. Managers and staff level).
+Resolutions of any issue reported are based on “time resolve”.
+Key technical competencies include:
+Wireless equipment (Singtel ONT, Cisco, Ruckus, TP-Link, PEPWAVE)
+Tools use for network configurations (Putty, Speedtest)
+Ticketing software (ServiceNow)
+Install, configure and setup store receipt printer.
+Install, configure and setup Server, Switches, Access Point, Point of Sale devices, Self-Ordering Kiosk, kitchen Dell clients for newly open store.
+Preventive maintenance on all store equipment (i.e. server, switches, routers, SOK, POS, cash drawer, printers, barcode scanner, cashless devices, access point and wire/wireless devices).
+Key accomplishment includes:
+Respond to daily ticketing system.
+Perform a two-way communication with helpdesk and giving advice on certain issues reported.
+Standby and backup for another engineer if required (24-hour service).
+Traveling onsite to perform troubleshooting and/or rectifying of any related retails issue reported (island wide).
+Attending and resolving severity one (urgent) cases in within the time frame given.
+Backup and restore of Server, Self-ordering Kiosk and Point of Sale data if required.
+Deploy, configure and setup of faulty equipment (I.e. Server, Switches, Routers etc.) if required.
+Repair and configure devices (Hard disk, printers, cash drawers etc.) if required.
+Reconfigure network (switch, routers and access point) settings if required.
+Installing and configuring a new hard drive for Self-Ordering Kiosk and Point of Sales devices.
+Perform a documentations update on lease equipment to retail stores.
+Perform a software update on retail store applications if required.
+Liaise with third party vendor if required.
+Train colleagues in workplace on how to analyze, rectify and resolve retail store issues.
+Systems Technician / Engineer| Sigma3 Pte Ltd | 16th January 2017 – 9th May 2018 | Salary SGD 2300
+Monitor Singtel STM reports on daily basis.
+Monitor and configure Solution IP and InnGate system on daily basis.
+Monitor daily WIFI usage for all Sigma3 clients.
+Configure and setup wireless equipment for hospitality/malls/Koufu/McDonald’s and other client locations.
+Perform a daily and hourly checklist on all wireless equipment that is under the care of Sigma3.
+Troubleshoot and/or configure a new or faulty wireless equipment.
+Provide advice, guide and recommends the end user / clients on resolving wireless issues.
+Perform a command (i.e. telnet, ping, ipconfig etc.) to resolve certain networking issues.
+Shift lead during working hours.
+Promote to Systems Engineer.
+Shift work environment.
+Key technical competencies include:
+Wireless equipment (Singtel ONT, Aruba, Netgain, Antlabs, Ruckus, Cisco, Tplink, Mikrotik, FortiGate)
+Putty, Advanced IP Scanner, ActiveXperts, WiFi Overview 360, Speedtest, Network Scanner, Nperf and others.
+Configure and setup network printer.
+Configure and setup Monitoring Application Server for hotels.
+Preventive maintenance on wireless equipment.
+Key accomplishment includes:
+Responded to daily ticketing system.
+Answering calls for clients with any networking and wireless connectivity issues.
+Perform troubleshooting with hotel guests that were not able to connect through hotel network.
+Travelled onsite if issue could not be resolved remotely.
+Analyze Singtel wireless equipment and submit reports to Singtel on daily basis.
+Liaise with third party vendor (Antlabs, Singtel, cabling contractors etc.) if require.
+Training colleagues in workplace on how to analyze, rectify, resolve and submit reports to Singtel.
+Training colleagues in workplace on how to setup and configure wireless equipment.
+Training colleagues in workplace on how to resolve wireless / networking issues.
+Training colleagues in workplace on how to resolve mobile/chromecast/Apple TV or other device WIFI issues.
+Training colleagues in workplace on how to resolve issues with command.
+Received an award for the highest closing ticket for year 2017.
+Received an award for KPI’s achievement for the month of November 2017.
+System Administrator | Computer Analysts and Recovery Experts (C.A.R.E) Pte Ltd | November 2015 – November 2016 | Salary SGD 2100
+Administrate users and groups for Microsoft Exchange, Office 365 and Active Directory
+Perform a monthly maintenance on servers, firewalls and workstations.
+Knowledge of DNS, DHCP and configurations of WIFI access points at an intermediate level.
+Installation of Windows Server 2012 R2 and required service packages on workstations.
+Configuration of WSUS (windows server update service).
+Installation and configuration of Symantec Backup Exec.
+Installation and configuration of Cobian backup software and servers and workstation.
+Used patch management procedures for workstations and servers
+Provide system hardware recommendations and implementation on workstations and servers.
+Key technical competencies include:
+Windows workstations (Windows ME – Windows 10) and servers (2003 – 2012)
+Active Directory, Exchange, Office 365, DNS and DHCP.
+Setup and configure of printers and scanners
+Preventive maintenance on servers and workstations.
+Implement patches to server and from server to workstations through WSUS.
+Key accomplishment includes:
+Responded to daily ticketing system.
+Answered any incoming calls for clients with any IT issues.
+Travelled onsite if issue could not be resolved remotely.
+Updated computer management system with equipment, user or contact change.
+Uploaded SIW (System Information for Windows) or Belarc Advisor (audit software) to C.A.R.E computer management system (CMS) after completed the preventive maintenance on any PCs or servers.
+Trained colleagues on how to perform the preventive maintenance on servers, firewalls and workstations.
+Trained colleagues on how to setup and configure printers and scanners.
+Administered backup systems like Symantec Backup Exec, Cobian and Shadow Protect.
+Liaise with external vendors – server warranty, third party software (hotel, accounts, sap), building contractors and cleaning service to improve service level.
+Specialist, Operations | NCS Pte Ltd | Ang Mo Kio, Singapore | Mar 2015 – November 2015 | Salary SGD 2000
+		Perform a daily basis school TA task which includes Active Directory, LAN, printers, scanners, projectors or any IT devices including servers.
+Executive IT | Century Total Logistics Sdn. Bhd. | Johor, Malaysia | Mar 2008 – Mar 2015 (6 years 9 months) Salary MYR 3,550
+       Identifies, researches, and resolves technical problems and concerns of staff. Answers inquiries in person and via
+telephone, e-mail and voice mail concerning the use of computer hardware and software, including printing, word processing, electronic mail, and operating systems.
+Establishes and maintains policies, procedures and standards relating to company's standard operating procedure. Resolve computer software and hardware problems for all employees. Consults with users to determine source of specific error and recommend solution. May set up hardware for employees and maintain network and telecommunications systems. Reviews, evaluates, designs, implements and maintains company databases. Consult with users to determine future needs. Investigates, evaluates, recommends and upgrades hardware and software to meet company requirements. Prepares and maintains documentation for current network platform, backup and printing procedures. Always be prepared for any computer errors after working hours and/or during holidays. Perform technical support on VLCC (Titan Scorpio and Titan Neptune) under the supervision of vessels Captain. Perform the monthly audit for not less than 100 PCs. Maintain SAP and WMS systems. Maintaining, configuring and monthly backup for Tradeweb, Intimax (customs) and Tariff Finder systems. Good with Windows ME, Windows XP, Windows Vista, Windows 7, Windows 8, SQL Server® 2008 R2 SP2, Windows Server
+2008 R2 Standard and Linux CentOS.
+Warehouse Supervisor | GT Resources Sdn. Bhd. | Johor, Malaysia | Jan 2006 - Mar 2008 (2 years) Salary MYR 1,400
+Supervises and coordinates activities of workers concerned with ordering, receiving, storing, inventorying, issuing, and shipping materials, supplies, tools, equipment, and parts, in stockroom or warehouse. Plans layout of stockroom, warehouse, and other storage areas, considering turnover, size, weight, and related factors of items stored. Consult employees on care and preservation of items received, stored, and shipped, methods and use of equipment in handling, storing, maintaining, and shipping stock, and related problems. Review records for accuracy of information and compliance with established procedures, and to determine adequacy of stock levels. Schedules work for special and periodic inventories. Trace history of items to determine reasons for discrepancies between inventory and stock-control records and recommends remedial actions to resolve discrepancies.
+IT Support | JB Computer (also known as Otawan Sdn. Bhd) | Johor, Malaysia | Jan 2005 - Jan 2006 (1 year) Monthly Salary MYR 1200
+Installing and configuring computer systems and networks. Talk to staff and/or clients through a series of actions directly or over the telephone. Troubleshooting/diagnose system and network problems and solving hardware/software faults. Resolve any issues for PCs or laptop. Replacing parts as required (if needed). Run network applications to support systems and users. Setup new users account. Respond within agreed time limits to call-outs. Work continuously on a task until completion (or referral to third parties, if appropriate). Prioritizing and managing several open cases at one time. Testing and evaluating new technology. Conduct electrical safety checks on computer equipment.
+Referee List
+PERSONAL DETAILS
+NAME	MUHAMMAD HAFIZ BIN ABU BAKAR
+EMAIL			  	mhdhafiz24434@gmail.com 
+EXPECTED SALARY		  SGD 4,000 (negotiable)
+NOTICE			  None
+REASON FOR LEAVING	Career advancement
+With all due respect, I sincerely hope that the above information will satisfy the needs of your organizations. Your positive feedback to my application is extremely appreciated.
+Thank You.
+Referee 1 | Referee 1
+Referee’s Name | Mohamad Azlin Dzulkifli
+Organisation Name: | Century Total Logistics Sdn Bhd
+Designation: | General Manager
+Contact No: | +6012 – 773 7987
+Relationship: | General Manager
+Email Address: | azlin@century.com.my
+Referee 2 | Referee 2
+Referee’s Name | Sayeed Mohammed Nizamuddin
+Organisation Name: | Munich Reinsurance Singapore Pte Ltd
+Designation: | Manager, Service
+Contact No: | +65 – 8233 8752
+Relationship: | Employer
+Email Address: | msayeed@munichre.com
+

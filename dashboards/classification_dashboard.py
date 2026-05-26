@@ -54,6 +54,10 @@ from flask import (
     abort, redirect, url_for, g
 )
 
+# 🆕 ML-powered job role prediction
+from job_role_predictor import HybridClassifier
+_hybrid_classifier = HybridClassifier()  # Loads .pkl files once at startup
+
 # =============================================================================
 # 🔧 LOGGING
 # =============================================================================
@@ -1628,12 +1632,55 @@ def auto_classify_candidate(candidate_id: int) -> Optional[Dict]:
     ).fetchone():
         return None
 
+    # ── 🆕 HYBRID: ML model + keyword classification ─────────────────
+    # Step A: Run keyword classifier (original behavior)
     result = classifier.classify(anns, candidate_id)
+
+    # Step B: If hybrid ML model is available, enhance with ML prediction
+    if _hybrid_classifier and _hybrid_classifier.ml_available:
+        try:
+            # Fetch raw resume text for ML prediction
+            raw_row = db.execute(
+                "SELECT raw_text FROM raw_extractions "
+                "WHERE candidate_id = ? ORDER BY extraction_timestamp DESC LIMIT 1",
+                (candidate_id,)
+            ).fetchone()
+            raw_text = raw_row["raw_text"] if raw_row else ""
+
+            if raw_text and len(raw_text.strip()) > 100:
+                ml_pred = _hybrid_classifier.ml_predictor.predict(raw_text, top_n=5)
+
+                if ml_pred.get("predicted_role"):
+                    ml_function = ml_pred.get("function", "Others")
+                    ml_conf = ml_pred.get("confidence", 0.0)
+
+                    # ML overrides keywords when confident (≥25%) and not "Others"
+                    if ml_conf >= 0.25 and ml_function != "Others":
+                        result["function"] = ml_function
+                        result["function_conf"] = min(ml_conf + 0.3, 0.99)
+                        result["function_source"] = "ml_model"
+                    # Both agree → confidence boost
+                    elif ml_function == result["function"] and ml_function != "Others":
+                        result["function_conf"] = min(result["function_conf"] + 0.15, 0.99)
+                        result["function_source"] = "hybrid_agree"
+
+                    # Store the predicted role in reasoning
+                    result["predicted_role"] = ml_pred["predicted_role"]
+                    result["role_confidence"] = ml_conf
+                    result["top_roles"] = ml_pred.get("top_predictions", [])
+        except Exception as e:
+            logger.warning(f"⚠️ ML prediction failed for {candidate_id}: {e}")
+    # ── End hybrid block ──────────────────────────────────────────────
+
     now = datetime.datetime.now().isoformat()
 
     reasoning = json.dumps({
         "function_top3": result["function_top3"],
         "industry_top3": result["industry_top3"],
+        "predicted_role": result.get("predicted_role"),
+        "role_confidence": result.get("role_confidence"),
+        "top_roles": result.get("top_roles", []),
+        "function_source": result.get("function_source", "keywords"),
     })
 
     try:

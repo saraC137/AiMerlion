@@ -1,0 +1,71 @@
+# Case 04 | Candidate ID: 101576
+# Annotated name (if any): Li Wenbo
+# Ethnicity tag: chinese
+# Raw text length: 3861 chars
+# ============================================================
+
+Data Analyst | AI & Data Science +65 92785190 | liwenbo0066@gmail.com
+
+### Profile
+
+Data Science graduate from the University of Western Australia (UWA) with a strong foundation in data analysis, statistical modelling, data warehousing, and visualization. Experienced in data cleaning, exploratory data analysis, dashboard development, and operational reporting through internship and academic projects. Skilled in Python, SQL, Tableau, and PowerBI, with project experience spanning multi-agent AI systems and dimensional data modelling.
+
+### Education
+
+### University of Western Australia (UWA) 2022 – 2025
+
+Bachelor of Data Science
+
+## Experience
+
+#### Data Science & IT Intern Feb 2025 – May 2025
+
+Path of Hope
+
+Processed, cleaned, and validated organizational datasets used for annual reporting and internal analytics, ensuring data accuracy and consistency across multiple data sources. Conducted exploratory data analysis using Python (Pandas, NumPy) to identify patterns and anomalies in operational data, supporting internal reporting and decision-making. Developed data visualizations and reporting dashboards to present key performance metrics and organizational insights. Collaborated with cross-functional teams to collect, structure, and standardize operational datasets used in reporting processes.
+
+## Procurement Data Analytics Intern Nov 2024 – Feb 2025
+
+Singtel
+
+Managed and analyzed supplier onboarding datasets to ensure accuracy and completeness of vendor records within procurement systems. Maintained and updated supplier data in the AcuBuy platform, improving data consistency across supplier profiles and procurement records. Monitored onboarding progress across vendors and generated operational reports to track procurement workflow performance and vendor setup timelines. Investigated recurring supplier data inconsistencies and documentation gaps, contributing to improved data quality and more efficient supplier onboarding processes.
+
+Coding Tutor Feb 2023 – Feb 2024
+
+Code Camp
+
+Delivered structured Python programming lessons covering coding fundamentals and problem-solving techniques. Tracked student learning progress and analyzed performance patterns across assignments and coding exercises. Adjusted teaching strategies based on performance insights to improve learning outcomes and engagement, while providing technical guidance for student coding projects.
+
+## Projects
+
+### Autonomous Marketing AI Framework University Software Engineering Project
+
+- Designed an AI-driven marketing management framework using a multi-agent architecture.
+- Implemented system components in Python and FastAPI to coordinate strategic, specialist, and worker agents.
+- Integrated LLM APIs to support automated decision workflows and modular task delegation.
+- Designed feedback and data pipelines to support campaign analysis and real-time coordination.
+
+#### Traffic Crash Data Warehouse & Analytics University Data Warehousing Project
+
+- Designed a star schema data warehouse for traffic crash data analysis.
+- Built dimensional tables including dimDate, dimCrash, dimFatalities, and dimGeography.
+- Implemented SQL queries to transform raw datasets into structured fact tables.
+- Performed analytical queries to identify patterns in crash frequency, location, and severity.
+
+#### Organizational Data Reporting Analysis Path of Hope Internship Project
+
+- Processed and cleaned operational datasets used for organizational reporting and internal analytics.
+- Conducted exploratory data analysis to validate data quality and identify performance trends.
+
+• Produced visualizations to support internal reporting and stakeholder communication.
+
+# Skills
+
+Programming: Python, SQL, R
+
+Data Analysis: Pandas, NumPy, Data Cleaning, Exploratory Data Analysis, Statistical Analysis
+
+Visualization: Tableau, PowerBI
+
+Tools: Git, Microsoft Office
+

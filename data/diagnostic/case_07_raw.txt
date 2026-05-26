@@ -1,0 +1,55 @@
+# Case 07 | Candidate ID: 99987
+# Annotated name (if any): Anugerah Khalis binti Mohd Sabta
+# Ethnicity tag: malay
+# Raw text length: 2176 chars
+# ============================================================
+
+## **ANUGERAH KHALIS BINTE MOHD SABTA**
+
+anugerahkhalis@gmail.com · +6580439240
+
+*Reliable and detail-oriented professional with a background in administration, IT support, and customer service. Brings a calm, solution-focused approach, strong communication skills, and a commitment to accuracy and efficiency. Experienced in managing data, coordinating tasks, and navigating both technical and operational environments with confidence.*
+
+## **Work Experiences**
+
+01 Jul 2025- 02 Nov 2025 IT Asset Admin · Kyndryl
+
+- Managed and updated IT asset inventory using Microsoft Excel.
+- Scanned and verified RFID tags to ensure asset accuracy and activity status.
+- Coordinated with users to obtain asset tag photos and schedule verification sessions.
+- Tracked asset lifecycle activities, including issuance, return, repair, and disposal.
+- Ensured compliance with audit and company asset management policies.
+
+01 Aug 2023- 01 Sep 2023 IT Intern · Republic Polytechnic
+
+- Provided technical support and reimaged windows-based laptops for students and staff.
+- Assisted in user-friendly laptop deployment using Windows autopilot.
+- Conducted audits on hardware inventory, ensuring smooth operations and readiness for end user needs.
+
+01 Mar 2023- 31 Jul 2023 Software Developer Intern · Sixscape Communications Pte Ltd
+
+- Tested and documented RESTFUL APIs to ensure seamless user functionality using Postman.
+- Collaborated on UI/UX aspects of mini demo projects with another intern.
+- Designed ERD diagram and maintained databases with a focus on data integrity.
+
+01 Nov 2017- 31 Jan 2018 Penanshin Shipping Pte Ltd
+
+- Managed front-desk responsibilities and communicated shipping information.
+- Handled data entry into the system with attention to accuracy and within the deadline.
+
+## **Education**
+
+2020 – 2024 Diploma in Information Technology · Republic Polytechnic
+
+## **Skills**
+
+Technical & IT: SQL(PostgreSQL/MySQL/MSSQL) · C# · REST APIs · Postman· Jenkins · IT
+
+Support · Microsoft 10/11
+
+Soft Skills: Communication · Teamwork · Time Management · Adaptability · Work
+
+under pressure · Organization
+
+Administrative: Microsoft Office Suite · Data Entry · Record Keeping
+

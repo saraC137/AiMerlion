@@ -399,12 +399,44 @@ class DatabaseManager:
                 # Store BOTH the raw string AND a JSON version for flexibility
                 skills_raw = result.get("Skills")
                 skills_json = self._to_json_safe(skills_raw)
-                
+
                 experience_raw = result.get("Working_Experience")
                 experience_json = self._to_json_safe(experience_raw)
-                
+
                 education_raw = result.get("School_University")
                 education_json = self._to_json_safe(education_raw)
+
+                now_iso = datetime.datetime.now().isoformat()
+
+                # 🔁 IDEMPOTENT RE-PROCESSING (matches raw_extractions behavior):
+                # Before inserting, remove any prior structured rows for this
+                # candidate so re-running main.py UPDATES instead of duplicating.
+                # We preserve the ORIGINAL created_at and any human review work
+                # (reviewed flag + review_notes) from the most recent prior row.
+                prior = conn.execute("""
+                    SELECT created_at, reviewed, review_notes
+                    FROM structured_extractions
+                    WHERE candidate_id = ?
+                    ORDER BY id DESC
+                    LIMIT 1
+                """, (candidate_id,)).fetchone()
+
+                if prior is not None:
+                    created_at    = prior[0] or now_iso        # keep first-seen timestamp
+                    prev_reviewed = prior[1] if prior[1] is not None else 0
+                    prev_review_notes = prior[2]
+                    deleted = conn.execute(
+                        "DELETE FROM structured_extractions WHERE candidate_id = ?",
+                        (candidate_id,)
+                    ).rowcount
+                    logger.info(
+                        f"🔁 Replacing {deleted} prior structured row(s) for "
+                        f"candidate {candidate_id} (re-extraction)"
+                    )
+                else:
+                    created_at        = now_iso
+                    prev_reviewed     = 0
+                    prev_review_notes = None
 
                 cursor = conn.execute("""
                     INSERT INTO structured_extractions (
@@ -416,7 +448,8 @@ class DatabaseManager:
                         summary, certifications, languages,
                         projects, achievements, references_info, hobbies,
                         extraction_method, ai_assisted, extraction_status, notes,
-                        created_at, updated_at
+                        created_at, updated_at,
+                        reviewed, review_notes
                     ) VALUES (
                         ?, ?,
                         ?, ?, ?, ?, ?,
@@ -426,6 +459,7 @@ class DatabaseManager:
                         ?, ?, ?,
                         ?, ?, ?, ?,
                         ?, ?, ?, ?,
+                        ?, ?,
                         ?, ?
                     )
                 """, (
@@ -453,10 +487,12 @@ class DatabaseManager:
                     1 if result.get("AI_Assisted") else 0,
                     result.get("Extraction_Status", "Unknown"),
                     result.get("Notes", ""),
-                    datetime.datetime.now().isoformat(),
-                    datetime.datetime.now().isoformat()
+                    created_at,           # preserved from prior row if it existed
+                    now_iso,              # updated_at = now
+                    prev_reviewed,        # preserve human review flag
+                    prev_review_notes     # preserve human review notes
                 ))
-                
+
                 row_id = cursor.lastrowid
                 logger.debug(f"💃 Structured data saved for candidate {candidate_id} (ID: {row_id})")
                 return row_id
@@ -464,6 +500,98 @@ class DatabaseManager:
         except sqlite3.Error as e:
             logger.error(f"❌ Failed to save structured extraction for candidate {candidate_id}: {e}")
             return None
+
+    def dedupe_structured_extractions(self, dry_run: bool = False) -> Dict[str, int]:
+        """
+        🧹 Remove duplicate rows from structured_extractions.
+
+        Older runs of main.py (before the idempotent-save fix) inserted a NEW
+        row every time a candidate was re-processed. This collapses each
+        candidate down to a SINGLE row — keeping the most recent extraction
+        (highest id) while salvaging any human review work (reviewed flag /
+        review_notes) from the rows being deleted.
+
+        Args:
+            dry_run: If True, only report what WOULD be removed — change nothing.
+
+        Returns:
+            {
+              'candidates_with_dupes': int,  # candidates that had > 1 row
+              'rows_removed':          int,  # total duplicate rows deleted
+              'review_flags_salvaged': int,  # kept-rows that inherited a review flag
+              'dry_run':               int,  # 1 if nothing was actually changed
+            }
+        """
+        summary = {
+            'candidates_with_dupes': 0,
+            'rows_removed':          0,
+            'review_flags_salvaged': 0,
+            'dry_run':               1 if dry_run else 0,
+        }
+
+        try:
+            with self.get_connection() as conn:
+                dupes = conn.execute("""
+                    SELECT candidate_id, COUNT(*) AS n
+                    FROM structured_extractions
+                    GROUP BY candidate_id
+                    HAVING n > 1
+                """).fetchall()
+
+                summary['candidates_with_dupes'] = len(dupes)
+
+                for candidate_id, n in dupes:
+                    # The survivor: most recent row for this candidate
+                    keep_row = conn.execute("""
+                        SELECT id, reviewed, review_notes
+                        FROM structured_extractions
+                        WHERE candidate_id = ?
+                        ORDER BY id DESC
+                        LIMIT 1
+                    """, (candidate_id,)).fetchone()
+                    keep_id, keep_reviewed, keep_review_notes = keep_row
+
+                    # Salvage review work from ANY of the soon-to-be-deleted rows
+                    salvage = conn.execute("""
+                        SELECT reviewed, review_notes
+                        FROM structured_extractions
+                        WHERE candidate_id = ? AND id != ?
+                              AND (reviewed = 1 OR review_notes IS NOT NULL)
+                        ORDER BY id DESC
+                        LIMIT 1
+                    """, (candidate_id, keep_id)).fetchone()
+
+                    if salvage and not (keep_reviewed or keep_review_notes):
+                        salvaged_reviewed, salvaged_notes = salvage
+                        if not dry_run:
+                            conn.execute("""
+                                UPDATE structured_extractions
+                                SET reviewed = ?, review_notes = ?
+                                WHERE id = ?
+                            """, (salvaged_reviewed, salvaged_notes, keep_id))
+                        summary['review_flags_salvaged'] += 1
+
+                    if not dry_run:
+                        removed = conn.execute("""
+                            DELETE FROM structured_extractions
+                            WHERE candidate_id = ? AND id != ?
+                        """, (candidate_id, keep_id)).rowcount
+                    else:
+                        removed = n - 1  # would-be count
+
+                    summary['rows_removed'] += removed
+
+            verb = "Would remove" if dry_run else "Removed"
+            logger.info(
+                f"🧹 Dedupe: {verb} {summary['rows_removed']} duplicate row(s) "
+                f"across {summary['candidates_with_dupes']} candidate(s); "
+                f"{summary['review_flags_salvaged']} review flag(s) salvaged."
+            )
+
+        except sqlite3.Error as e:
+            logger.error(f"❌ Dedupe failed: {e}")
+
+        return summary
 
     def log_field_extraction(
         self,

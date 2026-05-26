@@ -18,13 +18,21 @@ Usage:
 """
 
 import os
+import sys
 import re
 import json
 import datetime
 import sqlite3
 from typing import Dict, List, Optional, Tuple
+
+# Add project root to path so we can import 'core' and other modules
+# when running from this directory
+root_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if root_path not in sys.path:
+    sys.path.append(root_path)
+
 from db_manager import DatabaseManager
-import config
+import core.config
 
 
 # =============================================================================
@@ -917,7 +925,12 @@ def main():
     """
     🎭 The Main Diagnostic Menu!
     """
-    db_path = config.DATABASE_FILE if hasattr(config, 'DATABASE_FILE') else "resume_extractions.db"
+    # Resolve database path relative to project root if it's not absolute
+    db_filename = core.config.DATABASE_FILE if hasattr(core.config, 'DATABASE_FILE') else "resume_extractions.db"
+    if not os.path.isabs(db_filename):
+        db_path = os.path.join(root_path, db_filename)
+    else:
+        db_path = db_filename
 
     if not os.path.exists(db_path):
         print(f"\n  ❌ Database not found: {db_path}")
