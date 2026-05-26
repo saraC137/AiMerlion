@@ -32,6 +32,7 @@ import docx
 import docx2txt
 import pdfplumber
 from pathlib import Path
+os.environ.setdefault('PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK', 'True')
 from paddleocr import PaddleOCR
 from PIL import Image
 import pdf2image
@@ -45,9 +46,9 @@ from utils import display_menu, save_checkpoint, load_checkpoint, get_checkpoint
 # 🗄️ Database Manager for raw + structured storage
 if config.DATABASE_ENABLED:
     from db_manager import DatabaseManager
-from ai_validator import AIValidator
-from marker_extractor import get_marker_extractor
-from document_parser import DocumentParser
+from extraction.ai_validator import AIValidator
+from extraction.marker_extractor import get_marker_extractor
+from extraction.document_parser import DocumentParser
 from pdf_inspector import analyze_pdf_type
 
 # Setup logging
@@ -122,6 +123,18 @@ class UltimateResumeExtractor:
         except Exception as e:
             logger.warning(f"⚠️ DocumentParser init failed: {e}")
 
+        # 🔗 SINGLE SOURCE OF TRUTH for raw text extraction.
+        # get_text_from_file() delegates to this so the text fed to the
+        # AI/regex extractor is byte-identical to what extract_raw_text.py
+        # writes into raw_text_output/. (Marker is a singleton — no double load.)
+        self.hybrid_extractor = None
+        try:
+            from extract_raw_text import HybridExtractor
+            self.hybrid_extractor = HybridExtractor()
+            logger.info("🔗 HybridExtractor initialized (shared raw-text pipeline)")
+        except Exception as e:
+            logger.warning(f"⚠️ HybridExtractor init failed: {e} — falling back to legacy path")
+
         # AI setup
         self.use_ai = config.USE_AI_EXTRACTION
         self.ai_extractor = None
@@ -129,7 +142,7 @@ class UltimateResumeExtractor:
 
         if self.use_ai:
             try:
-                from ai_extractor import AIExtractor
+                from extraction.ai_extractor import AIExtractor
                 self.ai_extractor = AIExtractor(model_name, logger=logger)
                 self.ai_enabled = self.ai_extractor.available
                 if self.ai_enabled:
@@ -354,7 +367,6 @@ class UltimateResumeExtractor:
             "Name": None,
             "Email": None,
             "Phone": None,
-            "Date_of_Birth": None,
             "Skills": None,
             "Working_Experience": None,
             "Location": None,
@@ -375,10 +387,12 @@ class UltimateResumeExtractor:
                 result["AI_Assisted"] = True
 
             # Update result with extracted data - ALL fields!
-            for field in ["Name", "Email", "Phone", "Date_of_Birth", "Skills",
+            for field in ["Name", "Email", "Phone", "Skills",
                           "Working_Experience", "Location", "School_University"]:
                 if extracted_data.get(field):
                     result[field] = extracted_data[field]
+            result["Phone_Method"] = extracted_data.get("Phone_Method", "Regex")
+            result["Email_Method"] = extracted_data.get("Email_Method", "Regex")
             
             # Try to extract name from filename if still missing
             if not result["Name"]:
@@ -427,7 +441,6 @@ class UltimateResumeExtractor:
             "name": None,
             "email": None,
             "phone": None,
-            "date_of_birth": None,
             "skills": None,
             "working_experience": None,
             "location": None,
@@ -438,37 +451,31 @@ class UltimateResumeExtractor:
         table_data = self._extract_from_table_format(text)
         data.update(table_data)
         
-        # --- 📧 EMAIL EXTRACTION (FIXED!) ---
+        # --- 📧 EMAIL EXTRACTION (sanitized + mailto-aware) ---
         if not data["email"]:
-            email_patterns = [
-                # FIXED: [A-Za-z] instead of [A-Z|a-z] - the | was being treated literally!
-                r'\b[A-Za-z0-9][A-Za-z0-9._%+-]*@[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z]{2,}\b',
-                r'(?:[Ee]-?[Mm]ail|MAIL|Email)[\s:]*([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})',
-            ]
-            for pattern in email_patterns:
-                matches = re.findall(pattern, text, re.IGNORECASE)
-                if matches:
-                    email = matches[0] if isinstance(matches[0], str) else matches[0]
-                    # Clean up the email
-                    email = email.strip().lower()
-                    # Skip excluded emails
-                    excluded = ['example.com', 'test.com', 'noreply@', 'support@', 'info@']
-                    if not any(excl in email for excl in excluded):
-                        data["email"] = email
-                        logger.info(f"✨ Found email: {data['email']}")
+            # Pass 1: text with only invisible/zero-width junk stripped — this
+            #         is lossless for clean resumes but repairs addresses split
+            #         by ZWSP/BOM (e.g. "ka<ZWSP>rthik@host" → "karthik@host")
+            #         so the raw pass can't "succeed" with a truncated address.
+            # Pass 2: a fully de-obfuscated copy that also repairs PDF-split,
+            #         spaced and "(at)(dot)" addresses ("john . doe @ gmail .
+            #         com", "john [at] gmail [dot] com", "john＠gmail.com").
+            for source, label in ((self._strip_invisible(text), "raw"),
+                                  (self._normalize_for_email(text), "normalized")):
+                for candidate in self._gather_email_candidates(source):
+                    clean = self._sanitize_email(candidate)
+                    if clean:
+                        data["email"] = clean
+                        logger.info(f"✨ Found email ({label}): {clean}")
                         break
+                if data["email"]:
+                    break
         
         # --- 📱 PHONE EXTRACTION ---
         if not data["phone"]:
             phone = self._extract_phone_english(text, data.get("email"))
             if phone:
                 data["phone"] = phone
-        
-        # --- 🎂 DATE OF BIRTH ---
-        if not data["date_of_birth"]:
-            dob = self._extract_dob_english(text)
-            if dob:
-                data["date_of_birth"] = dob
         
         # --- 👤 NAME EXTRACTION ---
         if not data["name"]:
@@ -620,12 +627,15 @@ class UltimateResumeExtractor:
                     if digits_only.startswith('0000') or digits_only.startswith('1234567'):
                         continue
                     
-                    # Format and return
+                    # Format, sanitize, and return
                     formatted = self._format_phone_international(phone_raw, pattern_type, digits_only)
                     if formatted:
+                        # Country-format branches are already clean; this is a
+                        # no-op safety net for GENERIC/INTL/LABELED leftovers.
+                        formatted = self._sanitize_phone(formatted) or formatted
                         logger.info(f"✨ Found phone ({pattern_type}): {formatted}")
                         return formatted
-        
+
         return None
     
     def _format_phone_international(self, raw: str, phone_type: str, digits: str) -> str:
@@ -701,105 +711,193 @@ class UltimateResumeExtractor:
             elif digits.startswith('04') and len(digits) == 10:
                 return f"+61 {digits[1:4]} {digits[4:7]} {digits[7:]}"
         
-        # Labeled or generic - clean up and return
-        return cleaned if cleaned else raw.strip()
+        # Labeled or generic - clean up and return (sanitized)
+        return self._sanitize_phone(cleaned if cleaned else raw) or (cleaned if cleaned else raw.strip())
 
-    def _extract_dob_english(self, text: str) -> Optional[str]:
+    def _gather_email_candidates(self, source: str) -> list:
         """
-        🎂 Extract date of birth from ENGLISH resumes!
-        Returns YYYY-MM-DD format.
+        📨 Collect email candidates from `source`, most-authoritative first:
+          1) mailto: hyperlink targets   2) "Email:"-labelled addresses
+          3) any bare address token anywhere in the text.
         """
-        import datetime
-        
-        current_year = datetime.datetime.now().year
-        min_birth_year = current_year - config.MAX_AGE
-        max_birth_year = current_year - config.MIN_AGE
-        
-        # Find contact info area
-        contact_area = self._find_contact_area(text)
-        search_text = contact_area if contact_area else text
-        
-        # DOB patterns for English resumes
-        dob_patterns = [
-            # ========== LABELED PATTERNS (highest priority!) ==========
-            # "DOB: 01/15/1990" or "Date of Birth: 15-03-1990"
-            (r'(?:DOB|D\.O\.B\.?|Date\s*of\s*Birth|Birth\s*Date|Born|Birthday)[\s:]*(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})', 'mdy_labeled'),
-            # "DOB: 1990-01-15"
-            (r'(?:DOB|D\.O\.B\.?|Date\s*of\s*Birth|Birth\s*Date|Born|Birthday)[\s:]*(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})', 'ymd_labeled'),
-            # "DOB: 15 March 1990" or "Born: 15 Jun 1990"
-            (r'(?:DOB|D\.O\.B\.?|Date\s*of\s*Birth|Birth\s*Date|Born|Birthday)[\s:]*(\d{1,2})(?:st|nd|rd|th)?\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{4})', 'dmy_written_labeled'),
-            # "DOB: March 15, 1990"
-            (r'(?:DOB|D\.O\.B\.?|Date\s*of\s*Birth|Birth\s*Date|Born|Birthday)[\s:]*(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})', 'mdy_written_labeled'),
+        candidates = []
+        # 1️⃣ Markdown / HTML mailto: links are the most authoritative target
+        #    e.g. [display@x.com](mailto:real@x.com)  → real@x.com
+        candidates += re.findall(
+            r'mailto:\s*[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}',
+            source, re.IGNORECASE
+        )
+        # 2️⃣ Labelled emails ("Email: a@b.com", "Email :** a@b.com", "e-mail – a@b.com")
+        candidates += re.findall(
+            r'(?:e[\s\-]?mail|mail)[\s:*\-–—]*[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}',
+            source, re.IGNORECASE
+        )
+        # 3️⃣ Any bare email token anywhere
+        candidates += re.findall(
+            r'[A-Za-z0-9][A-Za-z0-9._%+\-]*@[A-Za-z0-9][A-Za-z0-9.\-]*\.[A-Za-z]{2,}',
+            source
+        )
+        return candidates
 
-            # ========== UNLABELED PATTERNS (search contact area only) ==========
-            # "15 March 1990" or "15th Jun 1990" (DD Month YYYY — very common in SG!)
-            (r'\b(\d{1,2})(?:st|nd|rd|th)?\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{4})\b', 'dmy_written'),
-            # "January 15, 1990" (Month DD, YYYY)
-            (r'\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\b', 'mdy_written'),
-            # "1990-01-15" (ISO format)
-            (r'\b(\d{4})-(\d{1,2})-(\d{1,2})\b', 'ymd'),
-            # "01/15/1990" or "15.03.1990" (with dots!)
-            (r'\b(\d{1,2})[/.](\d{1,2})[/.](\d{4})\b', 'mdy'),
-        ]
-        
-        for pattern, date_format in dob_patterns:
-            matches = re.finditer(pattern, search_text, re.IGNORECASE)
-            for match in matches:
-                try:
-                    # 📅 Map month abbreviations to numbers
-                    month_map = {
-                        'jan': 1, 'january': 1, 'feb': 2, 'february': 2,
-                        'mar': 3, 'march': 3, 'apr': 4, 'april': 4,
-                        'may': 5, 'jun': 6, 'june': 6, 'jul': 7, 'july': 7,
-                        'aug': 8, 'august': 8, 'sep': 9, 'sept': 9, 'september': 9,
-                        'oct': 10, 'october': 10, 'nov': 11, 'november': 11,
-                        'dec': 12, 'december': 12,
-                    }
+    def _strip_invisible(self, text: str) -> str:
+        """
+        🫥 Remove invisible/zero-width characters that PDF extraction or
+        anti-scrape tricks inject *inside* otherwise-clean addresses
+        (e.g. "ka<ZWSP>rthik@host" -> "karthik@host"). Lossless for normal
+        resume text, so it is safe to run before the first email pass.
+        NBSP is a real space, so it becomes one.
+        """
+        if not text:
+            return ""
+        # Zero-width junk carries NO spacing -- DELETE it.
+        #   ZWSP ZWNJ ZWJ word-joiner BOM/ZWNBSP
+        s = re.sub(r'[\u200b\u200c\u200d\u2060\ufeff]', '', text)
+        # NBSP -> normal space so later @/dot collapsing can act on it.
+        return s.replace('\u00a0', ' ')
 
-                    if date_format in ['dmy_written', 'dmy_written_labeled']:
-                        # (day, month_name, year)
-                        day_str, month_name, year_str = match.groups()
-                        day = int(day_str)
-                        month = month_map.get(month_name.lower().rstrip('.'), 0)
-                        year = int(year_str)
+    def _normalize_for_email(self, text: str) -> str:
+        """
+        🧽 Produce an email-search-only copy of `text` that repairs
+        addresses broken by PDF extraction or anti-scrape obfuscation.
+        Used ONLY as a fallback for email detection -- never mutates the
+        text other fields use.
 
-                    elif date_format in ['mdy_written', 'mdy_written_labeled', 'written']:
-                        # (month_name, day, year)
-                        month_name, day_str, year_str = match.groups()
-                        month = month_map.get(month_name.lower().rstrip('.'), 0)
-                        day = int(day_str)
-                        year = int(year_str)
+        Repairs:
+          - Invisible/zero-width chars (via _strip_invisible)
+          - Unicode lookalikes:  fullwidth @ -> @,  fullwidth/ideographic dot -> .
+          - HTML entities:  &#64; &commat; -> @,  &#46; -> .
+          - Worded obfuscation:  "(at)" "[at]" "{at}" " at "  -> @
+                                 "(dot)" "[dot]" "{dot}" " dot " -> .
+          - PDF-split addresses:  "john . doe @ gmail . com" / line breaks
+            inside the address  -> "john.doe@gmail.com"
+        """
+        if not text:
+            return ""
+        s = self._strip_invisible(text)
 
-                    elif date_format in ['mdy_labeled', 'mdy']:
-                        g1, g2, g3 = map(int, match.groups())
-                        # 🧠 Smart DD/MM vs MM/DD detection for SG resumes
-                        # If first number > 12, it MUST be the day (DD/MM/YYYY)
-                        if g1 > 12:
-                            day, month, year = g1, g2, g3
-                        elif g2 > 12:
-                            month, day, year = g1, g2, g3
-                        else:
-                            # Ambiguous — default to DD/MM/YYYY (SG/UK convention)
-                            day, month, year = g1, g2, g3
+        # Unicode lookalikes
+        s = s.replace('＠', '@')          # ＠ fullwidth at
+        s = re.sub(r'[．。]', '.', s)  # ． fullwidth / 。 ideographic dot
 
-                    elif date_format in ['ymd_labeled', 'ymd']:
-                        year, month, day = map(int, match.groups())
-                    
-                    else:
-                        continue
-                    
-                    # Validate year range
-                    if min_birth_year <= year <= max_birth_year:
-                        # Validate date is real
-                        dt = datetime.datetime(year, month, day)
-                        formatted = dt.strftime('%Y-%m-%d')
-                        logger.info(f"✅ Found DOB: {formatted}")
-                        return formatted
-                
-                except (ValueError, OverflowError):
-                    continue
-        
+        # HTML entities for @ and .
+        s = re.sub(r'&#0*64;|&commat;|&#x40;', '@', s, flags=re.IGNORECASE)
+        s = re.sub(r'&#0*46;|&period;|&#x2e;', '.', s, flags=re.IGNORECASE)
+
+        # Worded obfuscation: (at) [at] {at} " at " / arroba  → @
+        s = re.sub(r'\s*[\(\[\{]\s*(?:at|arroba)\s*[\)\]\}]\s*', '@', s, flags=re.IGNORECASE)
+        s = re.sub(r'\s+(?:at|arroba)\s+(?=[A-Za-z0-9.\-]+\s*(?:[\(\[\{]\s*)?dot)',
+                   '@', s, flags=re.IGNORECASE)
+        # Worded obfuscation: (dot) [dot] {dot} " dot "  → .
+        s = re.sub(r'\s*[\(\[\{]\s*(?:dot|punto)\s*[\)\]\}]\s*', '.', s, flags=re.IGNORECASE)
+        s = re.sub(r'\s+(?:dot|punto)\s+', '.', s, flags=re.IGNORECASE)
+
+        # Collapse whitespace (incl. newlines) hugging an @
+        s = re.sub(r'\s*@\s*', '@', s)
+        # Collapse whitespace around a dot only when it sits between
+        # email-ish chars — repairs "gmail . com" / "john .\n doe" without
+        # gluing ordinary sentences together.
+        s = re.sub(r'(?<=[A-Za-z0-9])[ \t]*\.[ \t\r\n]*(?=[A-Za-z0-9])', '.', s)
+        # Repair a single newline splitting the local part right before '@'
+        s = re.sub(r'(?<=[A-Za-z0-9._%+\-])\s*\r?\n\s*(?=@)', '', s)
+
+        return s
+
+    def _sanitize_email(self, raw: Optional[str]) -> Optional[str]:
+        """
+        🧼 Return a single clean email address from messy input.
+
+        Handles:
+          - Markdown links:  [disp@x.com](mailto:real@x.com)  → real@x.com
+                              (the mailto: target is authoritative)
+          - mailto: prefixes, angle brackets <a@b.com>
+          - Leading labels:  "address: a@b.com", "Email :** a@b.com"
+          - Markdown emphasis (**, *, `), trailing punctuation
+        Returns lowercased email, or None if nothing valid.
+        """
+        if not raw:
+            return None
+        s = str(raw)
+
+        EMAIL = r'[A-Za-z0-9][A-Za-z0-9._%+\-]*@[A-Za-z0-9][A-Za-z0-9.\-]*\.[A-Za-z]{2,}'
+
+        # 1️⃣ Prefer the mailto: target (the real hyperlink) if present
+        m = re.search(r'mailto:\s*(' + EMAIL + r')', s, re.IGNORECASE)
+        if m:
+            candidate = m.group(1)
+        else:
+            # 2️⃣ Otherwise take the first bare email token anywhere in the string
+            m = re.search(EMAIL, s)
+            if not m:
+                return None
+            candidate = m.group(0)
+
+        # Trim wrappers / markdown / stray punctuation
+        candidate = candidate.strip(' \t\r\n<>()[]{}"\'.,;:|*`').lower()
+
+        # Final strict validation
+        if re.fullmatch(EMAIL, candidate):
+            excluded = ('example.com', 'test.com', 'noreply@', 'support@',
+                        'info@', 'donotreply@', 'no-reply@')
+            if not any(x in candidate for x in excluded):
+                return candidate
         return None
+
+    def _sanitize_phone(self, raw: Optional[str]) -> Optional[str]:
+        """
+        🧼 Return a single clean phone token from messy input.
+
+        Handles:
+          - Markdown emphasis:  "** 87654321 **"          → 87654321
+          - Field bleed:        "87654321 **Email :** a@b" → 87654321
+          - Leading labels:     "Number: +65-12345678"     → +65-12345678
+          - Trailing labels:    "+65 1234 5678 (HP)"       → +65 1234 5678
+        Preserves a leading '+' and internal spaces/dashes; validates digit count.
+        """
+        if not raw:
+            return None
+        s = str(raw)
+
+        # Strip markdown emphasis / backticks / underscores used as emphasis
+        s = re.sub(r'[*`_]{1,3}', ' ', s)
+
+        # Strip a leading label (incl. bare "Number"/"No"/"Contact"/"HP" etc.)
+        s = re.sub(
+            r'(?i)^[\s\-:.#)]*'
+            r'(?:phone|tel(?:ephone)?|mobile|cell(?:\s*phone)?|contact|'
+            r'hp|h/?p|hand\s*phone|whatsapp|portable|'
+            r'no\.?\s*(?:tel|hp|phone|mobile)?|number|num)'
+            r'\b[\s.:#)\-]*',
+            '', s
+        ).strip()
+
+        # Cut off at the first field-bleed boundary (email/@, address, fax, etc.)
+        s = re.split(
+            r'(?i)\b(?:e-?mail|address|fax|name|nationality|nric|fin|'
+            r'date\s*of\s*birth|dob|d\.o\.b)\b|@',
+            s
+        )[0]
+
+        # Extract the phone-shaped token (optional +, digits, spaces, . - ( ))
+        m = re.search(r'\+?\d[\d\s().\-]{5,18}\d', s)
+        if not m:
+            return None
+        token = m.group(0).strip()
+
+        # Drop a trailing parenthetical label: "(HP)", "(Mobile)", "(O)", "(R)"
+        token = re.sub(r'\s*\([^)]*\)\s*$', '', token).strip()
+        # Trim stray leading/trailing separators
+        token = token.strip(' -.')
+
+        digits = re.sub(r'\D', '', token)
+        if not (7 <= len(digits) <= 15):
+            return None
+        if len(set(digits)) <= 2:               # 0000000, 1111111 etc.
+            return None
+        if digits.startswith(('0000', '1234567')):
+            return None
+
+        # Collapse runs of whitespace inside the token
+        return re.sub(r'\s{2,}', ' ', token)
 
     def _find_contact_area(self, text: str) -> Optional[str]:
         """
@@ -1011,104 +1109,6 @@ class UltimateResumeExtractor:
         phone = phone.translate(str.maketrans('０１２３４５６７８９', '0123456789'))
         phone = phone.replace('－', '-').replace('・', '-')
         return re.sub(r'\s+', '', phone).strip()
-
-    def _extract_dob(self, text: str) -> Optional[str]:
-        """
-        🎂 DOB Detective - Now searches near other contact info!
-        ALWAYS returns YYYY-MM-DD format!
-        """
-        logger.debug("🎂 DOB Detective is on the case!")
-        
-        current_year = datetime.datetime.now().year
-        min_birth_year = current_year - 65  # Max age 65
-        max_birth_year = current_year - 21  # Min age 21
-        
-        def normalize_numbers(text_str: str) -> str:
-            return text_str.translate(str.maketrans('０１２３４５６７８９', '0123456789'))
-        
-        # First, try to find DOB near email/phone if we have them
-        contact_area = self._find_contact_information_area(text)
-        if contact_area:
-            logger.debug("🎯 Found contact area, searching for DOB there first!")
-            dob = self._extract_dob_from_text(contact_area, min_birth_year, max_birth_year)
-            if dob:
-                return dob
-        
-        # If not found in contact area, search whole text
-        return self._extract_dob_from_text(text, min_birth_year, max_birth_year)
-
-    def _extract_dob_from_text(self, text: str, min_year: int, max_year: int) -> Optional[str]:
-        """Extract DOB from given text section"""
-        
-        def normalize_numbers(text_str: str) -> str:
-            return text_str.translate(str.maketrans('０１２３４５６７８９', '0123456789'))
-        
-        dob_patterns = [
-            # Western style dates
-            (r'(?:Date of Birth|DOB|Born|Birthday)[\s:：]*(\d{4})[/\-\.](\d{1,2})[/\-\.](\d{1,2})', 'ymd'),
-            (r'(?:Date of Birth|DOB|Born|Birthday)[\s:：]*(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{4})', 'mdy'),
-            
-            # Japanese dates with headers
-            (r'生年月日[\s:：]*(?:大正|昭和|平成|令和)?\s*([０-９0-9]{1,2})\s*年\s*([０-９0-9]{1,2})\s*月\s*([０-９0-9]{1,2})\s*日', 'era'),
-            (r'生年月日[\s:：]*([０-９0-9]{4})\s*年\s*([０-９0-9]{1,2})\s*月\s*([０-９0-9]{1,2})\s*日', 'ymd'),
-            
-            # Dates with 生 marker
-            (r'([０-９0-9]{4})年([０-９0-9]{1,2})月([０-９0-9]{1,2})日生', 'ymd'),
-            (r'((?:19|20)\d{2})年(\d{1,2})月(\d{1,2})日生', 'ymd'),
-            
-            # ISO format
-            (r'\b((?:19|20)\d{2})-(\d{1,2})-(\d{1,2})\b', 'ymd'),
-            
-            # Just year/month/day with various separators
-            (r'\b((?:19|20)\d{2})[/\-\.](\d{1,2})[/\-\.](\d{1,2})\b', 'ymd'),
-        ]
-        
-        for pattern, date_format in dob_patterns:
-            matches = re.findall(pattern, text, re.IGNORECASE | re.MULTILINE)
-            for match in matches:
-                try:
-                    year, month, day = None, None, None
-                    
-                    if date_format == 'era' and len(match) == 3:
-                        # Handle Japanese era
-                        era_year = int(normalize_numbers(match[0]))
-                        month = int(normalize_numbers(match[1]))
-                        day = int(normalize_numbers(match[2]))
-                        
-                        # Detect era from context
-                        context = text[max(0, text.find(match[0])-50):text.find(match[0])+50]
-                        if '令和' in context:
-                            year = 2018 + era_year
-                        elif '平成' in context:
-                            year = 1988 + era_year
-                        elif '昭和' in context:
-                            year = 1925 + era_year
-                        else:
-                            # Default to Heisei for reasonable ages
-                            year = 1988 + era_year
-                    
-                    elif date_format == 'ymd':
-                        year = int(normalize_numbers(match[0]))
-                        month = int(normalize_numbers(match[1]))
-                        day = int(normalize_numbers(match[2]))
-                    
-                    elif date_format == 'mdy':
-                        month = int(normalize_numbers(match[0]))
-                        day = int(normalize_numbers(match[1]))
-                        year = int(normalize_numbers(match[2]))
-                    
-                    # Validate year
-                    if year and min_year <= year <= max_year:
-                        # Always format as YYYY-MM-DD
-                        formatted_date = f"{year:04d}-{month:02d}-{day:02d}"
-                        logger.info(f"✅ Found valid DOB: {formatted_date}")
-                        return formatted_date
-                        
-                except (ValueError, IndexError) as e:
-                    logger.debug(f"Could not parse date: {match} - {e}")
-                    continue
-        
-        return None
 
     def _find_contact_information_area(self, text: str) -> Optional[str]:
         """
@@ -1395,11 +1395,69 @@ class UltimateResumeExtractor:
     def _clean_name(self, name: str) -> str:
         return re.sub(r'[（(].*?[）)]', '', name).strip()
 
+    def _extract_via_shared_pipeline(self, file_path: str) -> Optional[str]:
+        """
+        Run the EXACT same per-file extraction branching as
+        extract_raw_text.py::extract_raw_text() via the shared HybridExtractor.
+
+        DOCX            → HybridExtractor.extract_docx()
+        PDF needs_ocr   → HybridExtractor.extract_hybrid()   (Marker + OCR concat)
+        PDF text-only   → HybridExtractor.extract_text_only() (Marker only)
+
+        Returns the raw (un-normalized) text, or None.
+        """
+        file_name = os.path.basename(file_path)
+        is_docx = file_name.lower().endswith('.docx')
+
+        if is_docx:
+            logger.info(f"📄 DOCX → shared python-docx/XML extraction for {file_name}")
+            return self.hybrid_extractor.extract_docx(file_path)
+
+        # PDF: inspect, then branch identically to extract_raw_text.py
+        pdf_info = analyze_pdf_type(file_path)
+        logger.info(
+            f"🔍 PDF Inspector: {file_name} → type={pdf_info['pdf_type']}, "
+            f"images={pdf_info['image_count']} "
+            f"(deep={pdf_info.get('image_count_deep', 0)}), "
+            f"text={pdf_info['text_length']} chars "
+            f"({pdf_info.get('chars_per_page', 0):.0f}/page over "
+            f"{pdf_info.get('page_count', 0)} pages), "
+            f"needs_ocr={pdf_info['needs_ocr']}"
+        )
+        if pdf_info.get('detection_reason'):
+            logger.info(f"   └─ reason: {pdf_info['detection_reason']}")
+
+        if pdf_info['needs_ocr']:
+            logger.info(
+                f"🔀 needs_ocr=True ({pdf_info['image_count']} images) "
+                f"- shared HYBRID extraction for {file_name}"
+            )
+            return self.hybrid_extractor.extract_hybrid(file_path)
+
+        logger.info(f"📄 Text-only PDF - shared Marker extraction for {file_name}")
+        return self.hybrid_extractor.extract_text_only(file_path)
+
     def get_text_from_file(self, file_path: str) -> Optional[str]:
         """📄 Enhanced text extraction with PDF inspection - uses OCR only when images detected"""
         file_name = os.path.basename(file_path)
         if file_name.startswith('~$'):
             return None
+
+        # ── SHARED RAW-TEXT PIPELINE ──────────────────────────────────────────
+        # Delegate to the SAME HybridExtractor that extract_raw_text.py uses, so
+        # the text fed to the AI/regex extractor is identical to what is written
+        # into raw_text_output/*.xlsx. _clean_text() is applied afterwards as the
+        # ONLY intentional difference — it is downstream normalization the
+        # regex/AI layer requires; the raw_text_output dump is intentionally
+        # left un-normalized for human inspection.
+        if self.hybrid_extractor is not None:
+            try:
+                raw = self._extract_via_shared_pipeline(file_path)
+                return self._clean_text(raw) if raw else None
+            except Exception as e:
+                logger.warning(
+                    f"⚠️ Shared pipeline failed for {file_name} ({e}) — using legacy path"
+                )
 
         text = ""
         ocr_min_threshold = getattr(config, 'OCR_MIN_TEXT_THRESHOLD', 100)
@@ -1409,9 +1467,17 @@ class UltimateResumeExtractor:
             if file_path.lower().endswith('.pdf'):
                 # 🔍 STEP 1: Inspect PDF to determine extraction strategy
                 pdf_info = analyze_pdf_type(file_path)
-                logger.info(f"🔍 PDF Inspector: {file_name} → type={pdf_info['pdf_type']}, "
-                           f"images={pdf_info['image_count']}, text={pdf_info['text_length']} chars, "
-                           f"needs_ocr={pdf_info['needs_ocr']}")
+                logger.info(
+                    f"🔍 PDF Inspector: {file_name} → type={pdf_info['pdf_type']}, "
+                    f"images={pdf_info['image_count']} "
+                    f"(deep={pdf_info.get('image_count_deep', 0)}), "
+                    f"text={pdf_info['text_length']} chars "
+                    f"({pdf_info.get('chars_per_page', 0):.0f}/page over "
+                    f"{pdf_info.get('page_count', 0)} pages), "
+                    f"needs_ocr={pdf_info['needs_ocr']}"
+                )
+                if pdf_info.get('detection_reason'):
+                    logger.info(f"   └─ reason: {pdf_info['detection_reason']}")
 
                 # 📄 CASE 1: Text-only PDF - no OCR needed
                 if not pdf_info['needs_ocr']:
@@ -1596,47 +1662,76 @@ class UltimateResumeExtractor:
         
         final_results = {}
         ai_assisted = False
-        
-        # Try AI extraction first if enabled
+
+        # ── STEP 1: Regex for Email and Phone (always runs first) ──────────────
+        # Phone and Email are reliably captured by regex; AI is unnecessary for them.
+        regex_data = self._extract_with_mega_regex(text)
+        regex_email  = regex_data.get('email')
+        regex_phone  = regex_data.get('phone')
+        if regex_email:
+            final_results['email'] = regex_email
+        if regex_phone:
+            final_results['phone'] = regex_phone
+
+        # ── STEP 2: AI for Name + structured fields (experience, skills, etc.) ──
         if self.ai_enabled:
             try:
                 logger.info("🤖 Attempting AI extraction...")
-                
-                # 🌟 Use the CORRECT methods!
                 header_data = self.ai_extractor.extract_header_fields(text)
-                deep_data = self.ai_extractor.extract_deep_fields(text)
-                
-                # Merge results
-                ai_results = {**header_data, **deep_data}
-                
+                deep_data   = self.ai_extractor.extract_deep_fields(text)
+                ai_results  = {**header_data, **deep_data}
+
                 if ai_results:
-                    final_results.update(ai_results)
+                    for key, val in ai_results.items():
+                        # Keep regex email/phone; let AI fill everything else
+                        if key in ('email', 'phone') and final_results.get(key):
+                            continue
+                        final_results[key] = val
                     ai_assisted = True
                     logger.info(f"✅ AI extracted: {list(ai_results.keys())}")
             except Exception as e:
                 logger.warning(f"⚠️ AI extraction failed: {e}")
-        
-        # Fallback to regex for missing fields
-        required_fields = ['name', 'email', 'phone', 'date_of_birth']
-        missing_fields = [field for field in required_fields if not final_results.get(field)]
-        
-        if not self.ai_enabled or missing_fields:
-            logger.info(f"⚡ Using regex for: {missing_fields if missing_fields else 'all fields'}")
-            regex_results = self._extract_with_mega_regex(text)
-            
-            # Fill in missing fields
-            for field in required_fields:
-                if not final_results.get(field) and regex_results.get(field):
-                    final_results[field] = regex_results[field]
-        
+
+        # ── STEP 3: Regex fills any remaining gaps ──────────────────────────────
+        for field in ('name', 'email', 'phone'):
+            if not final_results.get(field) and regex_data.get(field):
+                final_results[field] = regex_data[field]
+
+        # ── STEP 4: Final sanitize — guarantees clean output regardless of
+        #            whether the value came from regex OR the AI model ─────────
+        # An email MUST be a real address: local@domain.tld. _sanitize_email
+        # returns None for anything that isn't (no '@', a name, a LinkedIn URL,
+        # "N/A", "see resume", AI noise). When it fails we DROP the value — a
+        # string without an '@' is NOT an email, so it never belongs here.
+        if final_results.get('email'):
+            cleaned_email = self._sanitize_email(final_results['email'])
+            if not cleaned_email:
+                logger.warning(
+                    "🚫 Rejected non-email value for Email field: "
+                    f"{str(final_results['email'])[:60]!r}"
+                )
+            final_results['email'] = cleaned_email
+        if final_results.get('phone'):
+            final_results['phone'] = (
+                self._sanitize_phone(final_results['phone']) or final_results['phone']
+            )
+
+        # Record per-field extraction methods for reporting (reflect the FINAL
+        # value: if email was rejected above, it is 'Not found', not 'Regex').
+        phone_method = 'Regex' if regex_phone else ('AI' if final_results.get('phone') else 'Not found')
+        if not final_results.get('email'):
+            email_method = 'Not found'
+        else:
+            email_method = 'Regex' if regex_email else 'AI'
+
         # 🎯 FORMAT THE OUTPUT PROPERLY!
         # Pass raw text for fallback extraction if structured parsing fails
         formatted_data = {
             "Name": final_results.get("name"),
             "Email": final_results.get("email"),
             "Phone": final_results.get("phone"),
-            "Date_of_Birth": standardize_date(final_results.get("date_of_birth")),
-
+            "Phone_Method": phone_method,
+            "Email_Method": email_method,
             # 💎 THE CRITICAL FIX: Convert lists to JSON strings for CSV export!
             # 🆘 Now with RAW TEXT FALLBACK when structured parsing fails!
             "Skills": self._format_skills_for_export(final_results, text),
@@ -1644,6 +1739,14 @@ class UltimateResumeExtractor:
 
             "Location": final_results.get("location"),
             "School_University": self._format_education_for_export(final_results, text),
+            "Summary": final_results.get("summary", ""),
+
+            # 🗂️ Raw structured data — preserved for JSON export formatting
+            "_raw_experience": final_results.get("working_experience", []),
+            "_raw_education": final_results.get("education", []),
+            "_raw_hard_skills": final_results.get("hard_skills", []),
+            "_raw_soft_skills": final_results.get("soft_skills", []),
+            "_raw_languages": final_results.get("languages", []),
         }
 
         return formatted_data, ai_assisted
@@ -1861,12 +1964,11 @@ class UltimateResumeExtractor:
             "Name": None,
             "Email": None,
             "Phone": None,
-            "Date_of_Birth": None,
             "Skills": None,
             "Working_Experience": None,
             "Location": None,
             "School_University": None,
-            
+
             # 🆕 NEW FIELDS - Previously extracted but not saved!
             "Summary": None,
             "Certifications": None,
@@ -1919,10 +2021,14 @@ class UltimateResumeExtractor:
 
             # ✨ FIXED: Update result with ALL fields (including new ones!)
             # Basic contact fields
-            for field in ["Name", "Email", "Phone", "Date_of_Birth", "Location"]:
+            for field in ["Name", "Email", "Phone", "Location"]:
                 if extracted_data.get(field):
                     result[field] = extracted_data[field]
                     logger.debug(f"✅ Updated {field}: {str(extracted_data[field])[:100]}...")
+
+            # Carry forward per-field extraction method tags
+            result["Phone_Method"] = extracted_data.get("Phone_Method", "Regex")
+            result["Email_Method"] = extracted_data.get("Email_Method", "Regex")
 
             # Validate extracted name — catch garbage like email usernames or labels
             extracted_email = result.get("Email", "")
@@ -1972,6 +2078,13 @@ class UltimateResumeExtractor:
             if extracted_data.get('Summary'):
                 result['Summary'] = extracted_data['Summary']
                 logger.debug(f"✅ Updated Summary: {str(extracted_data['Summary'])[:100]}...")
+
+            # 🗂️ Store raw structured data for JSON export
+            result['_raw_experience'] = extracted_data.get('_raw_experience', [])
+            result['_raw_education'] = extracted_data.get('_raw_education', [])
+            result['_raw_hard_skills'] = extracted_data.get('_raw_hard_skills', [])
+            result['_raw_soft_skills'] = extracted_data.get('_raw_soft_skills', [])
+            result['_raw_languages'] = extracted_data.get('_raw_languages', [])
             
             # 🆕 NEW: Update list fields (convert to readable format)
             if extracted_data.get('Certifications'):
@@ -2104,7 +2217,7 @@ class UltimateResumeExtractor:
             if not result["ID"]:
                 result["Notes"] += "🚨 No ID found in folder name!"
         else:
-            extracted_count = sum(1 for f in ["ID", "Name", "Email", "Phone", "Date_of_Birth"] if result[f] is not None)
+            extracted_count = sum(1 for f in ["ID", "Name", "Email", "Phone"] if result[f] is not None)
             if extracted_count >= 5:
                 result["Extraction_Status"] = "Complete"
             elif extracted_count >= 3:
@@ -2204,14 +2317,22 @@ class UltimateResumeExtractor:
             'name': r'(?:Name|Full\s*Name|Candidate\s*Name)[\s|│:]\s*([^|│\n]+)',
             'email': r'(?:Email|E-mail|Email\s*Address)[\s|│:]\s*([^|│\n]+)',
             'phone': r'(?:Phone|Tel|Mobile|HP|H/P|Handphone|Hand\s*Phone|Contact\s*(?:No|Number)?)[\s|│:]\s*([^|│\n]+)',
-            'date_of_birth': r'(?:DOB|D\.O\.B|Date\s*of\s*Birth|Birth\s*Date|Birthday)[\s|│:]\s*([^|│\n]+)',
         }
         for key, pattern in patterns.items():
             match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
             if match:
                 value = match.group(1).strip()
                 if key == 'email':
-                    data[key] = value.lower()
+                    # 🛡️ VALIDATE: the label-capture grabs everything up to the
+                    # next pipe/newline, so "Email and phone." yields "and
+                    # phone.". Only accept it if it's a real address — otherwise
+                    # leave email UNSET so the proper _gather_email_candidates /
+                    # _sanitize_email pass (and the AI header) can find it.
+                    clean = self._sanitize_email(value)
+                    if clean:
+                        data[key] = clean
+                    else:
+                        logger.debug(f"⚠️ Table email rejected (not an email): '{value[:60]}'")
                 elif key == 'phone':
                     # 🛡️ VALIDATE: Phone must contain at least 7 digits!
                     # Prevents capturing "NIL", "Available upon request", etc.
@@ -2220,14 +2341,6 @@ class UltimateResumeExtractor:
                         data[key] = value
                     else:
                         logger.debug(f"⚠️ Table phone rejected (not enough digits): '{value}'")
-                elif key == 'date_of_birth':
-                    # 🛡️ VALIDATE: DOB must contain digits that look like a date
-                    if re.search(r'\d{1,2}[/\-.\s]\d{1,2}[/\-.\s]\d{2,4}', value) or \
-                       re.search(r'(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)', value, re.IGNORECASE) or \
-                       re.search(r'\d{4}[/\-]\d{1,2}[/\-]\d{1,2}', value):
-                        data[key] = value
-                    else:
-                        logger.debug(f"⚠️ Table DOB rejected (not a date): '{value}'")
                 else:
                     data[key] = value
         return data
@@ -2292,8 +2405,6 @@ class UltimateResumeExtractor:
             missing_fields.append("name")
         if not regex_results.get("phone"):
             missing_fields.append("phone")
-        if not regex_results.get("date_of_birth"):
-            missing_fields.append("dob")
         
         if missing_fields:
             logger.info(f"🤖 AI attempting to extract missing fields: {missing_fields}")
@@ -2317,10 +2428,6 @@ class UltimateResumeExtractor:
                     elif field == "phone":
                         # Standardize AI-extracted phone
                         ai_enhanced_results["phone"] = self._standardize_phone_format(ai_result, 'AI')
-                    elif field == "dob":
-                        # Validate date format
-                        if re.match(r'\d{4}-\d{2}-\d{2}', ai_result):
-                            ai_enhanced_results["date_of_birth"] = ai_result
         
         # 3️⃣ ADD AI CONFIDENCE SCORES
         ai_enhanced_results["ai_assisted"] = True
@@ -2462,10 +2569,11 @@ def process_resumes(extractor, folder_list, processed_folders, batch_size, exist
             df.to_csv(emergency_csv, index=False, encoding='utf-8-sig')
             logger.info(f"💾 Emergency CSV saved: {emergency_csv}")
 
-            # Save to JSON
+            # Save to JSON (formatted to standard export schema)
             emergency_json = f"{config.OUTPUT_FILENAME_PREFIX}_interrupted_{timestamp}.json"
+            emergency_export = [format_result_as_export_json(r) for r in results]
             with open(emergency_json, 'w', encoding='utf-8') as f:
-                json.dump(results, f, ensure_ascii=False, indent=2, default=str)
+                json.dump(emergency_export, f, ensure_ascii=False, indent=8, default=str)
             logger.info(f"💾 Emergency JSON saved: {emergency_json}")
 
             print(f"\n✅ Saved {len(results)} candidates before exit!")
@@ -2516,6 +2624,210 @@ def process_resumes(extractor, folder_list, processed_folders, batch_size, exist
 
     return results
 
+
+# =============================================================================
+# JSON EXPORT FORMAT TRANSFORMATION
+# =============================================================================
+
+def _classify_job_function(title: str) -> str:
+    """Map a job title string to a broad function category."""
+    if not title:
+        return ""
+    t = title.lower()
+    if any(k in t for k in ["sales", "retail", "cashier", "store", "shop", "boutique", "merchandise"]):
+        return "Sales"
+    if any(k in t for k in ["finance", "account", "audit", "tax", "banking", "investment", "treasury", "credit"]):
+        return "Finance"
+    if any(k in t for k in ["software", "developer", "programmer", "it ", " it", "tech", "system", "data", "network", "devops", "cloud", "security", "infrastructure"]):
+        return "Technology"
+    if any(k in t for k in ["hr", "human resource", "recruit", "talent", "people", "compensation", "payroll"]):
+        return "Human Resources"
+    if any(k in t for k in ["market", "brand", "digital", "content", "social media", "pr", "communications", "advertis"]):
+        return "Marketing"
+    if any(k in t for k in ["operation", "logistic", "supply chain", "procurement", "warehouse", "inventory", "distribution"]):
+        return "Operations"
+    if any(k in t for k in ["nurse", "doctor", "medical", "healthcare", "health", "clinic", "pharma", "dental"]):
+        return "Healthcare"
+    if any(k in t for k in ["admin", "secretary", "receptionist", "clerk", "office manager", "personal assistant"]):
+        return "Admin"
+    if any(k in t for k in ["teacher", "lecturer", "educator", "tutor", "instructor", "trainer"]):
+        return "Education"
+    if any(k in t for k in ["customer service", "customer support", "help desk", "call center", "contact center"]):
+        return "Customer Service"
+    if any(k in t for k in ["manager", "director", "head of", "chief", "vp ", "president", "ceo", "coo", "cfo"]):
+        return "Management"
+    return ""
+
+
+# Ordered list of known language names. More-specific dialects come before
+# the parent ("Mandarin" before "Chinese") so that "Chinese (Mandarin)" yields
+# "Mandarin" rather than "Chinese" when both match.
+_KNOWN_LANGUAGES: List[str] = [
+    "Mandarin", "Cantonese", "Hokkien", "Teochew", "Hakka",
+    "English", "Chinese", "Malay", "Bahasa Melayu", "Tamil",
+    "Hindi", "Japanese", "Korean", "French", "German", "Spanish",
+    "Portuguese", "Italian", "Arabic", "Bengali", "Urdu", "Punjabi",
+    "Indonesian", "Bahasa Indonesia", "Burmese", "Sinhalese", "Thai",
+    "Vietnamese", "Tagalog", "Filipino", "Greek", "Russian", "Dutch",
+    "Swedish", "Norwegian", "Danish", "Finnish", "Polish", "Czech",
+    "Hungarian", "Romanian", "Turkish",
+]
+_KNOWN_LANGUAGES_LOWER: set = {l.lower() for l in _KNOWN_LANGUAGES}
+
+
+def _extract_languages_from_raw(text: str) -> List[str]:
+    """
+    Scan `text` for any known language names and return them in the canonical
+    capitalisation.  Handles cases like:
+      "Writes & Speaksenglish & Malay."  → ["English", "Malay"]
+      "Reads"                            → []
+      "Others"                           → []
+      "Page 2"                           → []
+
+    Tries word-boundary match first; falls back to substring match to catch
+    verb-concatenated tokens like "Speaksenglish".
+    """
+    found: List[str] = []
+    seen: set = set()
+    for lang in _KNOWN_LANGUAGES:
+        key = lang.lower()
+        if key in seen:
+            continue
+        # Word-boundary search (normal case)
+        if re.search(rf'\b{re.escape(lang)}\b', text, re.IGNORECASE):
+            found.append(lang)
+            seen.add(key)
+            # If we matched a dialect, suppress the parent "Chinese"
+            if key in {"mandarin", "cantonese", "hokkien", "teochew", "hakka"}:
+                seen.add("chinese")
+        # Substring fallback for concatenated tokens, e.g. "Speaksenglish"
+        elif re.search(re.escape(lang), text, re.IGNORECASE):
+            found.append(lang)
+            seen.add(key)
+            if key in {"mandarin", "cantonese", "hokkien", "teochew", "hakka"}:
+                seen.add("chinese")
+    return found
+
+
+def _classify_degree_type(degree_text: str, institution: str) -> str:
+    """Classify a degree into a standard type."""
+    combined = f"{degree_text} {institution}".lower()
+    if any(k in combined for k in ["phd", "ph.d", "doctor", "doctorate"]):
+        return "PhD"
+    if any(k in combined for k in ["master", "msc", "m.sc", "mba", "m.eng", "m.a.", "m.b.a", "m.ed", "mphil"]):
+        return "Master"
+    if any(k in combined for k in ["bachelor", "bsc", "b.sc", "b.eng", "b.a.", "bba", "b.b.a", "honours", "honor", "hons", "degree in"]):
+        return "Bachelor"
+    if any(k in combined for k in ["diploma", "dip.", " dip "]):
+        return "Diploma"
+    return "Others"
+
+
+def format_result_as_export_json(result: Dict) -> Dict:
+    """
+    Transform an internal extraction result dict into the standard candidate
+    export JSON format used for downstream systems.
+    """
+    # --- Work Experience ---
+    raw_exp = result.get("_raw_experience") or []
+    work_experience = []
+    for job in raw_exp:
+        if not isinstance(job, dict):
+            continue
+        dates_str = job.get("dates", "")
+        from_date, to_date = "", ""
+        if " - " in dates_str:
+            parts = dates_str.split(" - ", 1)
+            from_date = parts[0].strip()
+            to_date = parts[1].strip()
+        elif dates_str:
+            from_date = dates_str
+
+        description = job.get("description", "")
+        if description and description.lower() not in {"description not available", "n/a", "none", ""}:
+            responsibilities = [r.strip() for r in description.split("|") if r.strip() and len(r.strip()) > 3]
+        else:
+            responsibilities = []
+
+        work_experience.append({
+            "company": job.get("company", ""),
+            "title": job.get("role", ""),
+            "from": from_date,
+            "to": to_date,
+            "responsibility": responsibilities,
+        })
+
+    # --- Education ---
+    raw_edu = result.get("_raw_education") or []
+    education = []
+    for edu in raw_edu:
+        if not isinstance(edu, dict):
+            continue
+        institution = edu.get("institution", "")
+        degree_text = edu.get("degree", "")
+        education.append({
+            "school": institution,
+            "major": degree_text,
+            "Degree": _classify_degree_type(degree_text, institution),
+        })
+
+    # --- Language Skills ---
+    raw_langs = result.get("_raw_languages") or []
+    language_skills = []
+    seen_langs: set = set()
+
+    for lang in raw_langs:
+        if isinstance(lang, dict):
+            lang_name = lang.get("language", "")
+        elif isinstance(lang, str):
+            lang_name = lang
+        else:
+            continue
+        if not lang_name:
+            continue
+        for extracted in _extract_languages_from_raw(lang_name):
+            if extracted.lower() not in seen_langs:
+                seen_langs.add(extracted.lower())
+                language_skills.append(extracted)
+
+    # --- Skills & Tags ---
+    hard_skills = result.get("_raw_hard_skills") or []
+    soft_skills = result.get("_raw_soft_skills") or []
+    all_skills = [s for s in list(hard_skills) + list(soft_skills) if s]
+    # Tags: short hard-skill tokens that look like tool/system names (≤3 words, ≤30 chars)
+    tags = [s for s in hard_skills if s and len(s.split()) <= 3 and len(s) <= 30]
+
+    # --- Current Company / Title from most-recent role ---
+    current_company = work_experience[0].get("company", "") if work_experience else ""
+    current_title = work_experience[0].get("title", "") if work_experience else ""
+
+    return {
+        "ID": str(result.get("ID", "")) if result.get("ID") is not None else "",
+        "Name": result.get("Name") or "",
+        "Page": "",
+        "Phone": result.get("Phone") or "",
+        "Email": result.get("Email") or "",
+        "Current Company": current_company,
+        "Current Title": current_title,
+        "Team": "",
+        "Current Location": result.get("Location") or "",
+        "Expected Location": "",
+        "Gender": "",
+        "Created By": "",
+        "Creation Date": "",
+        "Last Contact": "",
+        "Function": _classify_job_function(current_title),
+        "Industry": [],
+        "Summary": result.get("Summary") or "",
+        "Language Skills": language_skills,
+        "Work Experience": work_experience,
+        "Education": education,
+        "Project Experience": "",
+        "tags": tags,
+        "skills": all_skills,
+    }
+
+
 def generate_reports(results: List[Dict], empty_folders: List[str]):
     """Generates CSV reports for the extraction results."""
     print("\n" + "═" * 80)
@@ -2527,20 +2839,21 @@ def generate_reports(results: List[Dict], empty_folders: List[str]):
     
     # 🌟 NEW: AI STATISTICS SECTION! 🌟
     # Calculate AI usage stats
-    ai_assisted_count = sum(1 for r in results if r.get('AI_Assisted', False))
-    ai_enhanced_names = sum(1 for r in results if r.get('AI_Assisted', False) and r.get('Name'))
-    ai_enhanced_phones = sum(1 for r in results if r.get('AI_Assisted', False) and r.get('Phone'))
-    ai_enhanced_dobs = sum(1 for r in results if r.get('AI_Assisted', False) and r.get('Date_of_Birth'))
-
+    ai_assisted_count  = sum(1 for r in results if r.get('AI_Assisted', False))
+    ai_enhanced_names  = sum(1 for r in results if r.get('AI_Assisted', False) and r.get('Name'))
+    # Phone and Email are extracted by regex; count per actual method
+    regex_phones = sum(1 for r in results if r.get('Phone_Method') == 'Regex')
+    regex_emails = sum(1 for r in results if r.get('Email_Method') == 'Regex')
     # Main data report - CSV
     output_csv = f"{config.OUTPUT_FILENAME_PREFIX}_{timestamp}.csv"
     df.to_csv(output_csv, index=False, encoding='utf-8-sig')
     print(f"\n📄 Main data saved to: {output_csv}")
 
-    # Main data report - JSON
+    # Main data report - JSON (formatted to standard export schema)
     output_json = f"{config.OUTPUT_FILENAME_PREFIX}_{timestamp}.json"
+    export_records = [format_result_as_export_json(r) for r in results]
     with open(output_json, 'w', encoding='utf-8') as f:
-        json.dump(results, f, ensure_ascii=False, indent=2, default=str)
+        json.dump(export_records, f, ensure_ascii=False, indent=8, default=str)
     print(f"📄 Main data saved to: {output_json}")
 
     # 🗣️ NEW: Language Classification Report 🗣️
@@ -2575,7 +2888,10 @@ def generate_reports(results: List[Dict], empty_folders: List[str]):
     # Missing fields report
     missing_report = []
     for _, row in df.iterrows():
-        missing = [f for f in ['Name', 'Email', 'Phone', 'Date_of_Birth'] if pd.isna(row.get(f))]
+        missing = [
+            f for f in ['Name', 'Email', 'Phone', 'Skills', 'Working_Experience', 'School_University']
+            if pd.isna(row.get(f)) or str(row.get(f, '')).strip() in ('', 'None', '[]', '{}')
+        ]
         if missing:
             missing_report.append({
                 'ID': row.get('ID', 'Unknown'),
@@ -2630,13 +2946,16 @@ def generate_reports(results: List[Dict], empty_folders: List[str]):
         ai_report = []
         for _, row in df.iterrows():
             if row.get('AI_Assisted', False):
+                ai_enhanced = [
+                    field for field in ['Name', 'Skills', 'Working_Experience', 'School_University', 'Summary']
+                    if pd.notna(row.get(field)) and str(row.get(field, '')).strip() not in ('', 'None', '[]', '{}')
+                ]
                 ai_report.append({
                     'ID': row.get('ID', 'Unknown'),
                     'Filenames_Processed': row['Filenames_Processed'],
-                    'AI_Enhanced_Fields': ', '.join([
-                        field for field in ['Name', 'Email', 'Phone', 'Date_of_Birth']
-                        if pd.notna(row.get(field))
-                    ]),
+                    'AI_Enhanced_Fields': ', '.join(ai_enhanced),
+                    'Phone_Method': row.get('Phone_Method', 'Regex'),
+                    'Email_Method': row.get('Email_Method', 'Regex'),
                     'Extraction_Status': row.get('Extraction_Status', 'Unknown')
                 })
         
@@ -2651,8 +2970,8 @@ def generate_reports(results: List[Dict], empty_folders: List[str]):
         print("\n🤖 AI ASSISTANCE REPORT:")
         print(f"✨ Total AI-Assisted Extractions: {ai_assisted_count}/{len(results)} ({ai_assisted_count/len(results)*100:.1f}%)")
         print(f"   💅 Names enhanced by AI: {ai_enhanced_names}")
-        print(f"   📱 Phones extracted by AI: {ai_enhanced_phones}")
-        print(f"   🎂 DOBs found by AI: {ai_enhanced_dobs}")
+        print(f"   📱 Phones extracted by Regex: {regex_phones}")
+        print(f"   📧 Emails extracted by Regex: {regex_emails}")
         
         # Which files needed AI help the most?
         ai_files = [r['Filenames_Processed'] for r in results if r.get('AI_Assisted', False)]
@@ -2666,11 +2985,30 @@ def generate_reports(results: List[Dict], empty_folders: List[str]):
         print("\n🤖 AI ASSISTANCE: Not needed - Regex handled everything! 💪")
 
     print("\n📊 Field Extraction Success Rates:")
-    for field in ['ID', 'Name', 'Email', 'Phone', 'Date_of_Birth']:
-        if field in df.columns:
-            success_rate = (df[field].notna().sum() / len(df)) * 100 if len(df) > 0 else 0
+    field_display = [
+        ('ID',                 'ID'),
+        ('Name',               'Name'),
+        ('Email',              'Email'),
+        ('Phone',              'Phone'),
+        ('Location',           'Location'),
+        ('Skills',             'Skills'),
+        ('Working_Experience', 'Working Experience'),
+        ('School_University',  'Education'),
+        ('Summary',            'Summary'),
+    ]
+    for col, label in field_display:
+        if col in df.columns:
+            filled = df[col].apply(
+                lambda v: bool(v) and str(v).strip() not in ('', 'None', 'nan', '[]', '{}')
+            ).sum()
+            success_rate = (filled / len(df)) * 100 if len(df) > 0 else 0
+            method_tag = ""
+            if col == 'Phone':
+                method_tag = f" [Regex: {regex_phones}]"
+            elif col == 'Email':
+                method_tag = f" [Regex: {regex_emails}]"
             emoji = "✅" if success_rate > 80 else "⚠️" if success_rate > 50 else "🚨"
-            print(f"  {emoji} {field}: {success_rate:.1f}% success")
+            print(f"  {emoji} {label}: {success_rate:.1f}% success{method_tag}")
     
     # 🌟 NEW: Show extraction method breakdown! 🌟
     if 'AI_Assisted' in df.columns:
@@ -2681,13 +3019,22 @@ def generate_reports(results: List[Dict], empty_folders: List[str]):
         print(f"  ⚡ Regex-only extractions: {regex_only} ({regex_only/len(df)*100:.1f}%)")
         print(f"  🤖 AI-assisted extractions: {ai_assisted} ({ai_assisted/len(df)*100:.1f}%)")
         
-        # Performance comparison
+        # Per-field success rate: Regex-only vs AI-assisted rows
         if ai_assisted > 0:
-            regex_success = df[df['AI_Assisted'] == False]['Name'].notna().sum() / regex_only * 100 if regex_only > 0 else 0
-            ai_success = df[df['AI_Assisted'] == True]['Name'].notna().sum() / ai_assisted * 100
-            print(f"\n  📊 Success rate comparison (Name field):")
-            print(f"     Regex-only: {regex_success:.1f}%")
-            print(f"     AI-assisted: {ai_success:.1f}%")
+            compare_fields = [
+                ('Name',               'Name'),
+                ('Skills',             'Skills'),
+                ('Working_Experience', 'Working Experience'),
+                ('School_University',  'Education'),
+            ]
+            print(f"\n  📊 Success rate comparison (Regex-only vs AI-assisted rows):")
+            for col, label in compare_fields:
+                if col not in df.columns:
+                    continue
+                r_rate = df[df['AI_Assisted'] == False][col].notna().sum() / regex_only * 100 if regex_only > 0 else 0
+                a_rate = df[df['AI_Assisted'] == True][col].notna().sum() / ai_assisted * 100
+                print(f"     {label:20s} — Regex-only: {r_rate:.1f}%  |  AI-assisted: {a_rate:.1f}%")
+        print(f"\n  🔑 Phone/Email always use Regex — not counted as AI-assisted.")
 
     # In generate_reports function
     if any(r.get('AI_Used', False) for r in results):
@@ -2793,7 +3140,7 @@ def list_candidates_and_files(extractor: "UltimateResumeExtractor"):
 def main():
     """🎭 The Main Show with MENU MAGIC!"""
 
-    from utils import display_menu, save_checkpoint, load_checkpoint, get_checkpoint_info, clear_checkpoint, print_batch_table, FeedbackLoopSystem, InteractiveCorrectionSystem, PatternLearningSystem, PerformanceMonitor, select_folders_to_process
+    from utils import display_menu, save_checkpoint, load_checkpoint, get_checkpoint_info, clear_checkpoint, print_batch_table, FeedbackLoopSystem, InteractiveCorrectionSystem, PatternLearningSystem, PerformanceMonitor, select_folders_to_process_enhanced
 
     folder_list = []
     processed_folders = []
@@ -2844,40 +3191,42 @@ def main():
             
         elif choice == "3":
             print("\n🎯 SELECTIVE PROCESSING")
-            
-            # Get ALL candidate folders properly
-            all_candidate_folders = []
-            
-            # Scan through date folders
-            for date_folder in os.scandir(config.RESUME_FOLDER):
-                if date_folder.is_dir() and re.match(r'\d{4}-\d{2}-\d{2}', date_folder.name):
-                    print(f"\n📅 Scanning {date_folder.name}...")
-                    
-                    # Get candidate folders inside this date folder
-                    for candidate in os.scandir(date_folder.path):
-                        if candidate.is_dir():
-                            all_candidate_folders.append(candidate.path)
-                            print(f"   ✓ Found: {candidate.name}")
-            
-            if not all_candidate_folders:
+
+            # Uses the SAME scanner that produced the count above
+            # (find_candidate_folders -> all_folders), so flat/numeric and
+            # date-wrapped layouts both work. Unlike option 4 (debug: auto
+            # runs the FIRST folder), this lets the user pick WHICH folders.
+            if not all_folders:
                 print("😱 No candidate folders found!")
                 continue
-            
-            print(f"\n💡 Found {len(all_candidate_folders)} total candidate folders")
-            print("\nSelect what to process:")
-            print("  [1] Process ALL candidates")
-            print("  [2] Process specific number of candidates")
-            
-            sub_choice = input("\nYour choice (1-2): ").strip()
-            
-            if sub_choice == "1":
-                folder_list = all_candidate_folders
-            elif sub_choice == "2":
-                num = int(input("How many candidates to process? "))
-                folder_list = all_candidate_folders[:num]
+
+            print(f"\n💡 {len(all_folders)} total candidate folders available")
+
+            # With thousands of folders, dumping every name is unusable, so
+            # offer an optional name filter first. Empty input = list all.
+            term = input(
+                "🔎 Type part of a folder name to narrow the list "
+                "(or press Enter to list all): "
+            ).strip().lower()
+            if term:
+                candidate_pool = [
+                    f for f in all_folders
+                    if term in os.path.basename(f).lower()
+                ]
+                if not candidate_pool:
+                    print(f"😱 No folders matched '{term}', darling! Try again.")
+                    continue
+                print(f"✨ {len(candidate_pool)} folder(s) match '{term}'")
             else:
+                candidate_pool = all_folders
+
+            # Let the user choose exactly which folders to run
+            # (numbers like "1, 3, 4", or "all").
+            folder_list = select_folders_to_process_enhanced(candidate_pool)
+            if not folder_list:
+                print("🤷‍♀️ Nothing selected — back to the menu.")
                 continue
-            
+
             processed_folders = []
             break
             
@@ -2886,14 +3235,9 @@ def main():
             
             # Find first candidate folder
             test_folder = None
-            for date_folder in os.scandir(config.RESUME_FOLDER):
-                if date_folder.is_dir() and re.match(r'\d{4}-\d{2}-\d{2}', date_folder.name):
-                    for candidate in os.scandir(date_folder.path):
-                        if candidate.is_dir():
-                            test_folder = candidate.path
-                            break
-                    if test_folder:
-                        break
+            all_debug_folders = find_candidate_folders(config.RESUME_FOLDER)
+            if all_debug_folders:
+                test_folder = all_debug_folders[0]
             
             if test_folder:
                 print(f"📁 Testing with: {test_folder}")

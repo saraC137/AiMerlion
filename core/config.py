@@ -28,8 +28,8 @@ OUTPUT_FILENAME_PREFIX = "extracted_resume_data"
 
 # --- AI Model Selection (OPTIMIZED FOR ENGLISH!) ---
 # 💅 Smaller, faster models for English-only processing!
-FAST_MODEL = "aimerlion-extractor"              # Quick extractions (headers, simple fields)
-SMART_MODEL = "aimerlion-extractor"             # Complex extractions (experience, education)
+FAST_MODEL = "merlion:latest"              # Quick extractions (headers, simple fields)
+SMART_MODEL = "merlion:latest"             # Complex extractions (experience, education)
 DEFAULT_MODEL = FAST_MODEL         # Which model to use by default
 
 # 🎯 These are the variables other modules actually import:
@@ -99,3 +99,8 @@ ML_MODEL_DIR = "ml_models"                     # Directory for saved models
 ML_AUTO_TRAIN_AFTER_BATCH = True               # Auto-train after processing batch
 ML_MIN_TRAINING_SAMPLES = 20                   # Minimum samples before ML kicks in
 ML_RETRAIN_AFTER_CORRECTIONS = 10              # Retrain after N corrections
+
+# --- Ollama Timeout ---
+# Max seconds to wait for a single ollama.chat() response.
+# nemotron3:33b at 16384 ctx can be slow; 180s avoids false hangs on busy hardware.
+AI_OLLAMA_TIMEOUT = 180
