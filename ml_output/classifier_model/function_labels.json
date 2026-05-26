@@ -1,0 +1,29 @@
+{
+  "classes": [
+    "Accounting & Finance",
+    "Administration",
+    "Customer Service",
+    "Engineering",
+    "IT",
+    "Management",
+    "Marketing",
+    "Sales",
+    "Shipping & Logistics",
+    "others"
+  ],
+  "distribution": {
+    "Accounting & Finance": 6,
+    "Engineering": 20,
+    "Sales": 30,
+    "Management": 13,
+    "IT": 126,
+    "Customer Service": 22,
+    "others": 108,
+    "Administration": 92,
+    "Shipping & Logistics": 8,
+    "Marketing": 4
+  },
+  "cv_f1_mean": 0.9799972606664824,
+  "cv_f1_std": 0.008423867396493031,
+  "n_samples": 429
+}

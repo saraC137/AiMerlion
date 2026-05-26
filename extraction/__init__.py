@@ -7,4 +7,5 @@ Module path convention:
   from extraction.ai_extractor import AIExtractor
   from extraction.document_parser import DocumentParser
   from extraction.ai_validator import AIValidator
+  from extraction.text_preprocessor import preprocess, clean, slice_sections
 """

@@ -26,6 +26,60 @@ import coloredlogs
 # Import helper functions from your utils.py
 from utils import standardize_phone_number, standardize_date
 import config
+from extraction.text_preprocessor import clean as _pp_clean, detect_sections as _pp_detect_sections
+
+# =====================================================================
+# JSON SCHEMAS FOR STRUCTURED OUTPUT (Ollama format parameter)
+# Passed as format= to ollama.chat() to enforce grammar-based constrained
+# generation — the model CANNOT output fields with wrong types or missing
+# required keys. Eliminates the need for post-processing "fix" methods.
+# =====================================================================
+
+HEADER_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "name":          {"type": ["string", "null"]},
+        "email":         {"type": ["string", "null"]},
+        "phone":         {"type": ["string", "null"]},
+        "nationality":   {"type": ["string", "null"]},
+        "location":      {"type": ["string", "null"]},
+        "language":      {"type": ["string", "null"]},
+        "linkedin":      {"type": ["string", "null"]},
+        "github":        {"type": ["string", "null"]},
+        "website":       {"type": ["string", "null"]},
+    },
+    "required": [
+        "name", "email", "phone", "nationality",
+        "location", "language", "linkedin", "github", "website",
+    ],
+}
+
+SKILLS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "hard": {"type": "array", "items": {"type": "string"}},
+        "soft": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["hard", "soft"],
+}
+
+SECTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "summary":        {"type": ["string", "null"]},
+        "skills":         {"type": ["string", "null"]},
+        "experience":     {"type": ["string", "null"]},
+        "education":      {"type": ["string", "null"]},
+        "certifications": {"type": ["string", "null"]},
+        "languages":      {"type": ["string", "null"]},
+        "others":         {"type": ["string", "null"]},
+    },
+    "required": [
+        "summary", "skills", "experience", "education",
+        "certifications", "languages", "others"
+    ],
+}
+
 
 class AIExtractor:
     """
@@ -41,14 +95,27 @@ class AIExtractor:
             self.logger = logging.getLogger(__name__)
             coloredlogs.install(level='INFO', logger=self.logger,
                               fmt='%(asctime)s - 🌸 %(levelname)s - %(message)s')
-        
+
+        _timeout = getattr(config, 'AI_OLLAMA_TIMEOUT', 180)
+        self._client = ollama.Client(timeout=_timeout)
         self.available = self._test_model()
-        
+
+        # BERT NER engine (lazy model load on first use)
+        self._ner_engine = None
+        self._ner_enabled = False
+        try:
+            from extraction.ner_engine import get_ner_engine
+            self._ner_engine = get_ner_engine(self.logger)
+            self._ner_enabled = True
+            self.logger.info("🧬 BERT NER Engine ready!")
+        except Exception as e:
+            self.logger.warning(f"⚠️ BERT NER not available: {e}")
+
     def _test_model(self) -> bool:
         """Test if the Ollama model is ready to serve!"""
         try:
             self.logger.info(f"🌸 Initializing {self.model_name} model...")
-            ollama.chat(model=self.model_name, messages=[{'role': 'user', 'content': 'Hi'}])
+            self._client.chat(model=self.model_name, messages=[{'role': 'user', 'content': 'Hi'}])
             self.logger.info(f"✨ {self.model_name} is READY! Extraction engines online!")
             return True
         except Exception as e:
@@ -106,7 +173,7 @@ class AIExtractor:
             '\ufeff', '\ufffe', '\uffff',
         ]
         for char in invisible_chars:
-            text = text.replace(char.encode().decode('unicode_escape'), '')
+            text = text.replace(char, '')
         
         # =====================================================================
         # STEP 3: NORMALIZE WHITESPACE CHARACTERS
@@ -118,13 +185,13 @@ class AIExtractor:
             '\u202f': ' ', '\u205f': ' ', '\u3000': ' ',
         }
         for char, replacement in whitespace_map.items():
-            text = text.replace(char.encode().decode('unicode_escape'), replacement)
+            text = text.replace(char, replacement)
         
         # =====================================================================
         # STEP 4: NORMALIZE LINE SEPARATORS
         # =====================================================================
-        text = text.replace('\u2028'.encode().decode('unicode_escape'), '\n')
-        text = text.replace('\u2029'.encode().decode('unicode_escape'), '\n')
+        text = text.replace('\u2028', '\n')
+        text = text.replace('\u2029', '\n')
         text = text.replace('\r\n', '\n')
         text = text.replace('\r', '\n')
         
@@ -136,7 +203,7 @@ class AIExtractor:
             '\u2015', '\u2212', '\u2043', '\ufe58', '\ufe63', '\uff0d',
         ]
         for char in dash_chars:
-            text = text.replace(char.encode().decode('unicode_escape'), '-')
+            text = text.replace(char, '-')
         
         # =====================================================================
         # STEP 6: NORMALIZE QUOTES
@@ -144,9 +211,9 @@ class AIExtractor:
         double_quotes = ['\u201c', '\u201d', '\u201e', '\u201f', '\u00ab', '\u00bb', '\u2033']
         single_quotes = ['\u2018', '\u2019', '\u201a', '\u201b', '\u2039', '\u203a', '\u2032', '\u0060', '\u00b4']
         for char in double_quotes:
-            text = text.replace(char.encode().decode('unicode_escape'), '"')
+            text = text.replace(char, '"')
         for char in single_quotes:
-            text = text.replace(char.encode().decode('unicode_escape'), "'")
+            text = text.replace(char, "'")
         
         # =====================================================================
         # STEP 7: NORMALIZE BULLET CHARACTERS
@@ -159,7 +226,7 @@ class AIExtractor:
             '\u2714', '\u2717', '\u2718', '\u261e', '\u2794',
         ]
         for char in bullet_chars:
-            text = text.replace(char.encode().decode('unicode_escape'), '* ')
+            text = text.replace(char, '* ')
         
         # =====================================================================
         # STEP 8: CLEAN UP CONTROL CHARACTERS
@@ -173,8 +240,10 @@ class AIExtractor:
         text = re.sub(r'\n\s*\n\s*\n+', '\n\n', text)
         text = re.sub(r'[ \t]+$', '', text, flags=re.MULTILINE)
         
-        self.logger.info("🧚‍♀️ Text normalization complete!")
-        return text.strip()
+        # Delegate final pass to the canonical preprocessor
+        result = _pp_clean(text)
+        self.logger.info("Text normalization complete.")
+        return result
     
     def _extract_email_regex(self, text: str) -> Optional[str]:
         """
@@ -225,6 +294,79 @@ class AIExtractor:
         email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
         return bool(re.match(email_pattern, email.strip()))
 
+    def _extract_phone_regex(self, text: str) -> Optional[str]:
+        """
+        Extract phone number using pure regex for Singapore (+65) and Malaysia (+60).
+        Searches labeled fields first (HP, Phone, Mobile, Tel), then bare numbers.
+        Returns raw matched string; caller should pass through standardize_phone_number.
+        """
+        header_text = text[:3000] if len(text) > 3000 else text
+
+        # --- Labeled phone patterns (highest confidence) ---
+        label_pattern = (
+            r'(?:HP|Handphone|H\/P|Phone|Mobile|Tel(?:ephone)?|Contact|Cel(?:l)?)'
+            r'\s*[:\-]?\s*'
+            r'(\+?[\d][\d\s\-\(\)\.]{6,17})'
+        )
+        for m in re.finditer(label_pattern, header_text, re.IGNORECASE):
+            candidate = m.group(1).strip()
+            if self._is_valid_phone(candidate):
+                self.logger.info(f"Regex found labeled phone: {candidate}")
+                return candidate
+
+        # --- Singapore: explicit +65 or 65 country code ---
+        sg_pattern = r'(?<!\d)(\+?65[\s\-\.]?[689]\d{3}[\s\-\.]?\d{4})(?!\d)'
+        m = re.search(sg_pattern, header_text)
+        if m:
+            candidate = m.group(1).strip()
+            self.logger.info(f"Regex found SG phone: {candidate}")
+            return candidate
+
+        # --- Malaysia: explicit +60 or 60 country code ---
+        my_pattern = r'(?<!\d)(\+?60[\s\-\.]?1[0-9][\s\-\.]?\d{3,4}[\s\-\.]?\d{4})(?!\d)'
+        m = re.search(my_pattern, header_text)
+        if m:
+            candidate = m.group(1).strip()
+            self.logger.info(f"Regex found MY phone (with code): {candidate}")
+            return candidate
+
+        # --- Singapore bare 8-digit number starting with 6, 8, or 9 ---
+        sg_bare = r'(?<!\d)([689]\d{3}[\s\-\.]?\d{4})(?!\d)'
+        for m in re.finditer(sg_bare, header_text):
+            candidate = m.group(1).strip()
+            # Avoid matching years or postal codes by checking context
+            start = max(0, m.start() - 20)
+            ctx = header_text[start:m.start()].lower()
+            if any(w in ctx for w in ['postal', 'zip', 'nric', 'ic no', 'year', 'batch', 'order']):
+                continue
+            self.logger.info(f"Regex found SG bare phone: {candidate}")
+            return candidate
+
+        # --- Malaysia bare mobile starting with 01 (10-11 digits) ---
+        my_bare = r'(?<!\d)(01[0-9][\s\-\.]?\d{3,4}[\s\-\.]?\d{4})(?!\d)'
+        m = re.search(my_bare, header_text)
+        if m:
+            candidate = m.group(1).strip()
+            self.logger.info(f"Regex found MY bare phone: {candidate}")
+            return candidate
+
+        return None
+
+    def _is_valid_phone(self, phone: str) -> bool:
+        """
+        Validate a candidate phone string is a plausible SG or MY number.
+        Accepts strings that contain 8-12 digits (after stripping formatting).
+        """
+        if not phone or not isinstance(phone, str):
+            return False
+        digits = re.sub(r'\D', '', phone)
+        if len(digits) < 8 or len(digits) > 15:
+            return False
+        # Must look like a real phone — reject pure years/IDs
+        if re.fullmatch(r'(19|20)\d{2}', digits):
+            return False
+        return True
+
     def _find_contact_area(self, text: str) -> str:
         """
         📝 Find the contact/header area of the resume (usually first 2000 chars).
@@ -245,100 +387,6 @@ class AIExtractor:
 
         # Fallback: use first 2000 characters
         return text[:2000] if len(text) > 2000 else text
-
-    def _extract_dob_regex(self, text: str) -> Optional[str]:
-        """
-        🎂 FAIRY CODEMOTHER'S DOB EXTRACTOR! 🎂
-        
-        Handles multiple DOB formats like a BOSS! 💅
-        This is like finding your birthday on a cake - it's there somewhere!
-        
-        Supported formats:
-        - DD/MM/YYYY (15/03/1990)
-        - MM/DD/YYYY (03/15/1990)
-        - DD-MM-YYYY (15-03-1990)
-        - Month DD, YYYY (March 15, 1990)
-        - DD Month YYYY (15 March 1990)
-        - YYYY-MM-DD (1990-03-15) - ISO format
-        """
-        if not text:
-            return None
-        
-        # 🎯 Pattern 1: Look for DOB labels first (highest accuracy!)
-        # This is like looking for a NAME TAG at a party! 🏷️
-        dob_label_patterns = [
-            # "DOB: 15/03/1990" or "Date of Birth: March 15, 1990"
-            r'(?:DOB|D\.O\.B\.?|Date\s+of\s+Birth|Birth\s*Date|Birthday|Born)\s*[:\-]?\s*([0-3]?[0-9][\/\-][0-1]?[0-9][\/\-]\d{4})',
-            r'(?:DOB|D\.O\.B\.?|Date\s+of\s+Birth|Birth\s*Date|Birthday|Born)\s*[:\-]?\s*(\d{4}[\/\-][0-1]?[0-9][\/\-][0-3]?[0-9])',
-            r'(?:DOB|D\.O\.B\.?|Date\s+of\s+Birth|Birth\s*Date|Birthday|Born)\s*[:\-]?\s*((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+[0-3]?[0-9],?\s+\d{4})',
-            r'(?:DOB|D\.O\.B\.?|Date\s+of\s+Birth|Birth\s*Date|Birthday|Born)\s*[:\-]?\s*([0-3]?[0-9]\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{4})',
-        ]
-        
-        for pattern in dob_label_patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                dob = match.group(1).strip()
-                # Validate it's a reasonable date
-                if self._is_valid_dob(dob):
-                    self.logger.info(f"🎂 Found DOB with label: {dob}")
-                    return dob
-        
-        # 🎯 Pattern 2: Look for dates in typical header positions
-        # Only search first 3000 chars (header area) to avoid catching other dates
-        header_text = text[:3000]
-        
-        # Look for dates that appear near contact info (conservative approach)
-        # This is like looking for clues in a detective story! 🕵️
-        date_patterns = [
-            r'\b([0-3]?[0-9][\/\-][0-1]?[0-9][\/\-](?:19|20)\d{2})\b',  # DD/MM/YYYY or MM/DD/YYYY
-            r'\b(\d{4}[\/\-][0-1]?[0-9][\/\-][0-3]?[0-9])\b',  # YYYY-MM-DD
-            r'\b((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+[0-3]?[0-9],?\s+(?:19|20)\d{2})\b',  # Month DD, YYYY
-            r'\b([0-3]?[0-9]\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+(?:19|20)\d{2})\b',  # DD Month YYYY
-        ]
-        
-        for pattern in date_patterns:
-            matches = re.finditer(pattern, header_text, re.IGNORECASE)
-            for match in matches:
-                dob = match.group(1).strip()
-                # Validate it's a reasonable birth date
-                if self._is_valid_dob(dob):
-                    # Additional check: Make sure it's not too recent (not born in last 15 years for job seekers)
-                    # This is like checking if the story makes sense! 📖
-                    # ✅ Validate birth year is within working age range
-                    # Born 1955-2008 = ages 18-71 (as of 2026)
-                    year_match_check = re.search(r'(19\d{2}|20[0-1]\d)', dob)
-                    year_val = int(year_match_check.group(1)) if year_match_check else 0
-                    if 1955 <= year_val <= 2008:
-                        self.logger.info(f"🎂 Found potential DOB in header: {dob}")
-                        return dob
-        
-        return None
-
-    def _is_valid_dob(self, dob_str: str) -> bool:
-        """
-        ✅ Validate that a date string looks like a reasonable DOB
-        
-        This is like checking if an outfit makes sense - 
-        you wouldn't wear a swimsuit to a snowstorm! ❄️👙
-        """
-        if not dob_str or len(dob_str) < 6:
-            return False
-        
-        # Should contain digits
-        if not any(char.isdigit() for char in dob_str):
-            return False
-        
-        # Extract year (should be 1940-2010 for working professionals)
-        year_match = re.search(r'(19\d{2}|20[0-1]\d)', dob_str)
-        if year_match:
-            year = int(year_match.group(1))
-            # Working professionals are typically born between 1940-2010
-            if 1940 <= year <= 2010:
-                return True
-            else:
-                return False
-        
-        return False
 
     def _extract_summary_regex(self, text: str) -> str:
         """
@@ -384,7 +432,29 @@ class AIExtractor:
             return certifications
 
         # Split by common delimiters and extract each certification
-        lines = re.split(r'\n|[•◗◗‹▪â– ►]', cert_text)
+        # Split by common delimiters and extract each certification
+        lines = re.split(r'\n|[•◗◗‹▪â– ►]', cert_text)
+        
+        # 💎 Merge orphan level qualifiers back to previous cert line
+        # e.g. ["AWS Certified Solutions Architect", "Associate"] 
+        #   → ["AWS Certified Solutions Architect Associate"]
+        level_qualifiers = {
+            'associate', 'professional', 'specialty', 'expert', 'foundational',
+            'practitioner', 'fundamentals', 'beginner', 'intermediate', 'advanced',
+            'master', 'level 1', 'level 2', 'level 3', 'level 4', 'level 5',
+            'tier 1', 'tier 2', 'tier 3', 'lvl 1', 'lvl 2', 'lvl 3'
+        }
+        merged_lines = []
+        for line in lines:
+            line = line.strip().lstrip('-*•·▪►').strip()
+            if not line:
+                continue
+            # Is this line JUST a level qualifier? Then merge with previous
+            if line.lower() in level_qualifiers and merged_lines:
+                merged_lines[-1] = merged_lines[-1].rstrip(',').rstrip() + " " + line
+            else:
+                merged_lines.append(line)
+        lines = merged_lines
 
         for line in lines:
             line = line.strip()
@@ -787,9 +857,10 @@ class AIExtractor:
         if not self.available:
             return {}
 
-        # 📍 STEP 1: Try regex extraction for email (most reliable!)
+        # 📍 STEP 1: Try regex extraction for email and phone (most reliable!)
         regex_email = self._extract_email_regex(text)
-        
+        regex_phone = self._extract_phone_regex(text)
+
         # 📍 STEP 2: Search a LARGER text sample (header info can be anywhere!)
         # Like searching for your misplaced wig - check EVERYWHERE! 💁‍♀️
         text_sample = text[:10000] if len(text) > 10000 else text
@@ -801,17 +872,14 @@ class AIExtractor:
     **IMPORTANT INSTRUCTIONS:**
     1. Search the ENTIRE resume header and contact section carefully
     2. Extract data EXACTLY as written - do not modify or format
-    3. Look for labels like "DOB:", "Date of Birth:", "Born:", "Birthday:"
-    4. DOB can be in various formats: DD/MM/YYYY, MM/DD/YYYY, DD-MM-YYYY, Month DD, YYYY
-    5. If a field is not found, return null (not empty string, not "N/A")
-    6. Phone numbers may include country codes (+65, +1, etc.)
-    7. Location can be "City, Country" or just "City"
+    3. If a field is not found, return null (not empty string, not "N/A")
+    4. Phone numbers may include country codes (+65, +60, etc.)
+    5. Location can be "City, Country" or just "City"
 
     **REQUIRED FIELDS TO EXTRACT:**
     - name: Full name (first and last name together)
     - email: Email address (username@domain.com format)
     - phone: Phone number (with country code if present). SG phones are 8 digits.
-    - date_of_birth: Date of birth in ANY format found (preserve original format)
     - nationality: Nationality or citizenship if mentioned (e.g. "Singaporean", "Malaysian")
     - location: Current city and/or country
     - language: Languages spoken (e.g. "English & Chinese"). Often appears as "Language : English & Chinese" in the header — DO NOT skip this!
@@ -825,7 +893,6 @@ class AIExtractor:
     "John Michael Doe
     Email: john.doe@email.com
     Phone: +65 9123 4567
-    DOB: 15/03/1990
     Location: Singapore
     LinkedIn: linkedin.com/in/johndoe"
 
@@ -834,7 +901,6 @@ class AIExtractor:
     "name": "John Michael Doe",
     "email": "john.doe@email.com",
     "phone": "+65 9123 4567",
-    "date_of_birth": "15/03/1990",
     "nationality": null,
     "location": "Singapore",
     "language": null,
@@ -846,7 +912,6 @@ class AIExtractor:
     Example Resume 2:
     "Sarah Chen
     sarah.chen@company.com | (+65) 8765-4321
-    Date of Birth: March 22, 1988
     Nationality: Singaporean
     Address: 123 Main Street, Singapore 123456"
 
@@ -855,7 +920,6 @@ class AIExtractor:
     "name": "Sarah Chen",
     "email": "sarah.chen@company.com",
     "phone": "+65 8765-4321",
-    "date_of_birth": "March 22, 1988",
     "nationality": "Singaporean",
     "location": "Singapore",
     "language": null,
@@ -866,7 +930,6 @@ class AIExtractor:
 
     Example Resume 3 (Singapore format with Language in header):
     "Nurul Ain Binte Ismail
-    Date of Birth	: 13 Oct 1989
     Nationality	: Singaporean
     Language	: English & Chinese
     HP	: 91234567
@@ -878,7 +941,6 @@ class AIExtractor:
     "name": "Nurul Ain Binte Ismail",
     "email": "nurul.ain@email.com",
     "phone": "91234567",
-    "date_of_birth": "13 Oct 1989",
     "nationality": "Singaporean",
     "location": "Blk 123 Ang Mo Kio Ave 4, Singapore 560123",
     "language": "English & Chinese",
@@ -893,8 +955,8 @@ class AIExtractor:
 
     **OUTPUT ONLY VALID JSON - NO MARKDOWN, NO EXPLANATIONS:**"""
 
-        # 📍 STEP 4: Call the AI with our fabulous new prompt!
-        result = self._call_ollama(prompt)
+        # 📍 STEP 4: Call the AI with schema-enforced structured output
+        result = self._call_ollama(prompt, schema=HEADER_SCHEMA)
 
         # 📍 STEP 5: VALIDATE and ENHANCE the extraction!
         # This is the QUALITY CONTROL stage, sweetie! 💅
@@ -910,17 +972,20 @@ class AIExtractor:
             else:
                 result['email'] = None
                 self.logger.warning("⚠️ No valid email found in resume")
-        
-        # ✅ Validate DOB - try regex extraction if AI missed it
-        if not result.get('date_of_birth'):
-            dob_regex = self._extract_dob_regex(text_sample)
-            if dob_regex:
-                result['date_of_birth'] = dob_regex
-                self.logger.info(f"✅ Using regex-extracted DOB: {dob_regex}")
-        
-        # ✅ Validate phone - standardize format
-        if result.get('phone'):
-            result['phone'] = standardize_phone_number(result['phone'])
+
+        # ✅ Validate phone - use regex fallback if AI failed or returned garbage
+        ai_phone = result.get('phone')
+        if not self._is_valid_phone(ai_phone):
+            if ai_phone:
+                self.logger.warning(f"⚠️ AI returned invalid phone: '{str(ai_phone)[:40]}' - using regex fallback")
+            if regex_phone:
+                result['phone'] = standardize_phone_number(regex_phone)
+                self.logger.info(f"✅ Using regex-extracted phone: {result['phone']}")
+            else:
+                result['phone'] = None
+                self.logger.warning("⚠️ No valid SG/MY phone found in resume")
+        else:
+            result['phone'] = standardize_phone_number(ai_phone)
         
         # ✅ Clean name - remove titles and suffixes
         if result.get('name'):
@@ -939,8 +1004,16 @@ class AIExtractor:
                 result['nationality'] = None
         
         self.logger.info(f"✅ Header extraction complete! Found: {', '.join([k for k, v in result.items() if v])}")
-        
-        return result
+
+        # 💎 Remap header fields to canonical schema
+        canonical_header = {
+            "Name": result.get("name") or "",
+            "Email": result.get("email") or "",
+            "Phone": result.get("phone") or "",
+            "Current Location": result.get("location") or "",
+            "Gender": result.get("gender") or "",
+        }
+        return canonical_header
 
     def extract_deep_fields(self, text: str) -> Dict[str, Any]:
         """
@@ -948,20 +1021,114 @@ class AIExtractor:
         Because AI can't be trusted with structure, honey! 💅
         """
         if not self.available:
-            return self._pure_manual_extraction(text)
-        
+            result = self._pure_manual_extraction(text)
+            if self._ner_enabled:
+                result = self._enhance_with_bert_ner(result, text)
+            return result
+
         self.logger.info("🎭 Starting MANUAL-FIRST extraction...")
-        
+
         # ALWAYS start with manual extraction
         result = self._pure_manual_extraction(text)
-        
+
+        # Use AI section detection to improve BERT NER accuracy
+        ai_sections: Dict[str, str] = {}
+        if self._ner_enabled:
+            self.logger.info("🔍 Running AI section detection for BERT NER...")
+            ai_sections = self.detect_sections_ai(text)
+
+        # BERT NER: fill gaps that regex missed, using AI sections where available
+        if self._ner_enabled:
+            result = self._enhance_with_bert_ner(result, text, ai_sections=ai_sections)
+
         # ONLY use AI to enhance/disambiguate specific fields if needed
         if self._needs_ai_enhancement(result):
             self.logger.info("🤖 Using AI for skill categorization only...")
             result = self._enhance_skills_with_ai(result, text)
-        
-        self.logger.info(f"âœ… Extraction complete: {len(result.get('hard_skills', []))} hard skills, {len(result.get('working_experience', []))} jobs")
-        
+
+        self.logger.info(f"✅ Extraction complete: {len(result.get('hard_skills', []))} hard skills, {len(result.get('working_experience', []))} jobs")
+
+        # 💎 Map to canonical schema (annotation tool format)
+        canonical = self._remap_to_canonical_schema(result)
+        self.logger.info("✨ Output remapped to canonical schema")
+        return canonical
+
+    def _enhance_with_bert_ner(
+        self,
+        result: Dict[str, Any],
+        full_text: str,
+        ai_sections: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Use BERT NER (NEREngine) to fill in fields that regex extraction missed.
+        Only adds to empty / short fields — never overwrites regex results.
+        Uses ai_sections (from detect_sections_ai) when available for better context.
+        """
+        if not self._ner_enabled or self._ner_engine is None:
+            return result
+
+        self.logger.info("🧬 Running BERT NER enhancement...")
+        ai_sections = ai_sections or {}
+
+        # ── Work Experience ────────────────────────────────────────────────
+        if not result.get('working_experience'):
+            exp_text = ai_sections.get('experience') or full_text
+            entities = self._ner_engine.get_entities_by_type(
+                exp_text, ['Companies worked at', 'Designation', 'Years of Experience']
+            )
+            companies   = entities.get('Companies worked at', [])
+            titles      = entities.get('Designation', [])
+            years       = entities.get('Years of Experience', [])
+            if companies or titles:
+                n = max(len(companies), len(titles), 1)
+                for i in range(n):
+                    # Use the SAME internal schema as the regex / date-first
+                    # extractors ({company, role, dates, description}) so the
+                    # JSON exporter (format_result_as_export_json) maps it to
+                    # {company, title, from, to, responsibility[]} correctly.
+                    entry: Dict[str, Optional[str]] = {
+                        'company':     companies[i] if i < len(companies) else None,
+                        'role':        titles[i]    if i < len(titles)    else None,
+                        'dates':       years[i]     if i < len(years)     else "",
+                        'description': '',
+                    }
+                    result['working_experience'].append(entry)
+                self.logger.info(f"🧬 NER added {n} experience entries")
+
+        # ── Education ──────────────────────────────────────────────────────
+        if not result.get('education'):
+            edu_text = ai_sections.get('education') or full_text
+            entities = self._ner_engine.get_entities_by_type(
+                edu_text, ['College Name', 'Degree', 'Graduation Year']
+            )
+            colleges = entities.get('College Name', [])
+            degrees  = entities.get('Degree', [])
+            years    = entities.get('Graduation Year', [])
+            if colleges or degrees:
+                n = max(len(colleges), len(degrees), 1)
+                for i in range(n):
+                    # Match the SAME internal schema the regex education
+                    # extractors use ({institution, degree, dates}) so the
+                    # JSON/CSV exporters read it correctly. Previously this
+                    # used qualification/graduation_year, which the exporter
+                    # ignores -> blank major/Degree on NER-filled education.
+                    entry = {
+                        'institution': colleges[i] if i < len(colleges) else None,
+                        'degree':      degrees[i]  if i < len(degrees)  else None,
+                        'dates':       years[i]    if i < len(years)    else "",
+                    }
+                    result['education'].append(entry)
+                self.logger.info(f"🧬 NER added {n} education entries")
+
+        # ── Skills ─────────────────────────────────────────────────────────
+        if not result.get('hard_skills'):
+            skill_text = ai_sections.get('skills') or full_text
+            entities = self._ner_engine.get_entities_by_type(skill_text, ['Skills'])
+            ner_skills = entities.get('Skills', [])
+            if ner_skills:
+                result['hard_skills'] = ner_skills
+                self.logger.info(f"🧬 NER added {len(ner_skills)} skills")
+
         return result
 
     def _pure_manual_extraction(self, text: str) -> Dict[str, Any]:
@@ -1228,13 +1395,13 @@ class AIExtractor:
         # It was killing extraction of the second skills section! 
         # Only "ADDITIONAL QUALIFICATIONS" (certifications) should terminate.
         terminator_keywords = [
-            '(?:WORK\s+)?EXPERIENCE[S]?', 'EMPLOYMENT', 'WORK\s+HISTORY', 'EDUCATION',
+            r'(?:WORK\s+)?EXPERIENCE[S]?', 'EMPLOYMENT', r'WORK\s+HISTORY', 'EDUCATION',
             'CERTIFICATION[S]?',
             'AWARD[S]?', 'PROJECT[S]?', 'REFERENCE[S]?', 'ACHIEVEMENT[S]?', 'PUBLICATION[S]?',
             'LANGUAGE[S]?',
             'HOBBIES?', 'INTEREST[S]?', 'SUMMARY', 'OBJECTIVE', 'PROFILE', 'COMMENDATION[S]?',
-            'PROFESSIONAL\s+DEVELOPMENT', 'CAREER', 'CO-?CURRICULAR',
-            'ADDITIONAL\s+QUALIFICATIONS?',  # ← Certifications section = stop
+            r'PROFESSIONAL\s+DEVELOPMENT', 'CAREER', 'CO-?CURRICULAR',
+            r'ADDITIONAL\s+QUALIFICATIONS?',  # ← Certifications section = stop
             # 🚫 REMOVED: "ADDITIONAL" alone — was killing "ADDITIONAL SKILLS" section!
         ]
         
@@ -1839,99 +2006,6 @@ class AIExtractor:
         
         return skill_lower in known_multi_word_skills
 
-    def _extract_dob_english(self, text: str) -> Optional[str]:
-        """
-        🎂 Extract date of birth from ENGLISH resumes!
-        Returns YYYY-MM-DD format.
-        🎭 FAIRY CODEMOTHER'S ENHANCEMENT: Added DD Mon YYYY pattern!
-        """
-        import datetime
-        
-        current_year = datetime.datetime.now().year
-        min_birth_year = current_year - config.MAX_AGE
-        max_birth_year = current_year - config.MIN_AGE
-        
-        # Find contact info area
-        contact_area = self._find_contact_area(text)
-        search_text = contact_area if contact_area else text
-        
-        # 🎭 FAIRY CODEMOTHER'S ENHANCED PATTERNS - Now with DD Mon YYYY support!
-        dob_patterns = [
-            # 🏆• NEW PATTERN: DD Mon YYYY (e.g., "13 Oct 1989") - Singapore/UK style!
-            (r'(?:DOB|D\.O\.B\.|Date of Birth|Birth Date|Born)[\s:]*(\d{1,2})\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{4})', 'dmy_written_labeled'),
-            
-            # 🏆• NEW PATTERN: DD Mon YYYY without label (standalone)
-            (r'\b(\d{1,2})\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{4})\b', 'dmy_written'),
-            
-
-            # With label: DOB: 01/15/1990
-            (r'(?:DOB|D\.O\.B\.|Date of Birth|Birth Date|Born)[\s:]*(\d{1,2})[/-](\d{1,2})[/-](\d{4})', 'mdy_labeled'),
-            # With label: DOB: 1990-01-15
-            (r'(?:DOB|D\.O\.B\.|Date of Birth|Birth Date|Born)[\s:]*(\d{4})[/-](\d{1,2})[/-](\d{1,2})', 'ymd_labeled'),
-            # Written: January 15, 1990
-            (r'\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(\d{4})\b', 'written'),
-            # ISO format: 1990-01-15
-            (r'\b(\d{4})-(\d{1,2})-(\d{1,2})\b', 'ymd'),
-            # US format: 01/15/1990
-            (r'\b(\d{1,2})/(\d{1,2})/(\d{4})\b', 'mdy'),
-            # Pattern for "22 January 1971" - DD FULL_MONTH YYYY format
-            (r'(?:DOB|D\.O\.B\.|Date of Birth|Birth Date|Born)[\s:]*(\d{1,2})\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})', 'dmy_full_month_labeled'),
-            # Same pattern but standalone (no label)
-            (r'\b(\d{1,2})\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})\b', 'dmy_full_month'),
-        ]
-        
-        # 🎭 Month name to number mapping for the new patterns!
-        month_map = {
-            'jan': 1, 'january': 1, 'feb': 2, 'february': 2, 'mar': 3, 'march': 3,
-            'apr': 4, 'april': 4, 'may': 5, 'jun': 6, 'june': 6, 'jul': 7, 'july': 7,
-            'aug': 8, 'august': 8, 'sep': 9, 'september': 9, 'oct': 10, 'october': 10,
-            'nov': 11, 'november': 11, 'dec': 12, 'december': 12
-        }
-        
-        for pattern, date_format in dob_patterns:
-            matches = re.finditer(pattern, search_text, re.IGNORECASE)
-            for match in matches:
-                try:
-                    # 🏆• Handle the new DD Mon YYYY formats!
-                    if date_format in ['dmy_written_labeled', 'dmy_written']:
-                        day = int(match.group(1))
-                        month_name = match.group(2).lower()
-                        year = int(match.group(3))
-                        month = month_map.get(month_name[:3], 0)  # Use first 3 chars for matching
-                        
-                    elif date_format == 'written':
-                        month_name, day, year = match.groups()
-                        month = datetime.datetime.strptime(month_name, '%B').month
-                        year, day = int(year), int(day)
-                    
-                    elif date_format in ['mdy_labeled', 'mdy']:
-                        month, day, year = map(int, match.groups())
-                    
-                    elif date_format in ['ymd_labeled', 'ymd']:
-                        year, month, day = map(int, match.groups())
-                    
-                    elif date_format in ['dmy_full_month_labeled', 'dmy_full_month']:
-                        day = int(match.group(1))
-                        month_name = match.group(2)
-                        year = int(match.group(3))
-                        month = datetime.datetime.strptime(month_name, '%B').month
-
-                    else:
-                        continue
-                    
-                    # Validate year range
-                    if min_birth_year <= year <= max_birth_year:
-                        # Validate date is real
-                        dt = datetime.datetime(year, month, day)
-                        formatted = dt.strftime('%Y-%m-%d')
-                        self.logger.info(f"âœ… Found DOB: {formatted}")
-                        return formatted
-                
-                except (ValueError, OverflowError):
-                    continue
-        
-        return None
-
     def _extract_experience_date_first_format(self, text: str) -> list:
         """
         🎭 FAIRY CODEMOTHER'S SPECIAL! 💅
@@ -1979,16 +2053,10 @@ class AIExtractor:
                 self.logger.debug(f"â­ Skipping education entry in experience: {role_company[:50]}")
                 continue
 
-            # Parse role and company from "Role, Company Name"
+            # Parse role and company from "Role, Company Name" or "Company Name <role>"
             # Could be "Financial Consultant, Prudential Assurance Company Singapore (Pte) Ltd"
-            if ',' in role_company:
-                parts = role_company.split(',', 1)
-                role = parts[0].strip()
-                company = parts[1].strip() if len(parts) > 1 else "Company not specified"
-            else:
-                # If no comma, try to detect role vs company
-                role = role_company
-                company = "See description"
+            # OR "Utu Global Pte Ltd – Standard Chartered Ventures Senior DevOps / Platform Engineer"
+            role, company = self._split_role_company(role_company)
             
             # Format dates
             dates = f"{start_date} - {end_date}"
@@ -2198,7 +2266,7 @@ class AIExtractor:
         # 🏆 STEP 2: TRY DATE-FIRST FORMAT (Singapore/UK style)
         # This catches resumes like "Feb 2016 to Present    Financial Consultant, Prudential..."
         date_first_jobs = self._extract_experience_date_first_format(text)
-        if date_first_jobs and len(date_first_jobs) >= 2:
+        if date_first_jobs and len(date_first_jobs) >= 1:
             self.logger.info(f"🎯 Date-first format detected! Found {len(date_first_jobs)} jobs")
             return date_first_jobs
         
@@ -2264,14 +2332,113 @@ class AIExtractor:
             (r'\b([A-Z][A-Za-z\s]+(?:Ministry|Government|Agency|Authority|Board|Council|Commission|Department))\b', 'government'),
         ]
         
-        # Extract companies (continue with your existing extraction logic)
-        # ... (keep the rest of your current _extract_experience_regex code)
-        # I'm not including it all here because it's the same - just the section detection changed!
-        
-        # The rest of your method continues exactly as before...
-        # [All your existing company extraction, job parsing, validation code stays the same]
-        
-        return jobs  # Return the extracted jobs
+        # ===================================================================
+        # 🏆 STEP 4: DATE-ANCHORED JOB PARSING
+        # One job block per date range. Each range anchors a job; company /
+        # role come from the date line (+ the line above it), and the
+        # description is the block of lines until the next date range or a
+        # new section. Handles company-first and date-anywhere layouts
+        # (pure date-first is already handled by STEP 2 above).
+        # ===================================================================
+        month = r'(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?'
+        date_tok = r'(?:' + month + r'\s*,?\s*\d{4}|\d{1,2}[/\-]\d{4}|\d{4})'
+        end_tok = r'(?:' + date_tok + r'|Present|Current|Now|Ongoing|Till\s*Date|To\s*Date)'
+        date_range_re = re.compile(
+            r'(' + date_tok + r')\s*(?:-|–|—|to|till|until)\s*(' + end_tok + r')',
+            re.IGNORECASE,
+        )
+
+        anchors = list(date_range_re.finditer(exp_text))
+        if not anchors:
+            self.logger.warning("⚠️ No date ranges found in experience section")
+            return jobs
+
+        edu_kw = (
+            'diploma', 'degree', 'bachelor', 'master', 'phd', 'gce', 'o level',
+            'a level', 'n level', 'psle', 'nitec', 'polytechnic', 'university',
+            'college', 'secondary school', 'primary school', 'junior college',
+        )
+
+        lines = exp_text.split('\n')
+        line_starts = []
+        _pos = 0
+        for _ln in lines:
+            line_starts.append(_pos)
+            _pos += len(_ln) + 1
+
+        def _line_index_of(offset: int) -> int:
+            idx = 0
+            for li, s in enumerate(line_starts):
+                if s <= offset:
+                    idx = li
+                else:
+                    break
+            return idx
+
+        for i, m in enumerate(anchors):
+            dates = f"{m.group(1).strip()} - {m.group(2).strip()}"
+
+            anchor_line = _line_index_of(m.start())
+            if i + 1 < len(anchors):
+                nxt = _line_index_of(anchors[i + 1].start())
+                # The line just above the next date is THAT job's header,
+                # so end this description before it (prevents the next
+                # role/company bleeding into this job's description).
+                next_anchor_line = nxt - 1 if nxt - 1 > anchor_line else nxt
+            else:
+                next_anchor_line = len(lines)
+
+            # Header = line above the date line + the date line (date removed)
+            header_bits = []
+            if anchor_line > 0:
+                prev = lines[anchor_line - 1].strip(' \t|·•-')
+                if prev:
+                    header_bits.append(prev)
+            same = date_range_re.sub('', lines[anchor_line]).strip(' \t|·•-,')
+            if same:
+                header_bits.append(same)
+            header = ' '.join(header_bits).strip(' \t|·•-,')
+
+            if any(k in header.lower() for k in edu_kw):
+                self.logger.debug(f"⭐ Skipping education-looking block: {header[:50]}")
+                continue
+
+            if ',' in header:
+                role, company = [p.strip() for p in header.split(',', 1)]
+            elif re.search(r'\s+at\s+', header, re.IGNORECASE):
+                parts = re.split(r'\s+at\s+', header, maxsplit=1, flags=re.IGNORECASE)
+                role, company = parts[0].strip(), parts[1].strip()
+            else:
+                role, company = self._split_role_company(header)
+
+            desc_lines = []
+            seen = set()
+            for ln in lines[anchor_line + 1:next_anchor_line]:
+                ln = ln.strip()
+                if len(ln) < 4:
+                    continue
+                if re.match(r'^(?:Education|Skills|Achievements|Awards|Certifications?|'
+                            r'References|Projects|Languages|Hobbies|Co-Curricular|'
+                            r'Additional|Qualifications?)\s*$', ln, re.IGNORECASE):
+                    break
+                ln = re.sub(r'^[\*\-•·►➢▪▸]\s*', '', ln).strip()
+                key = ln.lower()
+                if ln and key not in seen:
+                    seen.add(key)
+                    desc_lines.append(ln)
+
+            description = ' | '.join(desc_lines) if desc_lines else "Description not available"
+
+            jobs.append({
+                "company": (company or "Company not specified")[:200],
+                "role": (role or "Role not specified")[:200],
+                "dates": dates,
+                "description": description,
+            })
+            self.logger.info(f"✅ Extracted: {role[:40]} at {company[:40]}")
+
+        self.logger.info(f"💼 Regex experience extraction found {len(jobs)} job(s)")
+        return jobs
 
     def _clean_education_text(self, text: str) -> str:
         """
@@ -2690,7 +2857,27 @@ class AIExtractor:
                 if any(kw in inst_lower for kw in ['pte ltd', 'pvt ltd', 'company', 'corporation', 'services pte']):
                     continue
 
-                # Avoid duplicates
+                # 💎 Smart deduplication: skip if substring overlap with already-found
+                # e.g. "Singapore University" should not be added if "Singapore University 
+                # of Social Sciences" already exists, and vice versa
+                is_duplicate = False
+                for existing in list(found_institutions):
+                    # If new one is a substring of existing, or existing is substring of new
+                    if inst_lower in existing or existing in inst_lower:
+                        # Keep the LONGER (more specific) one
+                        if len(inst_lower) > len(existing):
+                            # Replace existing entry with this longer one
+                            found_institutions.discard(existing)
+                            # Also remove from education list
+                            education[:] = [e for e in education 
+                                          if e.get('institution', '').lower() != existing]
+                            is_duplicate = False  # we'll add the longer one
+                        else:
+                            is_duplicate = True
+                        break
+                
+                if is_duplicate:
+                    continue
                 if institution.lower() in found_institutions:
                     continue
                 found_institutions.add(institution.lower())
@@ -2775,18 +2962,25 @@ SKILLS: {skills_list}
 Return ONLY this JSON:
 {{"hard": ["skill1", "skill2"], "soft": ["skill3", "skill4"]}}"""
 
-        response = self._call_ollama_raw(prompt, num_predict=300)
+        response = self._call_ollama_raw(prompt, num_predict=300, schema=SKILLS_SCHEMA)
         parsed = self._parse_ai_response(response)
-        
+
         if parsed and isinstance(parsed.get('hard'), list) and isinstance(parsed.get('soft'), list):
             result['hard_skills'] = parsed['hard'][:30]
             result['soft_skills'] = parsed['soft'][:20]
-            self.logger.info("âœ… AI re-categorized skills successfully")
+            self.logger.info("âœ… AI re-categorized skills successfully (schema-enforced)")
         
         return result
 
-    def _call_ollama_raw(self, prompt: str, num_predict: int = 500) -> str:
-        """Helper to call Ollama and return raw text response"""
+    def _call_ollama_raw(self, prompt: str, num_predict: int = 500,
+                         schema=None) -> str:
+        """Helper to call Ollama and return raw text response.
+
+        Args:
+            schema: Optional JSON Schema dict. When provided it is passed as
+                    the format parameter to ollama.chat(), enabling
+                    grammar-based constrained generation.
+        """
         try:
             # 💅 FAIRY CODEMOTHER'S FIX: Context window QUADRUPLED!
             # 4096 was WAY too small — resumes + prompt easily exceed 4K tokens.
@@ -2799,11 +2993,14 @@ Return ONLY this JSON:
                 'num_ctx': 16384,   # 🔥 Was 4096 — quadrupled!
                 'num_predict': num_predict,
                 'repeat_penalty': 1.1,  # 🆕 Prevent repetition in output
+                # Disable Qwen3 chain-of-thought so num_predict isn't burned on <think>
+                # blocks. Silently ignored by non-Qwen models and older Ollama versions.
+                'think': False,
             }
 
-            response = ollama.chat(
-                model=self.model_name,
-                messages=[
+            chat_kwargs = {
+                'model': self.model_name,
+                'messages': [
                     {
                         'role': 'system',
                         'content': (
@@ -2821,16 +3018,25 @@ Return ONLY this JSON:
                     },
                     {'role': 'user', 'content': prompt}
                 ],
-                options=options
-            )
+                'options': options,
+            }
+            if schema is not None:
+                chat_kwargs['format'] = schema
 
-            return response['message']['content']
+            response = self._client.chat(**chat_kwargs)
+
+            content = response['message']['content'] or ""
+            # Strip any residual Qwen3 <think>...</think> blocks as a safety net
+            # in case 'think: False' isn't honored by this Ollama version.
+            content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL)
+            content = re.sub(r'<think>.*$',         '', content, flags=re.DOTALL)
+            return content.strip()
 
         except Exception as e:
             self.logger.error(f"âŒ AI Call error: {e}")
             return ""
 
-    def _call_ollama(self, prompt: str, is_deep: bool = False) -> Dict:
+    def _call_ollama(self, prompt: str, is_deep: bool = False, schema=None) -> Dict:
         """Helper to handle the actual API call"""
         try:
             # 💅 FAIRY CODEMOTHER'S FIX: Matching context window + tighter sampling
@@ -2840,15 +3046,17 @@ Return ONLY this JSON:
                 'top_k': 20,        # 🆕 Top-K sampling
                 'num_ctx': 16384,   # 🔥 Was 4096 — quadrupled!
                 'repeat_penalty': 1.1,  # 🆕 Prevent repetition
+                # Disable Qwen3 reasoning so num_predict goes entirely to JSON output
+                'think': False,
             }
-            
+
             if is_deep:
                 options['num_predict'] = 3000  # More room for structured output
             
             # 🌐Ÿ HERE'S WHERE THE MAGIC HAPPENS, SWEETIE! 🌐Ÿ
-            response = ollama.chat(
-                model=self.model_name,
-                messages=[
+            chat_kwargs = {
+                'model': self.model_name,
+                'messages': [
                     {
                         'role': 'system',
                         'content': (
@@ -2871,10 +3079,18 @@ Return ONLY this JSON:
                     },
                     {'role': 'user', 'content': prompt}
                 ],
-                options=options
-            )
-            
-            response_text = response['message']['content']
+                'options': options,
+            }
+            if schema is not None:
+                chat_kwargs['format'] = schema
+
+            response = self._client.chat(**chat_kwargs)
+
+            response_text = response['message']['content'] or ""
+            # Strip Qwen3 <think>...</think> blocks before JSON parsing
+            response_text = re.sub(r'<think>.*?</think>', '', response_text, flags=re.DOTALL)
+            response_text = re.sub(r'<think>.*$',         '', response_text, flags=re.DOTALL)
+            response_text = response_text.strip()
             parsed_data = self._parse_ai_response(response_text)
             
             # 🌐Ÿ VALIDATION LAYER - Check if AI was lazy!
@@ -2954,7 +3170,7 @@ Return ONLY this JSON:
                     cleaned_items = []
                     for item in data[field]:
                         if isinstance(item, str):
-                            cleaned = item.strip().strip('•\-"“"”*◗¦▪▫')
+                            cleaned = item.strip().strip('•-””””*◗¦▪▫')
                             cleaned = re.sub(r'^\d+\.?\s*', '', cleaned)
                             if cleaned and len(cleaned) > 2 and len(cleaned) < 100:
                                 cleaned_items.append(cleaned)
@@ -3201,13 +3417,450 @@ Return ONLY this JSON:
 
         return processed
 
+    # ════════════════════════════════════════════════════════════════════════
+    # 💎 CANONICAL SCHEMA MAPPER — Fairy Codemother's Schema Alignment
+    # ════════════════════════════════════════════════════════════════════════
+    def _remap_to_canonical_schema(self, internal: Dict) -> Dict:
+        """
+        🎯 Map the internal extraction dict (lowercase, snake_case) to the
+        CANONICAL output schema used by the annotation tool and golden test set.
+
+        Internal keys (lowercase)        →  Canonical keys (Title Case)
+        - name                           →  Name
+        - phone                          →  Phone
+        - email                          →  Email
+        - working_experience             →  Work Experience
+        - education                      →  Education
+        - hard_skills                    →  hard_skills/tags
+        - soft_skills                    →  soft_skills/skills
+        - certifications                 →  Certifications  (flatten dict→string)
+        - languages                      →  Language Skills (flatten dict→string)
+        - projects                       →  Project Experience
+        - achievements                   →  Achievements
+        - references                     →  References
+        - hobbies                        →  Hobbies
+        - summary                        →  Summary
+        - location                       →  Current Location
+
+        Nested mappings:
+        - working_experience[].role      →  Work Experience[].title
+        - working_experience[].dates     →  Work Experience[].from + .to (split)
+        - working_experience[].description (string) → Work Experience[].responsibility (list)
+        - education[].institution        →  Education[].school
+        - education[].degree (string)    →  Education[].degree + .major (parsed)
+        """
+        if not isinstance(internal, dict):
+            return {}
+
+        # ─── Build the canonical output skeleton ───
+        canonical = {
+            "ID": internal.get("id", "") or "",
+            "Name": internal.get("name", "") or "",
+            "Page": internal.get("page", "") or "",
+            "Phone": internal.get("phone", "") or "",
+            "Email": internal.get("email", "") or "",
+            "Current Company": "",   # filled below from work_experience[0]
+            "Current Title": "",     # filled below from work_experience[0]
+            "Team": internal.get("team", "") or "",
+            "Current Location": internal.get("location", "") or internal.get("current_location", "") or "",
+            "Expected Location": internal.get("expected_location", "") or "",
+            "Gender": internal.get("gender", "") or "",
+            "Created By": internal.get("created_by", "") or "",
+            "Creation Date": internal.get("creation_date", "") or "",
+            "Last Contact": internal.get("last_contact", "") or "",
+            "Function": internal.get("function", "") or "",
+            "Industry": internal.get("industry", []) if isinstance(internal.get("industry"), list) else [],
+            "Summary": internal.get("summary", "") or "",
+            "Language Skills": [],
+            "Work Experience": [],
+            "Project Experience": [],
+            "Education": [],
+            "Certifications": [],
+            # 💎 Skills get cleaned through the validator (rejects sentences, fragments, etc.)
+            "hard_skills/tags": self._clean_skills_list(internal.get("hard_skills", []) or []),
+            "soft_skills/skills": self._clean_skills_list(internal.get("soft_skills", []) or []),
+            "Achievements": internal.get("achievements", []) or [],
+            "References": "",
+            "Hobbies": "",
+        }
+
+        # ─── Work Experience: working_experience → Work Experience ───
+        for job in (internal.get("working_experience") or []):
+            if not isinstance(job, dict):
+                continue
+            # Split "Jun 2023 - Present" into from / to
+            # 💎 FIX: Use whitespace+dash+whitespace OR " to " as word boundary
+            # OLD BUG: [-–—to]+ matched individual 't' or 'o' inside "Nov", "October" etc.
+            dates_raw = (job.get("dates") or "").strip()
+            from_date, to_date = "", ""
+            if dates_raw:
+                # Split on: " - " or " – " or " — " or " to " (with WORD BOUNDARIES)
+                parts = re.split(r'\s+(?:-|–|—|to)\s+', dates_raw, maxsplit=1, flags=re.IGNORECASE)
+                from_date = parts[0].strip() if parts else ""
+                to_date = parts[1].strip() if len(parts) > 1 else ""
+            # Convert description string to list of bullets (split on " | " separator)
+            desc = job.get("description", "")
+            if isinstance(desc, str):
+                responsibilities = [b.strip() for b in desc.split("|") if b.strip() and b.strip() != "Description not available"]
+            elif isinstance(desc, list):
+                responsibilities = [str(b).strip() for b in desc if str(b).strip()]
+            else:
+                responsibilities = []
+            canonical["Work Experience"].append({
+                "company": job.get("company", "") or "",
+                "title": job.get("role", "") or job.get("title", "") or "",
+                "from": from_date,
+                "to": to_date,
+                "responsibility": responsibilities,
+            })
+
+        # ─── Current Company / Title from first job ───
+        if canonical["Work Experience"]:
+            first = canonical["Work Experience"][0]
+            canonical["Current Company"] = first.get("company", "")
+            canonical["Current Title"] = first.get("title", "")
+
+        # ─── Education: education → Education ───
+        for edu in (internal.get("education") or []):
+            if not isinstance(edu, dict):
+                continue
+            degree_raw = edu.get("degree", "") or ""
+            # Try to split "Bachelor of Engineering in Electronics" → degree + major
+            major = ""
+            degree = degree_raw
+            m = re.match(r'^(.*?(?:Bachelor|Master|Diploma|Certificate|Degree|Doctor|PhD|Nitec|Higher Nitec)[^,]*?)\s+(?:in|of)\s+(.+)$',
+                         degree_raw, re.IGNORECASE)
+            if m:
+                degree = m.group(1).strip()
+                major = m.group(2).strip()
+            canonical["Education"].append({
+                "school": edu.get("institution", "") or edu.get("school", "") or "",
+                "major": major,
+                "degree": degree,
+                "dates": edu.get("dates", "") or "",
+            })
+
+        # ─── Project Experience: projects → Project Experience ───
+        for proj in (internal.get("projects") or []):
+            if not isinstance(proj, dict):
+                continue
+            canonical["Project Experience"].append({
+                "name": proj.get("name", "") or "",
+                "description": proj.get("description", "") or "",
+                "date": proj.get("date", "") or proj.get("dates", "") or "",
+            })
+
+        # ─── Certifications: flatten dict → string list, with SMART REASSEMBLY ───
+        # 💎 The cert extractor sometimes fragments cert names into individual words.
+        # We reassemble them by detecting "Certified" followed by other tokens.
+        raw_cert_names = []
+        for cert in (internal.get("certifications") or []):
+            if isinstance(cert, dict):
+                name = cert.get("name", "")
+                if name:
+                    raw_cert_names.append(name.strip())
+            elif isinstance(cert, str) and cert.strip():
+                raw_cert_names.append(cert.strip())
+        canonical["Certifications"] = self._reassemble_certifications(raw_cert_names)
+
+        # ─── Language Skills: flatten dict → string list ───
+        for lang in (internal.get("languages") or []):
+            if isinstance(lang, dict):
+                name = lang.get("language", "") or lang.get("name", "")
+                if name:
+                    canonical["Language Skills"].append(name)
+            elif isinstance(lang, str):
+                canonical["Language Skills"].append(lang)
+
+        # ─── References: list → string (annotation tool uses string) ───
+        refs = internal.get("references") or []
+        if isinstance(refs, list) and refs:
+            if isinstance(refs[0], dict):
+                canonical["References"] = refs[0].get("name", "") or "Available upon request"
+            else:
+                canonical["References"] = str(refs[0])
+        elif isinstance(refs, str):
+            canonical["References"] = refs
+
+        # ─── Hobbies: list → string ───
+        hobs = internal.get("hobbies") or []
+        if isinstance(hobs, list):
+            canonical["Hobbies"] = ", ".join(str(h) for h in hobs if h)
+        elif isinstance(hobs, str):
+            canonical["Hobbies"] = hobs
+
+        return canonical
+
+    # ════════════════════════════════════════════════════════════════════════
+    # 🧹 SKILLS CLEANER — Reject sentence fragments and contamination
+    # ════════════════════════════════════════════════════════════════════════
+    def _clean_skills_list(self, skills: List[str]) -> List[str]:
+        """
+        🧹 Reject sentence fragments, section headers, dates, broken parens.
+        Keeps real skill names, drops bullets and section noise.
+        """
+        if not isinstance(skills, list):
+            return []
+
+        # Past-tense action verbs = sentence starters, NOT skills
+        action_verbs = {
+            'architected', 'implemented', 'designed', 'developed', 'built', 'created',
+            'managed', 'led', 'achieved', 'reduced', 'increased', 'optimized', 'improved',
+            'established', 'maintained', 'monitored', 'integrated', 'automated', 'engineered',
+            'deployed', 'configured', 'migrated', 'introduced', 'enabled', 'provided',
+            'lead', 'oncall', 'reducing', 'achieving', 'supporting', 'handling',
+            'protecting', 'eliminating', 'improving', 'capturing', 'data analysis',
+            'person in charge', 'monitor', 'engineered'
+        }
+
+        # Section headers and known noise
+        noise_headers = {
+            'professional experience', 'work experience', 'education', 'skills',
+            'certifications', 'achievements', 'projects', 'references', 'hobbies',
+            'languages', 'qualifications', 'awards', 'summary', 'objective',
+            'technical skills', 'key achievements', 'core competencies',
+            'kubernetes & containers', 'ci/cd & automation', 'infrastructure as code',
+            'observability & reliability', 'cloud platforms', 'security & governance',
+            'platform engineering', 'practices & collaboration',
+            'multi-cloud architecture', 'kubernetes & gitops',
+            'site reliability engineering', 'security & compliance',
+            'cost optimization', 'present', 'current', 'ongoing',
+        }
+
+        # Sentence connector phrases — indicates this is a sentence not a skill
+        sentence_phrases = [
+            ' supporting ', ' achieving ', ' reducing ', ' handling ',
+            ' protecting ', ' eliminating ', ' improving ', ' including ',
+            ' such as ', ' that ', ' which ', ' through ',
+        ]
+
+        validated = []
+        seen_lower = set()
+
+        for skill in skills:
+            if not skill or not isinstance(skill, str):
+                continue
+
+            skill = skill.strip().rstrip(',').rstrip(':').rstrip('.').strip()
+            if len(skill) < 2 or len(skill) > 80:
+                continue
+
+            skill_lower = skill.lower()
+
+            # Dedupe
+            if skill_lower in seen_lower:
+                continue
+
+            # Skip exact noise headers
+            if skill_lower in noise_headers:
+                continue
+
+            # Skip standalone dates / years
+            if re.match(r'^(?:\d{4}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}|Present|Current)$',
+                        skill, re.IGNORECASE):
+                continue
+
+            # Skip pure numbers/percentages
+            if re.match(r'^\d+%?$', skill):
+                continue
+
+            # Reject sentences (starts with action verb)
+            first_word = skill_lower.split()[0] if skill_lower.split() else ''
+            if first_word in action_verbs:
+                continue
+
+            # Reject if starts with a conjunction or lowercase common word (likely a fragment)
+            fragment_starters = {'and', 'or', 'but', 'with', 'using', 'including',
+                                  'such', 'for', 'from', 'by', 'to', 'in', 'on',
+                                  'a', 'an', 'the'}
+            if first_word in fragment_starters:
+                continue
+
+            # Reject unmatched parentheses (broken fragments like "platforms (EKS")
+            if skill.count('(') != skill.count(')'):
+                continue
+
+            # Reject if has sentence connectors
+            padded = ' ' + skill_lower + ' '
+            if any(phrase in padded for phrase in sentence_phrases):
+                if len(skill.split()) > 4:  # allow short ones like "Node.js with React"
+                    continue
+
+            # Reject long multi-word phrases that aren't Title Case
+            words = skill.split()
+            if len(words) > 6:
+                title_case = sum(1 for w in words if w and w[0].isupper())
+                if title_case / len(words) < 0.5:
+                    continue
+
+            validated.append(skill)
+            seen_lower.add(skill_lower)
+
+        return validated
+
+    # ════════════════════════════════════════════════════════════════════════
+    # 🏅 CERTIFICATIONS REASSEMBLER — Merge fragments back into full names
+    # ════════════════════════════════════════════════════════════════════════
+    def _reassemble_certifications(self, cert_fragments: List[str]) -> List[str]:
+        """
+        🏅 Reassemble fragmented certifications into full names.
+
+        Example input  (fragmented):
+          ["Certified", "Solutions", "Architect Associate",
+           "Certified", "Developer Associate", "Certified", "DevOps",
+           "Engineer Professional"]
+
+        Example output (reassembled):
+          ["AWS Certified Solutions Architect Associate",
+           "AWS Certified Developer Associate",
+           "AWS Certified DevOps Engineer Professional"]
+
+        Strategy:
+        - Detect known cert keywords (Certified, Certification, Certificate)
+        - When we see them, accumulate following tokens until next "Certified"
+          or until tokens look like a new cert series (Data, Machine Learning, etc.)
+        - Known cert prefixes (AWS, Azure, GCP, Microsoft, Google) get prepended
+          if the resume context implies them
+        """
+        if not cert_fragments:
+            return []
+
+        # Pre-clean: strip whitespace, drop empties
+        cleaned = []
+        for c in cert_fragments:
+            if c and isinstance(c, str):
+                c = c.strip().rstrip(',').strip()
+                if c:
+                    cleaned.append(c)
+
+        if not cleaned:
+            return []
+
+        # CASE 1: If all fragments are already long enough (>15 chars), they're whole certs
+        if all(len(c) >= 15 for c in cleaned):
+            # Just dedupe and return
+            seen = set()
+            result = []
+            for c in cleaned:
+                if c.lower() not in seen:
+                    seen.add(c.lower())
+                    result.append(c)
+            return result
+
+        # CASE 2: Fragmented — try to reassemble
+        # Trigger words that start a new cert
+        cert_starters = {'certified', 'certification', 'certificate', 'cert',
+                          'analysis', 'machine', 'databases'}
+        level_qualifiers = {'associate', 'professional', 'specialty', 'expert',
+                             'foundational', 'practitioner', 'fundamentals'}
+
+        assembled = []
+        current = []
+
+        for token in cleaned:
+            token_lower = token.lower().strip()
+            first_word = token_lower.split()[0] if token_lower.split() else ''
+
+            # New cert starts on "Certified" or specific keywords
+            if first_word in cert_starters and current:
+                assembled.append(' '.join(current))
+                current = [token]
+            else:
+                current.append(token)
+
+        if current:
+            assembled.append(' '.join(current))
+
+        # Post-clean: dedupe + prefix common providers if obvious
+        seen = set()
+        result = []
+        for cert in assembled:
+            cert = cert.strip()
+            if not cert:
+                continue
+            # Add AWS prefix if cert starts with "Certified" and mentions cloud terms
+            if cert.lower().startswith('certified ') and any(
+                kw in cert.lower() for kw in ['solutions architect', 'developer', 'devops', 'sysops', 'security']
+            ):
+                cert = 'AWS ' + cert
+            if cert.lower() not in seen:
+                seen.add(cert.lower())
+                result.append(cert)
+        return result
+
     def _clean_name(self, name: str) -> str:
         if not isinstance(name, str): return ""
         name = name.strip()
         name = re.sub(r'^(Mr\.|Ms\.|Mrs\.|Dr\.|Prof\.|Eng\.)\s*', '', name, flags=re.IGNORECASE)
         name = re.sub(r',\s*(PhD|MD|MBA|M\.Sc|B\.Sc)$', '', name, flags=re.IGNORECASE)
         return name
-    
+
+    def _split_role_company(self, header: str) -> tuple:
+        """
+        🎯 Smart split for headers WITHOUT comma separator.
+        Handles SG/MY patterns like:
+          "Utu Global Pte Ltd – Standard Chartered Ventures Senior DevOps Engineer"
+          "Tencent DevOps Engineer"
+          "SMRT Trains Data Analyst Assistant Engineer"
+        
+        Strategy:
+          1. Look for company suffix (Pte Ltd / Sdn Bhd / Inc / LLC / Ltd / Group / Corp)
+             → text BEFORE+including suffix = company, text AFTER = role
+          2. Look for em-dash / en-dash as separator
+             → first part = company, last part = role
+          3. Look for known role keywords (Engineer, Manager, Analyst, etc.)
+             → text BEFORE role keyword = company, role keyword onwards = role
+          4. Fallback: empty company, full header as role (NO MORE "See description")
+        """
+        if not header or not isinstance(header, str):
+            return ("", "")
+        
+        header = header.strip()
+        
+        # STRATEGY 1: Company suffix detection (SG/MY-aware)
+        suffix_pattern = re.compile(
+            r'^(.*?(?:Pte\.?\s*Ltd|Sdn\.?\s*Bhd|Pvt\.?\s*Ltd|Inc\.?|LLC|Ltd\.?|Group|Corp\.?|Corporation|Company|Holdings|Ventures|Services|Solutions|Trains|Bank))\s+(.+)$',
+            re.IGNORECASE
+        )
+        m = suffix_pattern.match(header)
+        if m:
+            company = m.group(1).strip(' -–—,')
+            role = m.group(2).strip(' -–—,')
+            return (role, company)
+        
+        # STRATEGY 2: Em-dash or en-dash separator
+        if any(sep in header for sep in [' – ', ' — ', ' - ']):
+            for sep in [' – ', ' — ', ' - ']:
+                if sep in header:
+                    parts = header.split(sep)
+                    if len(parts) >= 2:
+                        # First piece = company (often includes "Pte Ltd")
+                        # Last piece = role
+                        company = parts[0].strip()
+                        role = parts[-1].strip()
+                        return (role, company)
+        
+        # STRATEGY 3: Role keyword detection
+        role_keywords = [
+            'Engineer', 'Manager', 'Analyst', 'Developer', 'Consultant', 'Specialist',
+            'Director', 'Officer', 'Executive', 'Coordinator', 'Lead', 'Architect',
+            'Designer', 'Administrator', 'Supervisor', 'Assistant', 'Associate',
+            'Intern', 'Trainee', 'President', 'CEO', 'CFO', 'CTO', 'COO',
+            'VP', 'Vice President', 'Head', 'Chief'
+        ]
+        for kw in role_keywords:
+            # Look for role keyword preceded by space (not at start)
+            pattern = re.compile(rf'^(.*?)\s+((?:Senior\s+|Junior\s+|Principal\s+|Lead\s+|Staff\s+)?{kw}\b.*)$', re.IGNORECASE)
+            m = pattern.match(header)
+            if m and m.group(1).strip():
+                company = m.group(1).strip()
+                role = m.group(2).strip()
+                return (role, company)
+        
+        # STRATEGY 4: Give up gracefully — full header as role, blank company
+        # (Better than fake "See description" — at least it's truthful)
+        return (header, "")
+
     def _clean_markdown(self, text: str) -> str:
         """
         🧹 Remove markdown formatting that confuses regex!
@@ -3398,9 +4051,89 @@ Return ONLY this JSON:
             sections['experience'] = sections['experience_simple']
             del sections['experience_simple']
         
-        self.logger.info(f"✅ Section detection complete! Found {len(sections)} sections")
-        
+        # Merge experience_simple into experience (handled by text_preprocessor already,
+        # but guard here in case the legacy path produced both)
+        if 'experience' in sections and 'experience_simple' in sections:
+            if sections['experience'][0] <= sections['experience_simple'][0]:
+                del sections['experience_simple']
+            else:
+                sections['experience'] = sections['experience_simple']
+                del sections['experience_simple']
+        elif 'experience_simple' in sections:
+            sections['experience'] = sections['experience_simple']
+            del sections['experience_simple']
+
+        self.logger.info(f"Section detection complete. Found {len(sections)} sections.")
         return sections
+
+    def detect_sections_ai(self, text: str) -> Dict[str, str]:
+        """
+        🎭 AI-DRIVEN SECTION DETECTION!
+        Uses the LLM to intelligently segment the resume into logical blocks.
+        """
+        if not self.available:
+            self.logger.warning("⚠️ AI not available for section detection — using regex fallback")
+            boundaries = _pp_detect_sections(text)
+            return {name: text[start:end].strip() for name, (start, end) in boundaries.items()}
+
+        self.logger.info("🔍 Detecting sections via AI...")
+        
+        # Limit text sample for detection
+        text_sample = text[:15000] if len(text) > 15000 else text
+        
+        prompt = f"""Identify all logical sections in this resume and return them as a JSON object.
+        Extract the EXACT text for each section.
+        
+        **REQUIRED KEYS:**
+        - summary: Professional summary/objective
+        - skills: Technical and soft skills
+        - experience: Work history/employment
+        - education: Academic background
+        - certifications: Licenses/certifications
+        - languages: Spoken/written languages
+        - others: Projects, hobbies, references, etc.
+        
+        Resume text:
+        ---
+        {text_sample}
+        ---
+        
+        Return ONLY valid JSON."""
+
+        try:
+            # Use _call_ollama_raw with schema for reliability
+            response_text = self._call_ollama_raw(prompt, num_predict=2000, schema=SECTION_SCHEMA)
+
+            # Guard: model returned nothing usable (common with Qwen3 reasoning models
+            # when num_predict is consumed by <think> blocks)
+            if not response_text or not response_text.strip():
+                self.logger.warning(
+                    "⚠️ AI section detector returned empty content "
+                    "(likely Qwen3 reasoning burned all tokens) — using regex fallback"
+                )
+                boundaries = _pp_detect_sections(text)
+                return {name: text[start:end].strip() for name, (start, end) in boundaries.items()}
+
+            # Direct JSON parse
+            sections_raw = json.loads(response_text)
+
+            # Filter out null values
+            sections = {k: v for k, v in sections_raw.items() if v}
+
+            self.logger.info(f"✨ AI found {len(sections)} sections!")
+            return sections
+
+        except Exception as e:
+            # Fallback to regex-based detection so callers always get usable sections
+            self.logger.warning(f"⚠️ AI section detection failed ({e}) — using regex fallback")
+            boundaries = _pp_detect_sections(text)
+            return {name: text[start:end].strip() for name, (start, end) in boundaries.items()}
+
+    def _detect_section_boundaries_enhanced(self, text: str) -> Dict[str, Tuple[int, int]]:
+        """Delegates to extraction.text_preprocessor.detect_sections()."""
+        boundaries = _pp_detect_sections(text)
+        self.logger.info(f"Section detection complete. Found {len(boundaries)} sections.")
+        return boundaries
 
     def _extract_section_content(self, text: str, section_name: str) -> str:
         """
@@ -3524,6 +4257,121 @@ Return ONLY this JSON:
         return validated
 
     def _validate_skills_list(self, skills: List[str]) -> List[str]:
+        """
+        🧹 Validate and clean skills list — REJECT sentence fragments!
+        
+        Fairy Codemother's tightened rules:
+        - Reject sentences (starts with action verb in past tense)
+        - Reject unmatched parentheses (broken fragments)
+        - Reject section headers
+        - Reject pure numbers / dates / years
+        - Reject lowercase-starting non-acronyms
+        - Reject excessive length (> 80 chars usually = bullet, not skill)
+        """
+        if not isinstance(skills, list):
+            return []
+        
+        # Action verbs that indicate this is a SENTENCE not a skill
+        action_verb_starters = {
+            'architected', 'implemented', 'designed', 'developed', 'built', 'created',
+            'managed', 'led', 'achieved', 'reduced', 'increased', 'optimized', 'improved',
+            'established', 'maintained', 'monitored', 'integrated', 'automated', 'engineered',
+            'deployed', 'configured', 'migrated', 'introduced', 'enabled', 'provided',
+            'lead', 'data analysis', 'person in charge', 'oncall', 'reducing', 'achieving',
+            'supporting', 'handling', 'protecting', 'eliminating', 'improving', 'capturing'
+        }
+        
+        # Section headers that shouldn't be skills
+        section_headers = {
+            'professional experience', 'work experience', 'education', 'skills',
+            'certifications', 'achievements', 'projects', 'references', 'hobbies',
+            'languages', 'qualifications', 'awards', 'summary', 'objective',
+            'technical skills', 'key achievements', 'core competencies',
+            'kubernetes & containers', 'ci/cd & automation', 'infrastructure as code',
+            'observability & reliability', 'cloud platforms', 'security & governance',
+            'platform engineering', 'practices & collaboration', 'multi-cloud architecture',
+            'kubernetes & gitops', 'site reliability engineering', 'security & compliance',
+            'cost optimization'
+        }
+        
+        # Standalone date/time tokens (e.g., "Present", "2023", "Jun 2023")
+        date_pattern = re.compile(r'^(?:Present|Current|Ongoing|\d{4}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4})$', re.IGNORECASE)
+        
+        # Pure numbers / years
+        pure_number = re.compile(r'^\d+%?$')
+        
+        validated = []
+        seen_lower = set()
+        
+        for skill in skills:
+            if not skill or not isinstance(skill, str):
+                continue
+            
+            skill = skill.strip().rstrip(',').rstrip(':').strip()
+            
+            if len(skill) < 2 or len(skill) > 80:
+                continue
+            
+            skill_lower = skill.lower()
+            
+            # Dedupe
+            if skill_lower in seen_lower:
+                continue
+            
+            # Skip section headers
+            if skill_lower in section_headers:
+                continue
+            
+            # Skip dates
+            if date_pattern.match(skill):
+                continue
+            
+            # Skip pure numbers
+            if pure_number.match(skill):
+                continue
+            
+            # Reject sentences (starts with past-tense action verb)
+            first_word = skill_lower.split()[0] if skill_lower.split() else ''
+            if first_word in action_verb_starters:
+                continue
+            # Also catch multi-word starts
+            first_two = ' '.join(skill_lower.split()[:2]) if len(skill_lower.split()) >= 2 else ''
+            if first_two in action_verb_starters:
+                continue
+            
+            # Reject unmatched parentheses (broken fragments like "platforms (EKS")
+            open_parens = skill.count('(')
+            close_parens = skill.count(')')
+            if open_parens != close_parens:
+                continue
+            
+            # Reject if contains too many lowercase verb-like words (likely a sentence)
+            words = skill.split()
+            if len(words) > 6:
+                # Skills > 6 words are suspicious — likely descriptions
+                # Only allow if it looks like a multi-word skill name (PascalCase / Title Case)
+                title_case_words = sum(1 for w in words if w and w[0].isupper())
+                if title_case_words / len(words) < 0.5:
+                    continue
+            
+            # Reject obvious sentence enders
+            if skill.endswith(('.', ',')) and len(words) > 3:
+                continue
+            
+            # Reject phrases with sentence-y connectors
+            sentence_connectors = [' and ', ' with ', ' to ', ' for ', ' from ', ' by ', ' that ',
+                                    ' which ', ' supporting ', ' achieving ', ' reducing ',
+                                    ' including ', ' such as ', ' as a ']
+            if any(conn in (' ' + skill_lower + ' ') for conn in sentence_connectors):
+                # Allow short ones like "Node.js and React" if very short
+                if len(words) > 4:
+                    continue
+            
+            # Passed all filters
+            validated.append(skill)
+            seen_lower.add(skill_lower)
+        
+        return validated
         """
         💅 Validate that skills are ACTUALLY skills!
         

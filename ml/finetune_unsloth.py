@@ -18,17 +18,17 @@ Prerequisites:
     pip install unsloth trl accelerate datasets bitsandbytes
 
 Usage:
-    # Basic fine-tune with defaults (Qwen 2.5 7B)
+    # Basic fine-tune with defaults (Llama 3.2 3B)
     python finetune_unsloth.py --train-file train_data.jsonl
 
-    # Use a larger model (tight fit on 16GB!)
-    python finetune_unsloth.py --train-file train_data.jsonl --model unsloth/Qwen2.5-14B-Instruct-bnb-4bit
+    # Use a different model
+    python finetune_unsloth.py --train-file train_data.jsonl --model unsloth/Qwen2.5-7B-Instruct-bnb-4bit
 
     # Full options
     python finetune_unsloth.py \\
         --train-file train_data.jsonl \\
         --val-file val_data.jsonl \\
-        --model unsloth/Qwen2.5-7B-Instruct-bnb-4bit \\
+        --model unsloth/Llama-3.2-3B-Instruct-bnb-4bit \\
         --epochs 3 \\
         --batch-size 2 \\
         --seq-length 2048 \\
@@ -39,6 +39,14 @@ Usage:
     python finetune_unsloth.py --export-only --lora-path resume_model_finetuned/lora_model --gguf q4_k_m
 """
 
+# ─── BLACKWELL RTX 5070 Ti FIX: Disable Unsloth's incompatible CUDA kernels ──
+# Unsloth's fused CE loss and some attention kernels can't run on sm120 GPUs.
+# Set env vars BEFORE any unsloth import so they take effect on first load.
+import os
+os.environ["TORCH_COMPILE_DISABLE"] = "1"
+os.environ["TORCHDYNAMO_DISABLE"] = "1"
+os.environ["UNSLOTH_DISABLE_FUSED_CROSS_ENTROPY"] = "1"
+
 import os
 import sys
 import json
@@ -46,6 +54,7 @@ import argparse
 import logging
 from datetime import datetime
 from pathlib import Path
+
 
 # ─── Pretty console output (inherited from the OG finetune_model.py) ─────────
 class Console:
@@ -295,13 +304,13 @@ def setup_model(model_name: str, max_seq_length: int = 2048):
 
     model = FastLanguageModel.get_peft_model(
         model,
-        r=16,                       # LoRA rank: 16 is the sweet spot for 7B-14B
+        r=8,                        # LoRA rank: 8 for 3B models, 16 for 7B-14B
         target_modules=[            # Standard attention + MLP targets
             "q_proj", "k_proj", "v_proj", "o_proj",   # Attention layers
             "gate_proj", "up_proj", "down_proj",       # MLP layers (better accuracy)
         ],
-        lora_alpha=32,              # Scaling factor = 2 * rank
-        lora_dropout=0.05,          # Small dropout for regularization
+        lora_alpha=16,              # Scaling factor = 2 * rank (8*2=16)
+        lora_dropout=0.1,           # Higher dropout to prevent catastrophic forgetting
         bias="none",                # No bias training (saves memory)
         use_gradient_checkpointing="unsloth",  # Unsloth's special GC — extra VRAM savings!
         random_state=42,
@@ -334,7 +343,7 @@ def train_model(
     output_dir: str = "resume_model_finetuned",
     num_epochs: int = 3,
     batch_size: int = 2,
-    learning_rate: float = 2e-4,
+    learning_rate: float = 2e-5,
     max_seq_length: int = 2048,
 ):
     """
@@ -382,12 +391,6 @@ def train_model(
     # Alpaca format uses "instruction"/"input"/"output" fields.
 
     if data_format == "sharegpt":
-        # ShareGPT: {"conversations": [{"from": "human", "value": "..."}, {"from": "gpt", "value": "..."}]}
-        dataset_kwargs = {
-            "dataset_text_field": None,  # Not used for ShareGPT
-        }
-        # For ShareGPT, we need to format the conversations manually
-        # because SFTTrainer expects a specific format
         def format_sharegpt(example):
             """Convert ShareGPT format to a single text field (Llama 3 template)."""
             text_parts = ["<|begin_of_text|>"]
@@ -415,8 +418,6 @@ def train_model(
         val_dataset = val_dataset.map(format_sharegpt)
         dataset_text_field = "text"
     else:
-        # Alpaca: {"instruction": "...", "input": "...", "output": "..."}
-        # Format into ChatML template for Qwen models
         def format_alpaca(example):
             """Convert Alpaca format to a single text field (Llama 3 template)."""
             instruction = example.get("instruction", "")
@@ -443,6 +444,26 @@ def train_model(
 
     Console.success("Data formatted for training!")
 
+    # ── Instruction masking (completion-only training) ─────────────────
+    # Without this, the model trains on ALL tokens — including the long
+    # resume text in the prompt. That floods the loss with noise and
+    # causes the unnaturally high initial loss (>>10). With this collator,
+    # only the assistant response tokens (the JSON output) contribute to
+    # the loss. This is the correct setup for instruction fine-tuning.
+    #
+    # The response_template is the exact token sequence that marks where
+    # the assistant answer starts. Everything BEFORE it is masked (loss=0).
+    from trl import DataCollatorForCompletionOnlyLM
+
+    # Llama 3 assistant header — must match the format_sharegpt/format_alpaca output exactly.
+    response_template = "<|start_header_id|>assistant<|end_header_id|>\n\n"
+    response_template_ids = tokenizer.encode(response_template, add_special_tokens=False)
+    data_collator = DataCollatorForCompletionOnlyLM(
+        response_template=response_template_ids,
+        tokenizer=tokenizer,
+    )
+    Console.info(f"Completion-only collator active — loss computed on assistant response only")
+
     # ── Training arguments ────────────────────────────────────────────
     # These are carefully tuned for RTX 5070 Ti (16GB VRAM):
     #
@@ -460,19 +481,19 @@ def train_model(
         per_device_eval_batch_size=batch_size,
         gradient_accumulation_steps=4,          # Effective batch = batch_size * 4
         learning_rate=learning_rate,
-        weight_decay=0.01,                      # Standard L2 regularization
-        warmup_steps=10,                        # Gentle learning rate warmup
+        weight_decay=0.1,                       # Stronger regularization to prevent forgetting
+        warmup_steps=50,                        # Gentle warmup — 50 steps for 3B model
         optim="adamw_8bit",                     # 8-bit Adam: saves ~2GB VRAM!
         fp16=not is_bfloat16_supported(),       # Use fp16 if bf16 not available
         bf16=is_bfloat16_supported(),           # bf16 preferred on Blackwell/Ampere+
         logging_steps=5,                        # Log every 5 steps
-        eval_strategy="steps",                  # Evaluate during training
-        eval_steps=50,                          # Evaluate every 50 steps
+        eval_strategy="no",                     # Skip eval — Blackwell CE fix only covers training path
+        # eval_steps=50,
         save_strategy="steps",
         save_steps=100,                         # Save checkpoint every 100 steps
         save_total_limit=3,                     # Keep only 3 latest checkpoints
-        load_best_model_at_end=True,            # Load best model after training
-        metric_for_best_model="eval_loss",      # Track validation loss
+        load_best_model_at_end=False,           # No eval = no "best model" tracking
+        # metric_for_best_model="eval_loss",
         report_to="none",                       # No WandB/TensorBoard (keep it simple)
         seed=42,
     )
@@ -484,10 +505,10 @@ def train_model(
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
         args=training_args,
+        data_collator=data_collator,
         dataset_text_field=dataset_text_field,
         max_seq_length=max_seq_length,
-        packing=False,  # Don't pack multiple examples into one sequence
-                        # (resume texts vary too much in length for packing to help)
+        packing=False,
     )
 
     # ── VRAM check before we go ───────────────────────────────────────
@@ -522,6 +543,312 @@ def train_model(
     Console.success(f"LoRA adapters saved to: {lora_path}")
 
     return trainer, lora_path
+
+
+# =============================================================================
+# 📊 PHASE 3b: POST-TRAINING EVALUATION
+# The morning-after reviews! Did the audience love it? 🎭
+# Because training loss alone is like judging a singer by how
+# confident they LOOK — you gotta actually LISTEN to them sing! 🎤
+# =============================================================================
+
+def evaluate_model(
+    model,
+    tokenizer,
+    val_dataset,
+    data_format: str,
+    max_seq_length: int = 2048,
+    num_samples: int = 20,
+):
+    """
+    📊 Evaluate the fine-tuned model on validation examples.
+
+    For LLM fine-tuning (unlike spaCy NER), we can't just compute
+    token-level F1. Instead, we measure:
+
+    1. EXACT MATCH RATE — Did the model produce valid JSON?
+    2. FIELD-LEVEL ACCURACY — For each field (name, phone, email, etc.),
+       did the extracted value match the expected value?
+    3. JSON VALIDITY RATE — Can we even parse the output?
+
+    Think of it like a cooking competition:
+    - Exact Match = "Is this EXACTLY the dish we asked for?"
+    - Field-Level = "Did they get the sauce right? The protein? The garnish?"
+    - JSON Validity = "Did they at least put it on a plate?!" 🍽️💅
+
+    Args:
+        model:          The fine-tuned model
+        tokenizer:      The tokenizer
+        val_dataset:    Validation dataset
+        data_format:    "sharegpt" or "alpaca"
+        max_seq_length: Max generation length
+        num_samples:    How many examples to evaluate (default: 20)
+
+    Returns:
+        Dict with evaluation metrics
+    """
+    Console.banner("📊 PHASE 3b: Post-Training Evaluation")
+
+    import torch
+    from unsloth import FastLanguageModel
+
+    # ── Blackwell sm120 (RTX 5070 Ti) inference warning ──────────────
+    # Unsloth injects its custom attention kernels at model *load time*,
+    # not at for_inference() time. On sm120, these kernels produce broken
+    # attention output during generate(), causing complete gibberish.
+    # model.eval() does NOT undo the kernel injection.
+    # The in-process evaluation is unreliable on Blackwell — skip it and
+    # test the exported GGUF with Ollama (uses llama.cpp, no Unsloth kernels).
+    cc = torch.cuda.get_device_capability(0) if torch.cuda.is_available() else (0, 0)
+    if cc[0] >= 12:
+        Console.warning("Blackwell GPU (sm120) detected — skipping in-process evaluation.")
+        Console.info("Unsloth's attention kernels are injected at load time and produce")
+        Console.info("broken output during generate() on sm120, even with model.eval().")
+        Console.info("Use the exported GGUF + Ollama to evaluate your model instead:")
+        Console.info("  ollama create aimerlion-resume -f <output_dir>/Modelfile")
+        Console.info("  ollama run aimerlion-resume")
+        return {
+            "total": 0,
+            "json_valid": 0,
+            "json_invalid": 0,
+            "exact_match": 0,
+            "field_scores": {},
+            "avg_length_ratio": 0.0,
+            "json_valid_rate": 0.0,
+            "exact_match_rate": 0.0,
+            "errors": [],
+            "sample_outputs": [],
+            "skipped_reason": "Blackwell sm120 — use GGUF/Ollama for evaluation",
+        }
+
+    FastLanguageModel.for_inference(model)
+
+    # ── Sample validation examples ────────────────────────────────────
+    # We don't need to eval ALL examples — a representative sample
+    # gives us a reliable signal without taking forever.
+    total_available = len(val_dataset)
+    num_samples = min(num_samples, total_available)
+    Console.info(f"Evaluating on {num_samples} / {total_available} validation examples")
+
+    # ── Extract prompts and expected outputs ──────────────────────────
+    results = {
+        "total": num_samples,
+        "json_valid": 0,            # Model output is parseable JSON
+        "json_invalid": 0,          # Model output is NOT parseable JSON
+        "exact_match": 0,           # Output exactly matches expected
+        "field_scores": {},         # Per-field accuracy
+        "avg_length_ratio": 0.0,    # Output length vs expected length
+        "errors": [],               # Detailed error log
+        "sample_outputs": [],       # First few outputs for manual review
+    }
+
+    length_ratios = []
+
+    for i in range(num_samples):
+        example = val_dataset[i]
+
+        # ── Extract the prompt (user message) and expected output ──────
+        if data_format == "sharegpt":
+            convos = example.get("conversations", [])
+            system_msg = ""
+            prompt_parts = []
+            expected_output = ""
+            for msg in convos:
+                role = msg.get("from") if isinstance(msg, dict) else msg.get("from", "")
+                value = msg.get("value") if isinstance(msg, dict) else msg.get("value", "")
+                if role == "system":
+                    system_msg = value or ""
+                elif role == "human":
+                    prompt_parts.append(value or "")
+                elif role == "gpt":
+                    expected_output = value or ""
+            prompt = prompt_parts[-1] if prompt_parts else ""
+        else:
+            # Alpaca format
+            system_msg = ""
+            instruction = example.get("instruction", "")
+            inp = example.get("input", "")
+            prompt = f"{instruction}\n\n{inp}" if inp else instruction
+            expected_output = example.get("output", "")
+
+        if not prompt or not expected_output:
+            continue
+
+        # ── Format as Llama 3 chat (include system message if present) ──
+        # Must match the training format exactly so the model sees the same
+        # token pattern it learned from — system msg was in every training example.
+        messages = []
+        if system_msg:
+            messages.append({"role": "system", "content": system_msg})
+        messages.append({"role": "user", "content": prompt})
+        input_text = tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+
+        # ── Generate the model's response ─────────────────────────────
+        inputs = tokenizer(
+            input_text,
+            return_tensors="pt",
+            truncation=True,
+            max_length=max_seq_length,
+        ).to(model.device)
+
+        with torch.no_grad():
+            output_ids = model.generate(
+                **inputs,
+                max_new_tokens=1024,        # Resume JSON shouldn't exceed this
+                temperature=0.1,            # Low temp = deterministic output
+                top_p=0.9,
+                do_sample=True,
+                use_cache=True,
+                pad_token_id=tokenizer.eos_token_id,
+            )
+
+        # ── Decode only the NEW tokens (skip the prompt) ──────────────
+        generated_ids = output_ids[0][inputs["input_ids"].shape[1]:]
+        generated_text = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
+
+        # ── Score: JSON validity ──────────────────────────────────────
+        generated_json = None
+        expected_json = None
+        try:
+            generated_json = json.loads(generated_text)
+            results["json_valid"] += 1
+        except (json.JSONDecodeError, ValueError):
+            results["json_invalid"] += 1
+            results["errors"].append({
+                "sample": i,
+                "error": "Invalid JSON output",
+                "output_preview": generated_text[:200],
+            })
+
+        try:
+            expected_json = json.loads(expected_output)
+        except (json.JSONDecodeError, ValueError):
+            # Expected output isn't JSON — do string comparison instead
+            expected_json = None
+
+        # ── Score: Exact match ────────────────────────────────────────
+        if generated_text.strip() == expected_output.strip():
+            results["exact_match"] += 1
+
+        # ── Score: Field-level accuracy (if both are valid JSON) ──────
+        # This is the REAL gold — checking each field individually!
+        # Like grading each answer on an exam separately 📝
+        if generated_json and expected_json and isinstance(expected_json, dict):
+            for field_name, expected_value in expected_json.items():
+                if field_name not in results["field_scores"]:
+                    results["field_scores"][field_name] = {
+                        "correct": 0, "total": 0, "missing": 0
+                    }
+                results["field_scores"][field_name]["total"] += 1
+
+                generated_value = generated_json.get(field_name)
+                if generated_value is None:
+                    results["field_scores"][field_name]["missing"] += 1
+                elif _normalize_value(generated_value) == _normalize_value(expected_value):
+                    results["field_scores"][field_name]["correct"] += 1
+
+        # ── Length ratio (detect truncation or hallucination) ─────────
+        if expected_output:
+            ratio = len(generated_text) / max(len(expected_output), 1)
+            length_ratios.append(ratio)
+
+        # ── Save sample outputs for manual review ─────────────────────
+        if i < 5:  # Save first 5 for inspection
+            results["sample_outputs"].append({
+                "prompt_preview": prompt[:150] + "..." if len(prompt) > 150 else prompt,
+                "expected_preview": expected_output[:200] + "..." if len(expected_output) > 200 else expected_output,
+                "generated_preview": generated_text[:200] + "..." if len(generated_text) > 200 else generated_text,
+                "json_valid": generated_json is not None,
+            })
+
+    # ── Calculate summary metrics ─────────────────────────────────────
+    results["avg_length_ratio"] = (
+        sum(length_ratios) / len(length_ratios) if length_ratios else 0.0
+    )
+    results["json_valid_rate"] = results["json_valid"] / max(results["total"], 1)
+    results["exact_match_rate"] = results["exact_match"] / max(results["total"], 1)
+
+    # ── Print the GORGEOUS results table ──────────────────────────────
+    print()
+    print("═" * 60)
+    print("  📊 EVALUATION RESULTS")
+    print("═" * 60)
+    Console.stat("Total evaluated", results["total"])
+    Console.stat("JSON valid", f"{results['json_valid']}/{results['total']} ({results['json_valid_rate']:.1%})")
+    Console.stat("Exact match", f"{results['exact_match']}/{results['total']} ({results['exact_match_rate']:.1%})")
+    Console.stat("Avg length ratio", f"{results['avg_length_ratio']:.2f}x (1.0 = perfect)")
+
+    # ── Per-field accuracy table ──────────────────────────────────────
+    if results["field_scores"]:
+        print()
+        print(f"  {'Field':<25s} {'Correct':>8s} {'Missing':>8s} {'Total':>8s} {'Acc':>8s}")
+        print(f"  {'-'*57}")
+        for field, scores in sorted(
+            results["field_scores"].items(),
+            key=lambda x: x[1]["correct"] / max(x[1]["total"], 1),
+            reverse=True,
+        ):
+            acc = scores["correct"] / max(scores["total"], 1)
+            print(
+                f"  {field:<25s} {scores['correct']:>8d} "
+                f"{scores['missing']:>8d} {scores['total']:>8d} "
+                f"{acc:>7.1%}"
+            )
+
+    # ── Health verdicts ───────────────────────────────────────────────
+    print()
+    if results["json_valid_rate"] >= 0.9:
+        Console.success("JSON validity: EXCELLENT — model produces structured output! 🎉")
+    elif results["json_valid_rate"] >= 0.7:
+        Console.warning("JSON validity: OKAY — some outputs aren't valid JSON")
+    else:
+        Console.error("JSON validity: POOR — model struggles to produce valid JSON 😢")
+        Console.info("Try: more training data, more epochs, or lower temperature")
+
+    if results["avg_length_ratio"] < 0.3:
+        Console.warning("Outputs are MUCH shorter than expected — possible truncation!")
+        Console.info("Check your Modelfile stop tokens — they might be cutting output early")
+    elif results["avg_length_ratio"] > 3.0:
+        Console.warning("Outputs are MUCH longer than expected — possible hallucination!")
+        Console.info("The model may be generating extra fields or repeating itself")
+
+    # ── Sample outputs for manual review ──────────────────────────────
+    if results["sample_outputs"]:
+        print()
+        print("═" * 60)
+        print("  🔍 SAMPLE OUTPUTS (first 5 — for manual review)")
+        print("═" * 60)
+        for idx, sample in enumerate(results["sample_outputs"]):
+            print(f"\n  ── Sample {idx + 1} {'✅' if sample['json_valid'] else '❌'} ──")
+            print(f"  Prompt:    {sample['prompt_preview']}")
+            print(f"  Expected:  {sample['expected_preview']}")
+            print(f"  Generated: {sample['generated_preview']}")
+
+    print("═" * 60)
+
+    return results
+
+
+def _normalize_value(value) -> str:
+    """
+    Normalize a value for comparison — handles strings, lists, numbers.
+    
+    We lowercase, strip whitespace, and sort lists so that
+    ["Python", "Java"] matches ["java", "python"]. 
+    Because ORDER shouldn't matter for skills, darling! 💅
+    """
+    if isinstance(value, str):
+        return value.strip().lower()
+    elif isinstance(value, list):
+        return str(sorted([str(v).strip().lower() for v in value]))
+    elif isinstance(value, (int, float)):
+        return str(value)
+    else:
+        return str(value).strip().lower()
 
 
 # =============================================================================
@@ -587,9 +914,14 @@ def export_to_gguf(
     )
 
     # ── Find the output file ──────────────────────────────────────────
+    # Unsloth appends "_gguf" to the folder name automatically,
+    # so we search both locations to be safe. Pick the most recently
+    # modified .gguf so multiple training runs don't pick a stale file.
     gguf_files = list(Path(gguf_dir).glob("*.gguf"))
+    if not gguf_files:
+        gguf_files = list(Path(gguf_dir + "_gguf").glob("*.gguf"))
     if gguf_files:
-        gguf_path = str(gguf_files[0])
+        gguf_path = str(max(gguf_files, key=lambda f: f.stat().st_mtime))
         file_size = os.path.getsize(gguf_path) / (1024**3)
         Console.success(f"GGUF exported: {gguf_path}")
         Console.stat("File size", f"{file_size:.2f} GB")
@@ -644,8 +976,8 @@ def create_modelfile(
 
     # ── Build the Modelfile ───────────────────────────────────────────
     # NOTE: The TEMPLATE uses Go template syntax ({{ .System }} etc.)
-    # which is what Ollama expects. The ChatML format (<|im_start|>)
-    # matches how we trained the model — this alignment is CRITICAL!
+    # which is what Ollama expects. The Llama 3 format uses
+    # <|start_header_id|> tokens — this alignment is CRITICAL!
 
    # ── Build the Modelfile ───────────────────────────────────────────
     # NOTE: The TEMPLATE uses Go template syntax ({{ .System }} etc.)
@@ -730,11 +1062,11 @@ def main():
 
     # ── Model arguments ───────────────────────────────────────────────
     parser.add_argument(
-        "--model", type=str, default="unsloth/Qwen2.5-7B-Instruct-bnb-4bit",
-        help="Base model (default: unsloth/Qwen2.5-7B-Instruct-bnb-4bit). "
-             "Options: unsloth/Qwen2.5-7B-Instruct-bnb-4bit (comfortable on 16GB), "
-             "unsloth/Qwen2.5-14B-Instruct-bnb-4bit (tight on 16GB), "
-             "unsloth/Llama-3.2-8B-Instruct-bnb-4bit (alternative)"
+        "--model", type=str, default="unsloth/Llama-3.2-3B-Instruct-bnb-4bit",
+        help="Base model (default: unsloth/Llama-3.2-3B-Instruct-bnb-4bit). "
+             "Options: unsloth/Llama-3.2-3B-Instruct-bnb-4bit (best for 16GB VRAM), "
+             "unsloth/Llama-3.2-1B-Instruct-bnb-4bit (lighter, faster), "
+             "unsloth/Qwen2.5-7B-Instruct-bnb-4bit (larger, needs ChatML template)"
     )
     parser.add_argument(
         "--seq-length", type=int, default=2048,
@@ -744,7 +1076,7 @@ def main():
     # ── Training arguments ────────────────────────────────────────────
     parser.add_argument("--epochs", type=int, default=3, help="Training epochs (default: 3)")
     parser.add_argument("--batch-size", type=int, default=2, help="Batch size (default: 2 for 16GB VRAM)")
-    parser.add_argument("--lr", type=float, default=2e-4, help="Learning rate (default: 2e-4)")
+    parser.add_argument("--lr", type=float, default=2e-5, help="Learning rate (default: 2e-5 for 3B models)")
     parser.add_argument("--output-dir", type=str, default="resume_model_finetuned", help="Output directory")
 
     # ── Export arguments ──────────────────────────────────────────────
@@ -835,6 +1167,24 @@ def main():
         learning_rate=args.lr,
         max_seq_length=args.seq_length,
     )
+
+    # Phase 3b: Evaluate! (The part we were MISSING, darling! 💅)
+    eval_results = evaluate_model(
+        model=model,
+        tokenizer=tokenizer,
+        val_dataset=val_ds,
+        data_format=data_format,
+        max_seq_length=args.seq_length,
+        num_samples=20,
+    )
+
+    # Save evaluation results for tracking over time
+    eval_path = os.path.join(args.output_dir, "eval_results.json")
+    with open(eval_path, "w", encoding="utf-8") as f:
+        # Remove sample_outputs from saved file (too verbose for JSON)
+        save_results = {k: v for k, v in eval_results.items() if k != "sample_outputs"}
+        json.dump(save_results, f, indent=2, default=str)
+    Console.success(f"Evaluation results saved: {eval_path}")
 
     # Phase 4: Export to GGUF
     gguf_path = export_to_gguf(model, tokenizer, args.output_dir, args.gguf)

@@ -20,12 +20,14 @@ class AIValidator:
         self.logger = logging.getLogger(__name__)
         coloredlogs.install(level='INFO', logger=self.logger,
                           fmt='%(asctime)s - 🤖 %(levelname)s - %(message)s')
-        
+
+        self._client = ollama.Client(timeout=60)
+
         # Test if model is available
         try:
             self.logger.info(f"🎭 Initializing AI Assistant with {model_name}...")
             # Quick test
-            response = ollama.chat(model=self.model_name, messages=[
+            response = self._client.chat(model=self.model_name, messages=[
                 {'role': 'user', 'content': 'Say "ready"'}
             ])
             self.logger.info("✨ AI Assistant is READY to serve!")
@@ -54,10 +56,10 @@ Answer with ONLY this format:
 {{"is_name": true, "confidence": 0.8}}"""
         
         try:
-            response = ollama.chat(
+            response = self._client.chat(
                 model=self.model_name,
                 messages=[{'role': 'user', 'content': prompt}],
-                options={'temperature': 0.1}  # Low temperature for consistency
+                options={'temperature': 0.1}
             )
             
             # 🌟 ENHANCED: Robust JSON extraction!
@@ -174,12 +176,12 @@ Example: 1995-05-23""",
         
         response = None  # Ensure response is always defined
         try:
-            response = ollama.chat(
+            response = self._client.chat(
                 model=self.model_name,
                 messages=[{'role': 'user', 'content': prompt}],
                 options={
                     'temperature': 0.1,
-                    'num_predict': 50,  # Limit response length
+                    'num_predict': 50,
                 }
             )
             
@@ -314,12 +316,12 @@ Text to fix:
 Return the fixed text, maintaining all information but fixing line breaks."""
         
         try:
-            response = ollama.chat(
+            response = self._client.chat(
                 model=self.model_name,
                 messages=[{'role': 'user', 'content': prompt}],
                 options={'temperature': 0.1}
             )
-            
+
             fixed_text = response['message']['content']
             if len(fixed_text) > len(text) * 0.5:  # Sanity check
                 self.logger.info("🤖 AI fixed vertical formatting issues")

@@ -1,0 +1,625 @@
+{
+  "pipeline_version": "1.0",
+  "run_timestamp": "2026-04-21T13:47:51.129080",
+  "phases": {
+    "validation": {
+      "total_docs": 198,
+      "total_annotations": 9906,
+      "entity_counts": {
+        "SKILL": 5681,
+        "JOB_DESCRIPTION": 1638,
+        "WORK_DATE": 323,
+        "ORGANIZATION": 307,
+        "JOB_TITLE": 305,
+        "SECTION_HEADER": 205,
+        "DEGREE": 144,
+        "SOFT_SKILL": 141,
+        "INSTITUTION": 140,
+        "CERTIFICATION": 131,
+        "EDU_DATE": 117,
+        "LANGUAGE_SKILL": 106,
+        "PHONE": 68,
+        "SKILL_CATEGORY": 63,
+        "PERSON_NAME": 62,
+        "LOCATION": 59,
+        "CERT_DATE": 56,
+        "EMAIL": 54,
+        "CERT_ISSUER": 51,
+        "DATE_OF_BIRTH": 31,
+        "SUMMARY_TEXT": 31,
+        "WORK_LOCATION": 31,
+        "NATIONALITY": 27,
+        "PROJECT_TITLE": 25,
+        "GENDER": 22,
+        "PROJECT_DESCRIPTION": 21,
+        "MARITAL_STATUS": 20,
+        "NRIC_ID": 15,
+        "FIELD_OF_STUDY": 9,
+        "METRIC": 9,
+        "PROFICIENCY": 5,
+        "LINKEDIN": 5,
+        "EXPECTED_LOCATION": 3,
+        "INDUSTRY": 1
+      },
+      "entity_per_doc": {
+        "SKILL": 28.69191919191919,
+        "JOB_DESCRIPTION": 8.272727272727273,
+        "WORK_DATE": 1.6313131313131313,
+        "ORGANIZATION": 1.5505050505050506,
+        "JOB_TITLE": 1.5404040404040404,
+        "SECTION_HEADER": 1.0353535353535352,
+        "DEGREE": 0.7272727272727273,
+        "SOFT_SKILL": 0.7121212121212122,
+        "INSTITUTION": 0.7070707070707071,
+        "CERTIFICATION": 0.6616161616161617,
+        "EDU_DATE": 0.5909090909090909,
+        "LANGUAGE_SKILL": 0.5353535353535354,
+        "PHONE": 0.3434343434343434,
+        "SKILL_CATEGORY": 0.3181818181818182,
+        "PERSON_NAME": 0.31313131313131315,
+        "LOCATION": 0.29797979797979796,
+        "CERT_DATE": 0.2828282828282828,
+        "EMAIL": 0.2727272727272727,
+        "CERT_ISSUER": 0.25757575757575757,
+        "DATE_OF_BIRTH": 0.15656565656565657,
+        "SUMMARY_TEXT": 0.15656565656565657,
+        "WORK_LOCATION": 0.15656565656565657,
+        "NATIONALITY": 0.13636363636363635,
+        "PROJECT_TITLE": 0.12626262626262627,
+        "GENDER": 0.1111111111111111,
+        "PROJECT_DESCRIPTION": 0.10606060606060606,
+        "MARITAL_STATUS": 0.10101010101010101,
+        "NRIC_ID": 0.07575757575757576,
+        "FIELD_OF_STUDY": 0.045454545454545456,
+        "METRIC": 0.045454545454545456,
+        "PROFICIENCY": 0.025252525252525252,
+        "LINKEDIN": 0.025252525252525252,
+        "EXPECTED_LOCATION": 0.015151515151515152,
+        "INDUSTRY": 0.005050505050505051
+      },
+      "errors": [],
+      "warnings": [],
+      "empty_spans": 0,
+      "duplicate_spans": 0,
+      "orphaned_i_tags": 0,
+      "passed": true
+    },
+    "split": {
+      "seed": 42,
+      "total_docs": 198,
+      "split_ratios": {
+        "train": 0.8,
+        "val": 0.1,
+        "test": 0.1
+      },
+      "split_counts": {
+        "train": 160,
+        "val": 19,
+        "test": 19
+      },
+      "train_doc_ids": [
+        "skillspan_000053",
+        "doc_43288",
+        "doc_43202",
+        "skillspan_000099",
+        "skillspan_000071",
+        "doc_43234",
+        "skillspan_000022",
+        "doc_43235",
+        "skillspan_000070",
+        "skillspan_000012",
+        "doc_43213",
+        "skillspan_000128",
+        "doc_43270",
+        "skillspan_000108",
+        "skillspan_000112",
+        "doc_43242",
+        "skillspan_000102",
+        "doc_43282",
+        "skillspan_000077",
+        "doc_43293",
+        "doc_43215",
+        "doc_43313",
+        "skillspan_000027",
+        "skillspan_000023",
+        "skillspan_000007",
+        "skillspan_000016",
+        "doc_43283",
+        "skillspan_000069",
+        "skillspan_000065",
+        "skillspan_000021",
+        "skillspan_000103",
+        "skillspan_000009",
+        "doc_43296",
+        "skillspan_000127",
+        "doc_43275",
+        "doc_43312",
+        "skillspan_000135",
+        "skillspan_000117",
+        "doc_43231",
+        "skillspan_000003",
+        "skillspan_000113",
+        "doc_43300",
+        "skillspan_000074",
+        "skillspan_000046",
+        "skillspan_000136",
+        "skillspan_000038",
+        "skillspan_000087",
+        "skillspan_000043",
+        "skillspan_000085",
+        "skillspan_000004",
+        "doc_43199",
+        "skillspan_000133",
+        "doc_43244",
+        "skillspan_000061",
+        "skillspan_000044",
+        "skillspan_000054",
+        "skillspan_000134",
+        "skillspan_000119",
+        "skillspan_000045",
+        "doc_43196",
+        "skillspan_000066",
+        "doc_43292",
+        "skillspan_000101",
+        "skillspan_000055",
+        "doc_43249",
+        "doc_43241",
+        "skillspan_000118",
+        "skillspan_000114",
+        "skillspan_000047",
+        "skillspan_000008",
+        "skillspan_000140",
+        "skillspan_000048",
+        "doc_43297",
+        "skillspan_000089",
+        "skillspan_000019",
+        "doc_43314",
+        "skillspan_000091",
+        "skillspan_000068",
+        "skillspan_000058",
+        "skillspan_000049",
+        "skillspan_000056",
+        "skillspan_000083",
+        "doc_43279",
+        "doc_43247",
+        "skillspan_000081",
+        "skillspan_000063",
+        "skillspan_000130",
+        "skillspan_000006",
+        "skillspan_000026",
+        "skillspan_000111",
+        "skillspan_000076",
+        "skillspan_000096",
+        "skillspan_000015",
+        "doc_43261",
+        "skillspan_000125",
+        "skillspan_000052",
+        "doc_43307",
+        "skillspan_000107",
+        "doc_43205",
+        "doc_43268",
+        "skillspan_000124",
+        "skillspan_000042",
+        "skillspan_000041",
+        "skillspan_000120",
+        "skillspan_000064",
+        "skillspan_000139",
+        "skillspan_000075",
+        "skillspan_000095",
+        "skillspan_000092",
+        "skillspan_000067",
+        "doc_43301",
+        "skillspan_000078",
+        "skillspan_000079",
+        "skillspan_000090",
+        "skillspan_000073",
+        "skillspan_000011",
+        "doc_43251",
+        "skillspan_000024",
+        "skillspan_000020",
+        "doc_43230",
+        "skillspan_000025",
+        "skillspan_000105",
+        "skillspan_000062",
+        "skillspan_000032",
+        "doc_43280",
+        "skillspan_000028",
+        "skillspan_000100",
+        "skillspan_000033",
+        "skillspan_000037",
+        "doc_43286",
+        "skillspan_000036",
+        "skillspan_000059",
+        "skillspan_000104",
+        "skillspan_000098",
+        "doc_43259",
+        "skillspan_000121",
+        "skillspan_000088",
+        "skillspan_000017",
+        "skillspan_000001",
+        "skillspan_000110",
+        "doc_43245",
+        "doc_43302",
+        "skillspan_000035",
+        "skillspan_000018",
+        "skillspan_000084",
+        "doc_43250",
+        "skillspan_000039",
+        "doc_43257",
+        "skillspan_000080",
+        "skillspan_000060",
+        "doc_43232",
+        "skillspan_000010",
+        "skillspan_000031",
+        "skillspan_000034",
+        "doc_43258",
+        "skillspan_000040",
+        "skillspan_000123",
+        "skillspan_000137",
+        "skillspan_000029",
+        "skillspan_000122"
+      ],
+      "val_doc_ids": [
+        "doc_43269",
+        "skillspan_000115",
+        "skillspan_000030",
+        "skillspan_000126",
+        "doc_43285",
+        "doc_43200",
+        "skillspan_000014",
+        "skillspan_000093",
+        "skillspan_000057",
+        "doc_43317",
+        "skillspan_000050",
+        "skillspan_000129",
+        "skillspan_000109",
+        "doc_43305",
+        "skillspan_000086",
+        "skillspan_000138",
+        "skillspan_000097",
+        "skillspan_000072",
+        "skillspan_000002"
+      ],
+      "test_doc_ids": [
+        "doc_43315",
+        "doc_43254",
+        "doc_43228",
+        "doc_43229",
+        "skillspan_000051",
+        "skillspan_000094",
+        "doc_43253",
+        "skillspan_000082",
+        "skillspan_000116",
+        "doc_43260",
+        "skillspan_000131",
+        "doc_43281",
+        "doc_43321",
+        "skillspan_000005",
+        "skillspan_000013",
+        "skillspan_000132",
+        "doc_43226",
+        "doc_43265",
+        "skillspan_000106"
+      ],
+      "created_at": "2026-04-21T13:26:50.839418"
+    },
+    "ner_training": {
+      "model_path": "ml_output\\ner_model",
+      "base_model": "en_core_web_sm",
+      "n_epochs": 23,
+      "labels": [
+        "CERTIFICATION",
+        "CERT_DATE",
+        "CERT_ISSUER",
+        "DATE_OF_BIRTH",
+        "DEGREE",
+        "EDU_DATE",
+        "EMAIL",
+        "EXPECTED_LOCATION",
+        "FIELD_OF_STUDY",
+        "GENDER",
+        "INDUSTRY",
+        "INSTITUTION",
+        "JOB_DESCRIPTION",
+        "JOB_TITLE",
+        "LANGUAGE_SKILL",
+        "LINKEDIN",
+        "LOCATION",
+        "MARITAL_STATUS",
+        "METRIC",
+        "NATIONALITY",
+        "NRIC_ID",
+        "ORGANIZATION",
+        "PERSON_NAME",
+        "PHONE",
+        "PROFICIENCY",
+        "PROJECT_DESCRIPTION",
+        "PROJECT_TITLE",
+        "SECTION_HEADER",
+        "SKILL",
+        "SKILL_CATEGORY",
+        "SOFT_SKILL",
+        "SUMMARY_TEXT",
+        "WORK_DATE",
+        "WORK_LOCATION"
+      ],
+      "final_train_loss": "11975.991",
+      "final_val_loss": "480.21387",
+      "training_log": [
+        {
+          "epoch": 1,
+          "train_loss": "20164.572",
+          "val_loss": "1764.7042"
+        },
+        {
+          "epoch": 2,
+          "train_loss": "17985.027",
+          "val_loss": "2005.4198"
+        },
+        {
+          "epoch": 3,
+          "train_loss": "16630.568",
+          "val_loss": "1608.4404"
+        },
+        {
+          "epoch": 4,
+          "train_loss": "16067.98",
+          "val_loss": "1438.5265"
+        },
+        {
+          "epoch": 5,
+          "train_loss": "15586.998",
+          "val_loss": "1054.4044"
+        },
+        {
+          "epoch": 6,
+          "train_loss": "14724.259",
+          "val_loss": "977.1913"
+        },
+        {
+          "epoch": 7,
+          "train_loss": "14649.067",
+          "val_loss": "988.5032"
+        },
+        {
+          "epoch": 8,
+          "train_loss": "13531.213",
+          "val_loss": "735.25287"
+        },
+        {
+          "epoch": 9,
+          "train_loss": "13522.052",
+          "val_loss": "681.3899"
+        },
+        {
+          "epoch": 10,
+          "train_loss": "14088.992",
+          "val_loss": "674.9058"
+        },
+        {
+          "epoch": 11,
+          "train_loss": "13099.662",
+          "val_loss": "597.39087"
+        },
+        {
+          "epoch": 12,
+          "train_loss": "13168.13",
+          "val_loss": "576.76245"
+        },
+        {
+          "epoch": 13,
+          "train_loss": "13128.159",
+          "val_loss": "566.1289"
+        },
+        {
+          "epoch": 14,
+          "train_loss": "13550.546",
+          "val_loss": "571.1304"
+        },
+        {
+          "epoch": 15,
+          "train_loss": "13058.212",
+          "val_loss": "558.3623"
+        },
+        {
+          "epoch": 16,
+          "train_loss": "12292.974",
+          "val_loss": "502.26212"
+        },
+        {
+          "epoch": 17,
+          "train_loss": "12487.704",
+          "val_loss": "515.1081"
+        },
+        {
+          "epoch": 18,
+          "train_loss": "11820.687",
+          "val_loss": "468.49454"
+        },
+        {
+          "epoch": 19,
+          "train_loss": "11935.02",
+          "val_loss": "584.50494"
+        },
+        {
+          "epoch": 20,
+          "train_loss": "11442.177",
+          "val_loss": "471.44574"
+        },
+        {
+          "epoch": 21,
+          "train_loss": "12049.809",
+          "val_loss": "485.7576"
+        },
+        {
+          "epoch": 22,
+          "train_loss": "12003.258",
+          "val_loss": "497.2778"
+        },
+        {
+          "epoch": 23,
+          "train_loss": "11975.991",
+          "val_loss": "480.21387"
+        }
+      ]
+    },
+    "ner_evaluation": {
+      "CERTIFICATION": {
+        "precision": 0,
+        "recall": 0.0,
+        "f1": 0
+      },
+      "DATE_OF_BIRTH": {
+        "precision": 0,
+        "recall": 0.0,
+        "f1": 0
+      },
+      "DEGREE": {
+        "precision": 0,
+        "recall": 0.0,
+        "f1": 0
+      },
+      "EDU_DATE": {
+        "precision": 0,
+        "recall": 0.0,
+        "f1": 0
+      },
+      "EMAIL": {
+        "precision": 0,
+        "recall": 0.0,
+        "f1": 0
+      },
+      "EXPECTED_LOCATION": {
+        "precision": 0,
+        "recall": 0.0,
+        "f1": 0
+      },
+      "GENDER": {
+        "precision": 0,
+        "recall": 0.0,
+        "f1": 0
+      },
+      "INSTITUTION": {
+        "precision": 0,
+        "recall": 0.0,
+        "f1": 0
+      },
+      "JOB_DESCRIPTION": {
+        "precision": 0,
+        "recall": 0.0,
+        "f1": 0
+      },
+      "JOB_TITLE": {
+        "precision": 0,
+        "recall": 0.0,
+        "f1": 0
+      },
+      "LANGUAGE_SKILL": {
+        "precision": 0,
+        "recall": 0.0,
+        "f1": 0
+      },
+      "LINKEDIN": {
+        "precision": 0,
+        "recall": 0.0,
+        "f1": 0
+      },
+      "LOCATION": {
+        "precision": 0,
+        "recall": 0.0,
+        "f1": 0
+      },
+      "MARITAL_STATUS": {
+        "precision": 0,
+        "recall": 0.0,
+        "f1": 0
+      },
+      "NATIONALITY": {
+        "precision": 0,
+        "recall": 0.0,
+        "f1": 0
+      },
+      "NRIC_ID": {
+        "precision": 0,
+        "recall": 0.0,
+        "f1": 0
+      },
+      "ORGANIZATION": {
+        "precision": 0,
+        "recall": 0.0,
+        "f1": 0
+      },
+      "PERSON_NAME": {
+        "precision": 0,
+        "recall": 0.0,
+        "f1": 0
+      },
+      "PHONE": {
+        "precision": 0,
+        "recall": 0.0,
+        "f1": 0
+      },
+      "PROFICIENCY": {
+        "precision": 0,
+        "recall": 0.0,
+        "f1": 0
+      },
+      "SECTION_HEADER": {
+        "precision": 0,
+        "recall": 0.0,
+        "f1": 0
+      },
+      "SKILL": {
+        "precision": 0.24517906336088155,
+        "recall": 0.2398921832884097,
+        "f1": 0.24250681198910082
+      },
+      "SKILL_CATEGORY": {
+        "precision": 0,
+        "recall": 0.0,
+        "f1": 0
+      },
+      "SOFT_SKILL": {
+        "precision": 0,
+        "recall": 0.0,
+        "f1": 0
+      },
+      "SUMMARY_TEXT": {
+        "precision": 0,
+        "recall": 0.0,
+        "f1": 0
+      },
+      "WORK_DATE": {
+        "precision": 0,
+        "recall": 0.0,
+        "f1": 0
+      },
+      "WORK_LOCATION": {
+        "precision": 0,
+        "recall": 0.0,
+        "f1": 0
+      },
+      "_overall": {
+        "precision": 0.24517906336088155,
+        "recall": 0.08003597122302158,
+        "f1": 0.12067796610169493
+      }
+    },
+    "classification": {
+      "function": {
+        "model_path": "ml_output\\classifier_model\\function_classifier.pkl",
+        "n_classes": 10,
+        "n_samples": 429,
+        "cv_f1_mean": 0.9799972606664824,
+        "cv_f1_std": 0.008423867396493031
+      },
+      "industry": {
+        "model_path": "ml_output\\classifier_model\\industry_classifier.pkl",
+        "n_classes": 10,
+        "n_samples": 429,
+        "cv_f1_mean": 0.9354158118206243,
+        "cv_f1_std": 0.07493018225379769
+      }
+    }
+  }
+}
