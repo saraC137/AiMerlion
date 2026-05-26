@@ -1,9 +1,0 @@
-{
-  "last_trained": "2026-05-26T09:27:29.953409",
-  "db_path": "resume_extractions.db",
-  "results_summary": {
-    "confidence_scorer": "success",
-    "correction_suggester": "success",
-    "anomaly_detector": "success"
-  }
-}
