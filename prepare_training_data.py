@@ -83,13 +83,6 @@ def load_annotated_resumes(db_path: str, status_filter: str = "completed") -> Li
         ).fetchone()
         raw_text = raw_text_row["raw_text"] if raw_text_row else ""
 
-        # Fallback: try candidates table
-        if not raw_text:
-            fallback_row = conn.execute(
-                "SELECT raw_text FROM candidates WHERE id = ?", (candidate_id,)
-            ).fetchone()
-            raw_text = fallback_row["raw_text"] if fallback_row else ""
-
         if not raw_text:
             skipped["no_text"] += 1
             continue

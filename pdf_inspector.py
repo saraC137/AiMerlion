@@ -6,61 +6,154 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# ── Heuristic thresholds ──────────────────────────────────────────────────────
+# A page must have at least this many characters to look like real text content.
+# Anything lower than this on a per-page basis means there is likely image-based
+# text that pdfplumber couldn't read.
+MIN_CHARS_PER_PAGE = 150
+
+# Total text below this is treated as effectively empty regardless of page count.
+MIN_TOTAL_TEXT_CHARS = 100
+
+# Suspicious-low text: total chars/page is between this and MIN_CHARS_PER_PAGE,
+# so a thin text layer probably hides image content underneath.
+SUSPICIOUS_CHARS_PER_PAGE = 400
+
+
+def _count_images_deep(pdf_path: str) -> int:
+    """
+    Recursively count image XObjects across all pages, including images nested
+    inside Form XObjects (which pdfplumber.page.images misses).
+
+    Returns the total image XObject count, or 0 if scanning fails.
+    """
+    seen: set = set()
+    image_count = 0
+
+    def walk_xobject(xobj_dict):
+        nonlocal image_count
+        if not xobj_dict:
+            return
+        try:
+            if hasattr(xobj_dict, 'get_object'):
+                xobj_dict = xobj_dict.get_object()
+            if not isinstance(xobj_dict, dict):
+                return
+            for name, obj in xobj_dict.items():
+                if hasattr(obj, 'get_object'):
+                    resolved = obj.get_object()
+                else:
+                    resolved = obj
+                # Avoid cycles via indirect-object identity
+                obj_id = id(resolved)
+                if obj_id in seen:
+                    continue
+                seen.add(obj_id)
+
+                subtype = resolved.get('/Subtype') if isinstance(resolved, dict) else None
+                if subtype == '/Image':
+                    image_count += 1
+                elif subtype == '/Form':
+                    # Form XObjects can themselves carry an /XObject resource
+                    nested_resources = resolved.get('/Resources') if isinstance(resolved, dict) else None
+                    if nested_resources:
+                        if hasattr(nested_resources, 'get_object'):
+                            nested_resources = nested_resources.get_object()
+                        nested_xobj = nested_resources.get('/XObject') if isinstance(nested_resources, dict) else None
+                        walk_xobject(nested_xobj)
+        except Exception as e:
+            logger.debug(f"XObject walk error: {e}")
+
+    try:
+        with open(pdf_path, "rb") as f:
+            reader = PyPDF2.PdfReader(f)
+            for page in reader.pages:
+                try:
+                    resources = page.get('/Resources')
+                    if hasattr(resources, 'get_object'):
+                        resources = resources.get_object()
+                    if not isinstance(resources, dict):
+                        continue
+                    xobject = resources.get('/XObject')
+                    walk_xobject(xobject)
+                except Exception as e:
+                    logger.debug(f"Page XObject scan error: {e}")
+    except Exception as e:
+        logger.debug(f"Deep image scan failed for {pdf_path}: {e}")
+        return 0
+
+    return image_count
+
 
 def analyze_pdf_type(pdf_path: str) -> Dict[str, Any]:
     """
     Analyze PDF to determine its type and whether it contains images.
 
+    Detection uses three independent signals — direct page.images, deep
+    recursive XObject scan (catches images inside Form XObjects), and
+    per-page text density — so mixed PDFs with hidden images and thin
+    text layers are correctly flagged for OCR.
+
     Returns:
         dict with keys:
-            - has_images: bool - True if PDF contains any images
-            - has_text: bool - True if PDF has extractable text (>50 chars)
+            - has_images: bool - True if PDF contains any images (any source)
+            - has_text: bool - True if PDF has dense extractable text
             - has_fonts: bool - True if PDF has embedded fonts
             - has_vectors: bool - True if PDF has vector graphics
-            - image_count: int - Number of images found
+            - image_count: int - Max images found by either scanner
+            - image_count_deep: int - Images found by recursive XObject scan
             - text_length: int - Length of extractable text
-            - pdf_type: str - 'text_only', 'scanned', 'mixed', 'vector', 'unclear'
+            - chars_per_page: float - Average extracted chars per page
+            - page_count: int - Number of pages
+            - pdf_type: str - 'text_only' | 'scanned' | 'mixed' | 'vector' | 'unclear'
             - needs_ocr: bool - True if OCR should be used
+            - detection_reason: str - Human-readable explanation
     """
     result = {
-        'has_images': False,
-        'has_text': False,
-        'has_fonts': False,
-        'has_vectors': False,
-        'image_count': 0,
-        'text_length': 0,
-        'pdf_type': 'unclear',
-        'needs_ocr': False
+        'has_images':        False,
+        'has_text':          False,
+        'has_fonts':         False,
+        'has_vectors':       False,
+        'image_count':       0,
+        'image_count_deep':  0,
+        'text_length':       0,
+        'chars_per_page':    0.0,
+        'page_count':        0,
+        'pdf_type':          'unclear',
+        'needs_ocr':         False,
+        'detection_reason':  '',
     }
 
     try:
-        # Analyze with pdfplumber
+        # ── PASS 1: pdfplumber — text, top-level images, vectors ──────────────
         with pdfplumber.open(pdf_path) as pdf:
-            total_images = 0
-            total_text = ""
-            total_lines = 0
+            total_images_shallow = 0
+            total_text   = ""
+            total_lines  = 0
             total_curves = 0
+            page_count   = len(pdf.pages)
 
             for page in pdf.pages:
-                # Count images across all pages
-                images = page.images
-                total_images += len(images)
-
-                # Get text
+                total_images_shallow += len(page.images)
                 page_text = page.extract_text() or ""
                 total_text += page_text
-
-                # Count vectors
-                total_lines += len(page.lines)
+                total_lines  += len(page.lines)
                 total_curves += len(page.curves)
 
-            result['image_count'] = total_images
-            result['has_images'] = total_images > 0
-            result['text_length'] = len(total_text)
-            result['has_text'] = len(total_text) > 50
-            result['has_vectors'] = total_lines > 10 or total_curves > 5
+            result['page_count']     = max(page_count, 1)
+            result['text_length']    = len(total_text)
+            result['chars_per_page'] = len(total_text) / result['page_count']
+            result['has_vectors']    = total_lines > 10 or total_curves > 5
 
-        # Check fonts with PyPDF2
+        # ── PASS 2: PyPDF2 deep scan — catches Form-XObject-nested images ─────
+        deep_image_count = _count_images_deep(pdf_path)
+        result['image_count_deep'] = deep_image_count
+
+        # Take the higher of the two image counts (most-thorough wins)
+        result['image_count'] = max(total_images_shallow, deep_image_count)
+        result['has_images']  = result['image_count'] > 0
+
+        # ── PASS 3: Font detection (PyPDF2, page 1) ───────────────────────────
         try:
             with open(pdf_path, "rb") as file:
                 pdf_reader = PyPDF2.PdfReader(file)
@@ -68,41 +161,87 @@ def analyze_pdf_type(pdf_path: str) -> Dict[str, Any]:
                     page = pdf_reader.pages[0]
                     resources = page.get('/Resources')
                     if resources:
-                        # Handle IndirectObject by resolving it
                         if hasattr(resources, 'get_object'):
                             resources = resources.get_object()
-                        result['has_fonts'] = '/Font' in resources if isinstance(resources, dict) else False
-                    else:
-                        result['has_fonts'] = False
+                        result['has_fonts'] = (
+                            '/Font' in resources if isinstance(resources, dict) else False
+                        )
         except Exception as font_error:
             logger.debug(f"Font check failed: {font_error}")
             result['has_fonts'] = False
 
-        # Determine PDF type and OCR need
-        if result['has_text'] and result['has_fonts'] and not result['has_images']:
-            result['pdf_type'] = 'text_only'
-            result['needs_ocr'] = False  # Pure text PDF - no OCR needed
-        elif result['has_images'] and not result['has_text']:
-            result['pdf_type'] = 'scanned'
-            result['needs_ocr'] = True  # Scanned PDF - OCR required
-        elif result['has_images'] and result['has_text']:
-            result['pdf_type'] = 'mixed'
-            result['needs_ocr'] = True  # Mixed PDF - use OCR to capture image text
-        elif result['has_vectors'] and not result['has_text']:
-            result['pdf_type'] = 'vector'
-            result['needs_ocr'] = True  # Vector/shape-based - try OCR
-        else:
-            result['pdf_type'] = 'unclear'
-            result['needs_ocr'] = True  # When in doubt, use OCR
+        # ── Text-density classification ───────────────────────────────────────
+        # `has_text` now requires BOTH a minimum total AND a minimum density.
+        # A 5-page PDF with 80 chars total → has_text=False (was True before).
+        result['has_text'] = (
+            result['text_length']    >= MIN_TOTAL_TEXT_CHARS
+            and result['chars_per_page'] >= MIN_CHARS_PER_PAGE
+        )
 
-        logger.debug(f"PDF Analysis for {Path(pdf_path).name}: type={result['pdf_type']}, "
-                    f"images={result['image_count']}, text={result['text_length']} chars, needs_ocr={result['needs_ocr']}")
+        # A thin text layer below SUSPICIOUS_CHARS_PER_PAGE → text exists but
+        # is likely incomplete. We still flag for OCR even if no images detected.
+        suspiciously_thin = (
+            result['text_length']    >= MIN_TOTAL_TEXT_CHARS
+            and result['chars_per_page'] < SUSPICIOUS_CHARS_PER_PAGE
+        )
+
+        # ── Decision matrix ───────────────────────────────────────────────────
+        if result['has_text'] and result['has_fonts'] and not result['has_images'] and not suspiciously_thin:
+            result['pdf_type']         = 'text_only'
+            result['needs_ocr']        = False
+            result['detection_reason'] = (
+                f"text-only: {result['chars_per_page']:.0f} chars/page, no images, fonts present"
+            )
+
+        elif result['has_images'] and not result['has_text']:
+            result['pdf_type']         = 'scanned'
+            result['needs_ocr']        = True
+            result['detection_reason'] = (
+                f"scanned: {result['image_count']} images, only {result['text_length']} chars total"
+            )
+
+        elif result['has_images'] and result['has_text']:
+            result['pdf_type']         = 'mixed'
+            result['needs_ocr']        = True
+            result['detection_reason'] = (
+                f"mixed: {result['image_count']} images + {result['chars_per_page']:.0f} chars/page"
+            )
+
+        elif suspiciously_thin:
+            # NEW BRANCH: text exists but density suggests image-embedded content
+            result['pdf_type']         = 'mixed'
+            result['needs_ocr']        = True
+            result['detection_reason'] = (
+                f"suspicious-thin text layer ({result['chars_per_page']:.0f} chars/page across "
+                f"{result['page_count']} pages, threshold {SUSPICIOUS_CHARS_PER_PAGE}) — OCR likely needed"
+            )
+
+        elif result['has_vectors'] and not result['has_text']:
+            result['pdf_type']         = 'vector'
+            result['needs_ocr']        = True
+            result['detection_reason'] = (
+                f"vector: {total_lines} lines + {total_curves} curves, no real text"
+            )
+
+        else:
+            result['pdf_type']         = 'unclear'
+            result['needs_ocr']        = True
+            result['detection_reason'] = "unclear signals — defaulting to OCR for safety"
+
+        logger.debug(
+            f"PDF Analysis for {Path(pdf_path).name}: type={result['pdf_type']}, "
+            f"images={result['image_count']} (deep={result['image_count_deep']}, "
+            f"shallow={total_images_shallow}), text={result['text_length']} chars "
+            f"({result['chars_per_page']:.0f}/page), needs_ocr={result['needs_ocr']} — "
+            f"{result['detection_reason']}"
+        )
 
     except Exception as e:
         logger.warning(f"PDF analysis failed for {pdf_path}: {e}")
         # On error, default to using OCR to be safe
-        result['needs_ocr'] = True
-        result['pdf_type'] = 'error'
+        result['needs_ocr']        = True
+        result['pdf_type']         = 'error'
+        result['detection_reason'] = f"inspection error: {e}"
 
     return result
 
