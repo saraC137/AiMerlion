@@ -64,8 +64,78 @@ try:
 except ImportError:
     VECTOR_SEARCH_AVAILABLE = False
 
-# Global engine instance (lazy-initialized)
-_vector_engine = None
+# =============================================================================
+# 🤖 AI JD MATCHING — my-qwen-finetune:latest (optional — graceful degradation)
+# =============================================================================
+try:
+    import ollama as _ollama
+    OLLAMA_CHAT_AVAILABLE = True
+except ImportError:
+    OLLAMA_CHAT_AVAILABLE = False
+
+AI_JD_MODEL = "my-qwen-finetune:latest"
+
+
+def _ai_score_candidates(jd: str, candidates: list) -> list:
+    """
+    Use my-qwen-finetune:latest to score each candidate's match to the JD.
+
+    Called after vector search — adds 'ai_match_score' (0-100) and
+    'ai_match_reason' to each result dict. Failures are non-fatal:
+    both fields are set to None so the UI can show "N/A" gracefully.
+    """
+    if not OLLAMA_CHAT_AVAILABLE or not candidates:
+        for c in candidates:
+            c["ai_match_score"] = None
+            c["ai_match_reason"] = None
+        return candidates
+
+    # Build a compact candidate list for the prompt
+    cand_lines = []
+    for i, c in enumerate(candidates, 1):
+        profile = (c.get("profile_preview") or "")[:400]
+        cand_lines.append(
+            f"[{i}] ID:{c['candidate_id']} Name:{c['name']}\n{profile}"
+        )
+    candidates_block = "\n\n".join(cand_lines)
+
+    prompt = (
+        "You are an expert HR recruiter scoring candidate-to-JD fit.\n\n"
+        f"JOB DESCRIPTION:\n{jd[:1500]}\n\n"
+        f"CANDIDATES:\n{candidates_block}\n\n"
+        "For EACH candidate output ONE line in this exact format (no extra text):\n"
+        "[N] score:<0-100> reason:<one sentence>\n"
+        "Example: [1] score:82 reason:Strong Python and AWS skills align well."
+    )
+
+    try:
+        response = _ollama.chat(
+            model=AI_JD_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            options={"temperature": 0},
+        )
+        content = response["message"]["content"].strip()
+
+        # Parse lines like "[1] score:82 reason:Strong match..."
+        for line in content.splitlines():
+            m = re.match(
+                r'\[(\d+)\]\s+score:(\d+)\s+reason:(.*)', line.strip()
+            )
+            if m:
+                idx = int(m.group(1)) - 1
+                if 0 <= idx < len(candidates):
+                    candidates[idx]["ai_match_score"] = min(100, max(0, int(m.group(2))))
+                    candidates[idx]["ai_match_reason"] = m.group(3).strip()
+
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"⚠️ AI JD scoring failed ({AI_JD_MODEL}): {e}")
+
+    # Fill None for any candidate the model missed
+    for c in candidates:
+        c.setdefault("ai_match_score", None)
+        c.setdefault("ai_match_reason", None)
+
+    return candidates
 
 # =============================================================================
 # 🔬 ML QUALITY AUDIT ENGINE (optional — graceful degradation)
@@ -75,22 +145,6 @@ try:
     ML_AUDIT_AVAILABLE = True
 except ImportError:
     ML_AUDIT_AVAILABLE = False
-
-def get_vector_engine():
-    """
-    Lazy-initialize the vector search engine.
-    Only loads when first search request comes in.
-    """
-    global _vector_engine
-    if _vector_engine is None:
-        if not VECTOR_SEARCH_AVAILABLE:
-            return None
-        try:
-            _vector_engine = VectorSearchEngine()
-        except Exception as e:
-            logging.getLogger(__name__).error(f"❌ Vector engine init failed: {e}")
-            return None
-    return _vector_engine
 
 # =============================================================================
 # 🔧 LOGGING
@@ -159,6 +213,26 @@ TRACKED_FIELDS = {
 
 # Valid verdict values
 VALID_VERDICTS = {"correct", "wrong", "partial", "missing", "skip"}
+
+
+# =============================================================================
+# 🔍 VECTOR SEARCH ENGINE (GLOBAL SINGLETON)
+# =============================================================================
+# We initialize this once at the top level so it persists across requests.
+# This prevents "Storage folder already accessed" errors by keeping a single
+# connection to the Qdrant database. 👸✨
+_search_engine = None
+
+def get_vector_engine():
+    global _search_engine
+    if _search_engine is None:
+        try:
+            from vector_search import VectorSearchEngine
+            _search_engine = VectorSearchEngine()
+            print("  ✅ Vector Search Engine (Qdrant) initialized! 🧠")
+        except Exception as e:
+            print(f"  ❌ Failed to init Vector Engine: {e}")
+    return _search_engine
 
 
 # =============================================================================
@@ -300,7 +374,20 @@ def initialize_accuracy_schema():
         """)
 
         conn.commit()
+
+        # ── Migration: add 'notes' column if table predates it ─────
+        # Like adding a pocket to a dress that was sewn without one! 👗
+        try:
+            conn.execute("ALTER TABLE accuracy_reviews ADD COLUMN notes TEXT DEFAULT ''")
+            conn.commit()
+            logger.info("🧵 Migration applied: added 'notes' column to accuracy_reviews")
+        except sqlite3.OperationalError:
+            pass  # Column already exists — nothing to do, sweetie!
+
         conn.close()
+        # ── Migration: add 'notes' column if table predates it ─────
+        # Like adding a pocket to a dress that was sewn without one! 👗
+
         logger.info("✨ accuracy_reviews table initialized!")
 
     except sqlite3.Error as e:
@@ -1349,7 +1436,7 @@ def api_search_candidates():
             "error": "Vector search not available. Install dependencies:\n"
                      "  pip install qdrant-client --break-system-packages\n"
                      "  pip install ollama --break-system-packages\n"
-                     "  ollama pull nomic-embed-text",
+                     "  ollama pull mxbai-embed-large",
             "vector_search_available": False,
         }), 503
 
@@ -1361,13 +1448,22 @@ def api_search_candidates():
     top_k = min(data.get("top_k", 10), 50)
     skill_filter = data.get("skill_filter")
     location_filter = data.get("location_filter")
+    use_role_filter = bool(data.get("use_role_filter", False))
+    use_ai_score = bool(data.get("use_ai_score", True))
 
     results = engine.search(
         job_description=jd,
         top_k=top_k,
         skill_filter=skill_filter,
         location_filter=location_filter,
+        use_role_filter=use_role_filter
     )
+
+    # AI re-scoring: my-qwen-finetune:latest evaluates each candidate against the JD
+    if use_ai_score and results.get("results"):
+        results["results"] = _ai_score_candidates(jd, results["results"])
+        results["query_info"]["ai_model"] = AI_JD_MODEL
+        results["query_info"]["ai_scoring"] = OLLAMA_CHAT_AVAILABLE
 
     return jsonify(results)
 
@@ -1404,7 +1500,7 @@ def api_search_stats():
     if engine is None:
         return jsonify({
             "vector_search_available": False,
-            "message": "Install: pip install qdrant-client ollama; ollama pull nomic-embed-text"
+            "message": "Install: pip install qdrant-client ollama; ollama pull mxbai-embed-large"
         })
 
     stats = engine.get_stats()
@@ -1418,6 +1514,440 @@ def api_search_stats():
 # Same pattern as annotation_tool.py and review_dashboard.py:
 # Flask serves the HTML, which calls our own /api/ endpoints.
 # No CORS issues because it's the SAME origin! 🎉
+
+SEARCH_DASHBOARD_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🧚‍♀️ Vector Search Dashboard</title>
+<style>
+  /* ── CSS RESET & VARIABLES ──────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:        #0c0a14; --bg-card:   #151221; --bg-panel:  #110e1d;
+    --bg-input:  #1a1630; --border:    #2a2545; --border-f:  #a855f7;
+    --text:      #f0ecf9; --text-sec:  #9b8fc4; --text-mut:  #6b5f8a;
+    --accent:    #c084fc; --accent-dk: #7c3aed; --glow: rgba(168,85,247,0.15);
+    --gold:      #fbbf24; --pink:      #ec4899; --teal: #2dd4bf;
+    --ok:        #22c55e; --bad:       #ef4444; --warn: #f59e0b;
+    --purple:    #8b5cf6;
+    --mono: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    --display: 'Playfair Display', 'Georgia', serif;
+    --body: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  }
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Playfair+Display:wght@700;800&display=swap');
+
+  body {
+    background: linear-gradient(180deg, var(--bg) 0%, #0f0b1a 100%);
+    color: var(--text); font-family: var(--body);
+    min-height: 100vh; overflow-x: hidden;
+  }
+
+  /* ── LAYOUT ────────────────────────────────────────────────────── */
+  .app-container { display: flex; flex-direction: column; height: 100vh; }
+  
+  header {
+    background: var(--bg-panel); border-bottom: 1px solid var(--border);
+    padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3); z-index: 100;
+  }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .logo { font-size: 1.8rem; }
+  h1 { font-family: var(--display); font-size: 1.5rem; letter-spacing: -0.5px; }
+  h1 span { color: var(--accent); }
+
+  .nav-links { display: flex; gap: 20px; }
+  .nav-link { 
+    color: var(--text-sec); text-decoration: none; font-weight: 600; font-size: 0.9rem;
+    padding: 6px 12px; border-radius: 6px; transition: all 0.2s;
+  }
+  .nav-link:hover { color: var(--accent); background: var(--glow); }
+  .nav-link.active { color: var(--text); background: var(--glow); border: 1px solid var(--border-f); }
+
+  main { display: grid; grid-template-columns: 400px 1fr; gap: 24px; padding: 24px; flex: 1; overflow: hidden; }
+
+  /* ── SIDEBAR ───────────────────────────────────────────────────── */
+  .sidebar { display: flex; flex-direction: column; gap: 24px; overflow-y: auto; }
+  
+  .card {
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 20px; box-shadow: 0 8px 30px rgba(0,0,0,0.2);
+  }
+  .card-title {
+    font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
+    color: var(--text-mut); margin-bottom: 16px; display: flex; align-items: center; gap: 8px;
+  }
+
+  .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .stat-item { background: var(--bg-panel); padding: 12px; border-radius: 8px; border: 1px solid var(--border); }
+  .stat-label { font-size: 0.7rem; color: var(--text-mut); margin-bottom: 4px; }
+  .stat-value { font-family: var(--mono); font-size: 1.1rem; color: var(--accent); }
+
+  .search-config { display: flex; flex-direction: column; gap: 16px; }
+  .input-group { display: flex; flex-direction: column; gap: 8px; }
+  label { font-size: 0.85rem; font-weight: 600; color: var(--text-sec); }
+  textarea, input, select {
+    background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text); padding: 12px; font-family: var(--body); font-size: 0.95rem;
+    transition: border-color 0.2s;
+  }
+  textarea:focus, input:focus { border-color: var(--accent); outline: none; }
+  textarea { height: 200px; resize: none; }
+
+  .btn {
+    padding: 12px 20px; border-radius: 8px; border: none; font-weight: 700;
+    cursor: pointer; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px;
+    font-size: 0.95rem;
+  }
+  .btn-primary { background: linear-gradient(135deg, var(--accent-dk) 0%, var(--accent) 100%); color: white; }
+  .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 0 20px var(--glow); }
+  .btn-primary:active { transform: translateY(0); }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+  .btn-outline { background: transparent; border: 1px solid var(--border-f); color: var(--accent); }
+  .btn-outline:hover { background: var(--glow); }
+
+  /* ── RESULTS ───────────────────────────────────────────────────── */
+  .results-container { 
+    display: flex; flex-direction: column; gap: 16px; overflow-y: auto; padding-right: 8px;
+  }
+  .results-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+  .results-count { font-size: 0.9rem; color: var(--text-sec); }
+
+  .result-card {
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 20px; position: relative; transition: border-color 0.2s; cursor: pointer;
+  }
+  .result-card:hover { border-color: var(--accent); }
+  
+  .result-header { display: flex; justify-content: space-between; margin-bottom: 12px; align-items: flex-start; }
+  .candidate-info h3 { font-family: var(--display); font-size: 1.25rem; color: var(--text); }
+  .candidate-info p { font-size: 0.85rem; color: var(--text-mut); margin-top: 4px; font-family: var(--mono); }
+  
+  .score-badge {
+    background: var(--glow); border: 1px solid var(--border-f); color: var(--accent);
+    padding: 4px 12px; border-radius: 20px; font-weight: 700; font-family: var(--mono);
+    font-size: 0.9rem; display: flex; align-items: center; gap: 4px;
+  }
+
+  .role-pills { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .pill { 
+    font-size: 0.75rem; font-weight: 700; padding: 4px 10px; border-radius: 6px;
+    background: #2a2545; color: var(--text-sec);
+  }
+  .pill.function { background: #1e3a8a; color: #93c5fd; }
+  .pill.role { background: #5b21b6; color: #ddd6fe; }
+
+  .preview-text {
+    font-size: 0.9rem; color: var(--text-sec); line-height: 1.6;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .empty-state {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    height: 100%; color: var(--text-mut); gap: 16px;
+  }
+  .empty-state i { font-size: 4rem; opacity: 0.3; }
+
+  /* ── MODAL ─────────────────────────────────────────────────────── */
+  .modal-overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.85); backdrop-filter: blur(8px);
+    display: none; justify-content: center; align-items: center; z-index: 1000;
+  }
+  .modal {
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px;
+    width: 900px; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden;
+  }
+  .modal-header { padding: 20px 24px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+  .modal-body { padding: 24px; overflow-y: auto; }
+  .modal-footer { padding: 16px 24px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 12px; }
+  .close-btn { font-size: 1.5rem; cursor: pointer; color: var(--text-mut); }
+  .close-btn:hover { color: var(--text); }
+
+  /* ── UTILS ─────────────────────────────────────────────────────── */
+  .scroll-thin::-webkit-scrollbar { width: 6px; }
+  .scroll-thin::-webkit-scrollbar-track { background: transparent; }
+  .scroll-thin::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; }
+  .loading-spinner { 
+    width: 24px; height: 24px; border: 3px solid var(--glow); 
+    border-top: 3px solid var(--accent); border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+  .toast {
+    position: fixed; bottom: 24px; right: 24px; padding: 16px 24px;
+    border-radius: 8px; color: white; transform: translateY(100px);
+    transition: transform 0.3s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+    display: flex; align-items: center; gap: 12px; z-index: 2000;
+  }
+  .toast.show { transform: translateY(0); }
+  .toast.success { background: var(--ok); }
+  .toast.error { background: var(--bad); }
+</style>
+</head>
+<body>
+
+<div class="app-container">
+  <header>
+    <div class="brand">
+      <span class="logo">🧚‍♀️</span>
+      <h1>AiMerlion <span>Vector Search</span></h1>
+    </div>
+    <nav class="nav-links">
+      <a href="/dashboard" class="nav-link">Validator Dashboard</a>
+      <a href="/search" class="nav-link active">Search Engine</a>
+    </nav>
+  </header>
+
+  <main>
+    <!-- Left Sidebar: Controls & Stats -->
+    <section class="sidebar scroll-thin">
+      <!-- Collection Stats -->
+      <div class="card">
+        <div class="card-title">📊 Collection Status</div>
+        <div class="stats-grid" id="statsGrid">
+          <div class="stat-item">
+            <div class="stat-label">Total Candidates</div>
+            <div class="stat-value" id="statCount">...</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">Model</div>
+            <div class="stat-value" style="font-size: 0.75rem;" id="statModel">...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Search Controls -->
+      <div class="card" style="flex: 1;">
+        <div class="card-title">🔍 New Search</div>
+        <div class="search-config">
+          <div class="input-group">
+            <label for="jdInput">Job Description / Requirements</label>
+            <textarea id="jdInput" placeholder="Paste your JD here... e.g. Looking for a Python developer with 3 years experience in React and AWS..."></textarea>
+          </div>
+          
+          <div class="input-group">
+            <label for="topK">Top Results</label>
+            <input type="number" id="topK" value="10" min="1" max="50">
+          </div>
+
+          <button class="btn btn-primary" id="searchBtn">
+            <span>🚀 Find Candidates</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Index Management -->
+      <div class="card">
+        <div class="card-title">⚙️ Index Management</div>
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+          <button class="btn btn-outline" id="syncBtn">
+            <span>🔄 Sync New Resumes</span>
+          </button>
+          <button class="btn btn-outline" style="border-color: var(--bad); color: var(--bad); opacity: 0.6;" id="rebuildBtn">
+            <span>🗑️ Rebuild All</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Main Content: Results -->
+    <section class="results-container scroll-thin" id="resultsList">
+      <div class="empty-state">
+        <i>🔎</i>
+        <p>Enter a job description to find matching talent</p>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- Preview Modal -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="modalName">Candidate Name</h2>
+      <span class="close-btn" id="closeModal">&times;</span>
+    </div>
+    <div class="modal-body scroll-thin" id="modalBody">
+      <!-- Profile text goes here -->
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" id="closeModalBtn">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  // ── STATE ───────────────────────────────────────────────────────
+  let isSearching = false;
+  let isIndexing = false;
+
+  const els = {
+    statCount: document.getElementById('statCount'),
+    statModel: document.getElementById('statModel'),
+    jdInput: document.getElementById('jdInput'),
+    topK: document.getElementById('topK'),
+    searchBtn: document.getElementById('searchBtn'),
+    syncBtn: document.getElementById('syncBtn'),
+    rebuildBtn: document.getElementById('rebuildBtn'),
+    resultsList: document.getElementById('resultsList'),
+    modal: document.getElementById('modalOverlay'),
+    modalName: document.getElementById('modalName'),
+    modalBody: document.getElementById('modalBody'),
+    closeModal: document.getElementById('closeModal'),
+    closeModalBtn: document.getElementById('closeModalBtn'),
+    toast: document.getElementById('toast'),
+  };
+
+  // ── API HELPERS ─────────────────────────────────────────────────
+  async function api(path, method = 'GET', body = null) {
+    const opts = { method, headers: { 'Content-Type': 'application/json' } };
+    if (body) opts.body = JSON.stringify(body);
+    const resp = await fetch(path, opts);
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ error: 'Unknown error' }));
+      throw new Error(err.error || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+  }
+
+  function showToast(msg, type = 'success') {
+    els.toast.textContent = msg;
+    els.toast.className = `toast show ${type}`;
+    setTimeout(() => { els.toast.className = 'toast'; }, 3000);
+  }
+
+  // ── LOGIC ───────────────────────────────────────────────────────
+  async function loadStats() {
+    try {
+      const data = await api('/api/search/stats');
+      els.statCount.textContent = data.total_documents.toLocaleString();
+      els.statModel.textContent = data.embedding_model;
+    } catch (err) {
+      console.error('Failed to load stats:', err);
+    }
+  }
+
+  async function performSearch() {
+    if (isSearching) return;
+    const jd = els.jdInput.value.trim();
+    if (!jd) return showToast('Please enter a job description', 'error');
+
+    isSearching = true;
+    els.searchBtn.disabled = true;
+    els.searchBtn.innerHTML = '<div class="loading-spinner"></div> Searching...';
+    els.resultsList.innerHTML = '<div class="empty-state"><div class="loading-spinner" style="width:40px; height:40px;"></div><p>Semantically matching candidates...</p></div>';
+
+    try {
+      const data = await api('/api/search', 'POST', {
+        job_description: jd,
+        top_k: parseInt(els.topK.value),
+        use_ai_score: true
+      });
+
+      renderResults(data);
+    } catch (err) {
+      showToast(err.message, 'error');
+      els.resultsList.innerHTML = `<div class="empty-state"><p style="color:var(--bad)">❌ ${err.message}</p></div>`;
+    } finally {
+      isSearching = false;
+      els.searchBtn.disabled = false;
+      els.searchBtn.innerHTML = '<span>🚀 Find Candidates</span>';
+    }
+  }
+
+  function renderResults(data) {
+    if (!data.results || data.results.length === 0) {
+      els.resultsList.innerHTML = '<div class="empty-state"><i>🤷‍♀️</i><p>No matching candidates found</p></div>';
+      return;
+    }
+
+    const html = `
+      <div class="results-header">
+        <div class="results-count">Found ${data.results.length} matches in ${data.query_info.search_time_seconds}s</div>
+      </div>
+      ${data.results.map(r => `
+        <div class="result-card" onclick="previewCandidate(${r.candidate_id}, '${r.name.replace(/'/g, "\\'")}')">
+          <div class="result-header">
+            <div class="candidate-info">
+              <h3>${r.name}</h3>
+              <p>ID: ${r.candidate_id} • ${r.location || 'No Location'}</p>
+            </div>
+            <div class="score-badge">
+              <span>Similarity:</span> ${r.similarity_score}%
+            </div>
+          </div>
+          <div class="role-pills">
+            <span class="pill role">${r.predicted_role}</span>
+            <span class="pill function">${r.function}</span>
+          </div>
+          <div class="preview-text">${r.profile_preview}...</div>
+        </div>
+      `).join('')}
+    `;
+    els.resultsList.innerHTML = html;
+  }
+
+  async function previewCandidate(id, name) {
+    els.modalName.textContent = name;
+    els.modalBody.innerHTML = '<div class="loading-spinner"></div> Loading profile...';
+    els.modal.style.display = 'flex';
+
+    try {
+      const data = await api(`/api/candidates/${id}`);
+      // Build a clean profile display
+      const profile = data.structured.profile_text || "No profile text available.";
+      els.modalBody.innerHTML = `<div style="white-space: pre-wrap; line-height: 1.7;">${profile}</div>`;
+    } catch (err) {
+      els.modalBody.innerHTML = `<p style="color:var(--bad)">Failed to load: ${err.message}</p>`;
+    }
+  }
+
+  async function performSync(rebuild = false) {
+    if (isIndexing) return;
+    if (rebuild && !confirm('Are you sure you want to REBUILD the entire index? This will take a few minutes.')) return;
+
+    isIndexing = true;
+    const btn = rebuild ? els.rebuildBtn : els.syncBtn;
+    const originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<div class="loading-spinner"></div> Indexing...';
+
+    try {
+      const data = await api('/api/search/index', 'POST', { rebuild });
+      showToast(`Success! ${data.indexed} items processed.`);
+      loadStats();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      isIndexing = false;
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
+    }
+  }
+
+  // ── EVENTS ──────────────────────────────────────────────────────
+  els.searchBtn.onclick = performSearch;
+  els.syncBtn.onclick = () => performSync(false);
+  els.rebuildBtn.onclick = () => performSync(true);
+  
+  els.closeModal.onclick = () => els.modal.style.display = 'none';
+  els.closeModalBtn.onclick = () => els.modal.style.display = 'none';
+  window.onclick = (e) => { if (e.target == els.modal) els.modal.style.display = 'none'; };
+
+  // ── INIT ────────────────────────────────────────────────────────
+  loadStats();
+</script>
+</body>
+</html>
+"""
 
 DASHBOARD_HTML = """
 <!DOCTYPE html>
@@ -2086,6 +2616,10 @@ DASHBOARD_HTML = """
           <input id="locFilter" type="text" placeholder="e.g. Singapore"
             style="width:100%;box-sizing:border-box;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;padding:8px 12px;color:var(--text);font-size:12px;font-family:var(--mono);outline:none;">
         </div>
+        <div style="min-width:140px; display:flex; align-items:center; gap:8px; padding-top:14px;">
+          <input type="checkbox" id="useRoleFilter" style="width:16px;height:16px;cursor:pointer;">
+          <label for="useRoleFilter" style="font-size:11px;color:var(--accent);font-weight:700;cursor:pointer;">🎯 Filter by Role</label>
+        </div>
         <div style="min-width:80px;">
           <label style="font-size:10px;color:var(--text-mut);display:block;margin-bottom:4px;">📊 Results</label>
           <select id="topKSelect" style="width:100%;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;padding:8px;color:var(--text);font-size:12px;outline:none;">
@@ -2468,6 +3002,7 @@ async function searchByJD() {
   const skillFilter = skillRaw ? skillRaw.split(',').map(s => s.trim()).filter(s => s) : null;
   const locFilter = document.getElementById('locFilter').value.trim() || null;
   const topK = parseInt(document.getElementById('topKSelect').value) || 10;
+  const useRoleFilter = document.getElementById('useRoleFilter').checked;
 
   const wrap = document.getElementById('searchResults');
   wrap.innerHTML = '<div class="loading">🔍 Searching candidates... (embedding + similarity)</div>';
@@ -2480,6 +3015,7 @@ async function searchByJD() {
         top_k: topK,
         skill_filter: skillFilter,
         location_filter: locFilter,
+        use_role_filter: useRoleFilter
       }),
     });
 
@@ -2490,11 +3026,31 @@ async function searchByJD() {
 
     const results = data.results || [];
     const qi = data.query_info || {};
+    const jdRole = qi.jd_role || {};
 
-    let html = `<div style="font-size:11px;color:var(--text-mut);margin-bottom:12px;font-family:var(--mono);">
+    let html = '';
+    
+    // ── Show detected JD role ─────────────────────────────────────
+    if (jdRole.predicted_role) {
+      html += `
+        <div style="background:rgba(192,132,252,0.1); border:1px dashed var(--accent); border-radius:10px; padding:12px 18px; margin-bottom:16px; display:flex; align-items:center; gap:12px;">
+          <span style="font-size:24px;">🎯</span>
+          <div>
+            <div style="font-size:10px; color:var(--text-sec); text-transform:uppercase; letter-spacing:0.05em; font-weight:700;">JD Role Detected (Traditional ML)</div>
+            <div style="font-size:15px; font-weight:700; color:var(--accent);">${esc(jdRole.predicted_role)} <span style="font-weight:400; color:var(--text-mut); font-size:12px;">• ${esc(jdRole.function)}</span></div>
+          </div>
+          ${useRoleFilter ? '<span class="badge badge-ok" style="margin-left:auto;">Filter Active</span>' : ''}
+        </div>`;
+    }
+
+    const aiModel = qi.ai_model || null;
+    const aiEnabled = qi.ai_scoring === true;
+
+    html += `<div style="font-size:11px;color:var(--text-mut);margin-bottom:12px;font-family:var(--mono);">
       Found ${results.length} matches in ${qi.search_time_seconds}s • ${data.total_candidates} candidates in vector DB
       ${skillFilter ? ' • Skills filter: ' + skillFilter.join(', ') : ''}
       ${locFilter ? ' • Location: ' + locFilter : ''}
+      ${aiEnabled ? ` • <span style="color:var(--accent);">🤖 AI scored by ${esc(aiModel)}</span>` : ''}
     </div>`;
 
     if (results.length === 0) {
@@ -2504,19 +3060,35 @@ async function searchByJD() {
         const scoreColor = r.similarity_score >= 70 ? 'var(--ok)' : r.similarity_score >= 50 ? 'var(--warn)' : 'var(--bad)';
         const barWidth = Math.max(5, r.similarity_score);
 
+        // AI score display
+        const hasAI = r.ai_match_score !== null && r.ai_match_score !== undefined;
+        const aiScore = hasAI ? r.ai_match_score : null;
+        const aiReason = r.ai_match_reason || '';
+        const aiColor = aiScore >= 70 ? 'var(--ok)' : aiScore >= 50 ? 'var(--warn)' : 'var(--bad)';
+
         html += `
           <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:14px 18px;margin-bottom:8px;">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
               <div style="display:flex;align-items:center;gap:10px;">
                 <span style="font-size:20px;font-weight:800;color:${scoreColor};font-family:var(--display);min-width:35px;">#${r.rank}</span>
                 <div>
-                  <div style="font-size:14px;font-weight:700;color:var(--text);">${esc(r.name)}</div>
+                  <div style="display:flex; align-items:center; gap:8px;">
+                    <div style="font-size:14px;font-weight:700;color:var(--text);">${esc(r.name)}</div>
+                    <span class="badge" style="background:var(--bg-input); color:var(--accent); border:1px solid var(--border); font-size:9px;">${esc(r.predicted_role)}</span>
+                  </div>
                   <div style="font-size:11px;color:var(--text-sec);">${esc(r.email)} ${r.phone ? '• ' + esc(r.phone) : ''} ${r.location ? '• 📍 ' + esc(r.location) : ''}</div>
                 </div>
               </div>
-              <div style="text-align:right;">
-                <div style="font-size:22px;font-weight:800;color:${scoreColor};font-family:var(--display);">${r.similarity_score}%</div>
-                <div style="font-size:9px;color:var(--text-mut);">match score</div>
+              <div style="display:flex;gap:16px;align-items:flex-end;">
+                ${hasAI ? `
+                <div style="text-align:right;">
+                  <div style="font-size:22px;font-weight:800;color:${aiColor};font-family:var(--display);">${aiScore}%</div>
+                  <div style="font-size:9px;color:var(--accent);">🤖 AI score</div>
+                </div>` : ''}
+                <div style="text-align:right;">
+                  <div style="font-size:22px;font-weight:800;color:${scoreColor};font-family:var(--display);">${r.similarity_score}%</div>
+                  <div style="font-size:9px;color:var(--text-mut);">vector match</div>
+                </div>
               </div>
             </div>
             <!-- Score bar -->
@@ -2528,6 +3100,11 @@ async function searchByJD() {
               <span style="color:var(--accent);font-weight:600;">Skills:</span>
               ${esc(truncate(r.skills, 200))}
             </div>
+            ${aiReason ? `
+            <!-- AI match reason -->
+            <div style="font-size:11px;color:var(--text-sec);margin-top:6px;padding:6px 10px;background:rgba(192,132,252,0.07);border-left:2px solid var(--accent);border-radius:0 4px 4px 0;">
+              🤖 <em>${esc(aiReason)}</em>
+            </div>` : ''}
             <!-- Preview button — opens the full modal! ✨ -->
             <div style="margin-top:10px;display:flex;gap:8px;align-items:center;">
               <button class="btn btn-outline btn-sm"

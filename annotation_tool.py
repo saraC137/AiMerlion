@@ -313,6 +313,28 @@ def annotate(candidate_id: int):
         stored_soft_skills = pred.get("SoftSkills", [])
         stored_tags = pred.get("Tags", [])
 
+        # 🆕 ML-enhanced Function prediction — overrides keyword result
+        # if the ML model is confident. Graceful degradation if .pkl files
+        # are missing — keyword classifier still works fine! 💅
+        try:
+            from job_role_predictor import JobRolePredictor
+            _role_predictor = JobRolePredictor()
+            if _role_predictor.available and raw_text:
+                ml_pred = _role_predictor.predict(raw_text)
+                ml_function = ml_pred.get("function", "Others")
+                ml_conf = ml_pred.get("confidence", 0.0)
+                # Only override if ML is confident AND has a real category
+                if ml_conf >= 0.15 and ml_function != "Others":
+                    stored_function = ml_function
+                    logger.info(
+                        f"🤖 ML predicted role: {ml_pred['predicted_role']} "
+                        f"({ml_conf:.1%}) → Function: {ml_function}"
+                    )
+        except ImportError:
+            pass  # job_role_predictor.py not installed — that's fine!
+        except Exception as e:
+            logger.debug(f"ML prediction skipped: {e}")
+
     # Serialize annotations for JavaScript
     annotations_json = json.dumps([
         {
