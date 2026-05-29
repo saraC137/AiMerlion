@@ -1668,6 +1668,13 @@ class UltimateResumeExtractor:
         regex_data = self._extract_with_mega_regex(text)
         regex_email  = regex_data.get('email')
         regex_phone  = regex_data.get('phone')
+        # Don't report the recruiter/agency footer number (Tel/Fax/UEN context)
+        # as the candidate's phone — it's not theirs.
+        if regex_phone and self.ai_extractor \
+                and self.ai_extractor._phone_is_agency_number(text, regex_phone):
+            logger.info(f"🏢 Dropping agency phone from regex: {regex_phone}")
+            regex_phone = None
+            regex_data['phone'] = None   # so STEP 3's regex fallback can't re-add it
         if regex_email:
             final_results['email'] = regex_email
         if regex_phone:
@@ -1679,18 +1686,18 @@ class UltimateResumeExtractor:
                 logger.info("🤖 Attempting AI extraction...")
                 header_data = self.ai_extractor.extract_header_fields(text)
                 deep_data   = self.ai_extractor.extract_deep_fields(text)
-                ai_results  = {**header_data, **deep_data}
-
-                if ai_results:
-                    for key, val in ai_results.items():
-                        # Keep regex email/phone; let AI fill everything else
-                        if key in ('email', 'phone') and final_results.get(key):
-                            continue
-                        final_results[key] = val
-                    ai_assisted = True
-                    logger.info(f"✅ AI extracted: {list(ai_results.keys())}")
+                # header LAST so its values win over deep's blank header fields
+                canonical   = {**deep_data, **header_data}
+                # Bridge the canonical schema into the snake_case keys this
+                # method's formatters/exporters read — otherwise the rich AI
+                # output is dropped on a key-name mismatch.
+                self._absorb_canonical(canonical, final_results)
+                ai_assisted = True
+                logger.info("✅ AI extracted and merged into final_results")
             except Exception as e:
                 logger.warning(f"⚠️ AI extraction failed: {e}")
+                import traceback
+                logger.debug(traceback.format_exc())
 
         # ── STEP 3: Regex fills any remaining gaps ──────────────────────────────
         for field in ('name', 'email', 'phone'):
@@ -1747,9 +1754,121 @@ class UltimateResumeExtractor:
             "_raw_hard_skills": final_results.get("hard_skills", []),
             "_raw_soft_skills": final_results.get("soft_skills", []),
             "_raw_languages": final_results.get("languages", []),
+            "_raw_certifications": final_results.get("certifications", []),
+            "_raw_achievements": final_results.get("achievements", []),
+            "_raw_projects": final_results.get("projects", []),
+            "_raw_references": final_results.get("references", ""),
+            "_raw_hobbies": final_results.get("hobbies", ""),
+            "_raw_industry": final_results.get("industry", []),
+            # Full target-shaped canonical (emitted verbatim by the exporter)
+            "_canonical": final_results.get("_canonical"),
         }
 
         return formatted_data, ai_assisted
+
+    def extract_to_json(self, text: str, candidate_id: str = "") -> Dict:
+        """
+        🎯 PUBLIC one-call extraction that returns the standard candidate export
+        JSON using the EXACT pipeline main.py runs per candidate
+        (_extract_data_from_text → format_result_as_export_json).
+
+        Call this from scripts/notebooks instead of poking at AIExtractor
+        directly, so they go through the SAME process as main.py and produce
+        byte-for-byte identical output for the same input text.
+        """
+        formatted_data, _ = self._extract_data_from_text(text)
+        if candidate_id:
+            formatted_data["ID"] = candidate_id
+        return format_result_as_export_json(formatted_data)
+
+    def _absorb_canonical(self, canonical: Dict, final_results: Dict) -> None:
+        """
+        Map AIExtractor's canonical output (Title-Case keys, nested job/edu
+        dicts) into the snake_case keys this extractor's formatters and the
+        JSON exporter consume. Without this bridge the rich AI/regex result is
+        silently dropped because the key names differ ("Work Experience" vs
+        "working_experience"). Regex-found email/phone are preserved.
+
+        Accepts the canonical schema OR the older internal schema defensively.
+        """
+        if not isinstance(canonical, dict):
+            return
+
+        is_canonical = "Work Experience" in canonical or "hard_skills/tags" in canonical
+
+        # --- scalar header fields ---
+        name = canonical.get("Name") or canonical.get("name")
+        if name:
+            final_results["name"] = name
+        loc = canonical.get("Current Location") or canonical.get("location")
+        if loc:
+            final_results["location"] = loc
+        summ = canonical.get("Summary") or canonical.get("summary")
+        if summ:
+            final_results["summary"] = summ
+        if not final_results.get("email"):
+            em = canonical.get("Email") or canonical.get("email")
+            if em:
+                final_results["email"] = em
+        if not final_results.get("phone"):
+            ph = canonical.get("Phone") or canonical.get("phone")
+            if ph:
+                final_results["phone"] = ph
+
+        if not is_canonical:
+            # already internal schema — copy the structured fields straight over
+            for k in ("working_experience", "education", "hard_skills",
+                      "soft_skills", "languages", "certifications"):
+                if canonical.get(k) is not None:
+                    final_results[k] = canonical[k]
+            return
+
+        # --- Work Experience: canonical {company,title,from,to,responsibility[]}
+        #     -> internal {company, role, dates, description} ---
+        wexp = []
+        for j in (canonical.get("Work Experience") or []):
+            if not isinstance(j, dict):
+                continue
+            frm, to = (j.get("from") or "").strip(), (j.get("to") or "").strip()
+            dates = f"{frm} - {to}".strip(" -") if (frm or to) else ""
+            resp = j.get("responsibility") or []
+            desc = " | ".join(resp) if isinstance(resp, list) else str(resp)
+            wexp.append({
+                "company": j.get("company", "") or "",
+                "role": j.get("title", "") or "",
+                "dates": dates,
+                "description": desc,
+            })
+        final_results["working_experience"] = wexp
+
+        # --- Education: canonical {school,major,degree,dates}
+        #     -> internal {institution, degree, dates} ---
+        edu = []
+        for e in (canonical.get("Education") or []):
+            if not isinstance(e, dict):
+                continue
+            edu.append({
+                "institution": e.get("school", "") or "",
+                "degree": e.get("degree", "") or e.get("major", "") or "",
+                "dates": e.get("dates", "") or "",
+            })
+        final_results["education"] = edu
+
+        final_results["hard_skills"] = list(canonical.get("hard_skills/tags") or [])
+        final_results["soft_skills"] = list(canonical.get("soft_skills/skills") or [])
+        langs = canonical.get("Language Skills") or []
+        final_results["languages"] = [
+            l if isinstance(l, dict) else {"language": l} for l in langs
+        ]
+        final_results["certifications"] = list(canonical.get("Certifications") or [])
+        final_results["achievements"] = list(canonical.get("Achievements") or [])
+        final_results["projects"] = list(canonical.get("Project Experience") or [])
+        final_results["references"] = canonical.get("References") or ""
+        final_results["hobbies"] = canonical.get("Hobbies") or ""
+        final_results["industry"] = list(canonical.get("Industry") or [])
+        # Preserve the full, target-shaped canonical so the JSON exporter can
+        # emit it verbatim — guarantees main.py == the snippet's {**deep,**header}.
+        final_results["_canonical"] = canonical
 
     def _extract_section_raw(self, text: str, section_keywords: List[str]) -> Optional[str]:
         """
@@ -2723,66 +2842,94 @@ def _classify_degree_type(degree_text: str, institution: str) -> str:
     return "Others"
 
 
+def _empty_canonical_record() -> Dict:
+    """The exact candidate export schema (key ORDER matters), all-empty."""
+    return {
+        "ID": "", "Name": "", "Page": "", "Phone": "", "Email": "",
+        "Current Company": "", "Current Title": "", "Team": "",
+        "Current Location": "", "Expected Location": "", "Gender": "",
+        "Created By": "", "Creation Date": "", "Last Contact": "",
+        "Function": "", "Summary": "", "References": "", "Hobbies": "",
+        "Industry": [], "Language Skills": [], "Certifications": [],
+        "hard_skills/tags": [], "soft_skills/skills": [], "Achievements": [],
+        "Work Experience": [], "Project Experience": [], "Education": [],
+    }
+
+
 def format_result_as_export_json(result: Dict) -> Dict:
     """
-    Transform an internal extraction result dict into the standard candidate
-    export JSON format used for downstream systems.
+    Return the standard candidate export JSON — THE single output schema shared
+    by main.py and the snippet (AIExtractor canonical). When the AI path
+    produced a canonical record we emit it verbatim (so main.py == the snippet's
+    {**deep, **header}); otherwise we reconstruct the SAME schema/shape from the
+    raw fields. Key order matches _empty_canonical_record().
     """
-    # --- Work Experience ---
-    raw_exp = result.get("_raw_experience") or []
+    # ── Preferred: emit the canonical record verbatim ───────────────────────
+    canon = result.get("_canonical")
+    if isinstance(canon, dict) and canon:
+        rec = _empty_canonical_record()
+        for k in rec:
+            if k in canon:
+                rec[k] = canon[k]
+        if result.get("ID") not in (None, ""):
+            rec["ID"] = str(result["ID"])
+        return rec
+
+    # ── Fallback: reconstruct the same schema from raw fields ────────────────
+    rec = _empty_canonical_record()
+
     work_experience = []
-    for job in raw_exp:
+    for job in (result.get("_raw_experience") or []):
         if not isinstance(job, dict):
             continue
-        dates_str = job.get("dates", "")
+        dates_str = job.get("dates", "") or ""
         from_date, to_date = "", ""
         if " - " in dates_str:
-            parts = dates_str.split(" - ", 1)
-            from_date = parts[0].strip()
-            to_date = parts[1].strip()
+            from_date, to_date = (p.strip() for p in dates_str.split(" - ", 1))
         elif dates_str:
             from_date = dates_str
-
-        description = job.get("description", "")
-        if description and description.lower() not in {"description not available", "n/a", "none", ""}:
-            responsibilities = [r.strip() for r in description.split("|") if r.strip() and len(r.strip()) > 3]
+        desc = job.get("description", "") or ""
+        if desc and desc.lower() not in {"description not available", "n/a", "none", ""}:
+            responsibilities = [r.strip() for r in desc.split("|") if r.strip() and len(r.strip()) > 3]
         else:
             responsibilities = []
-
         work_experience.append({
-            "company": job.get("company", ""),
-            "title": job.get("role", ""),
+            "company": job.get("company", "") or "",
+            "title": job.get("role", "") or job.get("title", "") or "",
             "from": from_date,
             "to": to_date,
             "responsibility": responsibilities,
         })
 
-    # --- Education ---
-    raw_edu = result.get("_raw_education") or []
     education = []
-    for edu in raw_edu:
+    for edu in (result.get("_raw_education") or []):
         if not isinstance(edu, dict):
             continue
-        institution = edu.get("institution", "")
-        degree_text = edu.get("degree", "")
         education.append({
-            "school": institution,
-            "major": degree_text,
-            "Degree": _classify_degree_type(degree_text, institution),
+            "school": edu.get("institution", "") or edu.get("school", "") or "",
+            "major": edu.get("major", "") or "",
+            "degree": edu.get("degree", "") or "",
+            "dates": edu.get("dates", "") or "",
         })
 
-    # --- Language Skills ---
-    raw_langs = result.get("_raw_languages") or []
-    language_skills = []
-    seen_langs: set = set()
+    projects = []
+    for p in (result.get("_raw_projects") or []):
+        if isinstance(p, dict):
+            projects.append({
+                "name": p.get("name", "") or "",
+                "description": p.get("description", "") or "",
+                "date": p.get("date", "") or p.get("dates", "") or "",
+            })
 
-    for lang in raw_langs:
-        if isinstance(lang, dict):
-            lang_name = lang.get("language", "")
-        elif isinstance(lang, str):
-            lang_name = lang
-        else:
-            continue
+    certifications = []
+    for c in (result.get("_raw_certifications") or []):
+        name = c.get("name", "") if isinstance(c, dict) else str(c)
+        if name and name.strip():
+            certifications.append(name.strip())
+
+    language_skills, seen_langs = [], set()
+    for lang in (result.get("_raw_languages") or []):
+        lang_name = lang.get("language", "") if isinstance(lang, dict) else (lang if isinstance(lang, str) else "")
         if not lang_name:
             continue
         for extracted in _extract_languages_from_raw(lang_name):
@@ -2790,42 +2937,29 @@ def format_result_as_export_json(result: Dict) -> Dict:
                 seen_langs.add(extracted.lower())
                 language_skills.append(extracted)
 
-    # --- Skills & Tags ---
-    hard_skills = result.get("_raw_hard_skills") or []
-    soft_skills = result.get("_raw_soft_skills") or []
-    all_skills = [s for s in list(hard_skills) + list(soft_skills) if s]
-    # Tags: short hard-skill tokens that look like tool/system names (≤3 words, ≤30 chars)
-    tags = [s for s in hard_skills if s and len(s.split()) <= 3 and len(s) <= 30]
-
-    # --- Current Company / Title from most-recent role ---
-    current_company = work_experience[0].get("company", "") if work_experience else ""
-    current_title = work_experience[0].get("title", "") if work_experience else ""
-
-    return {
-        "ID": str(result.get("ID", "")) if result.get("ID") is not None else "",
-        "Name": result.get("Name") or "",
-        "Page": "",
-        "Phone": result.get("Phone") or "",
-        "Email": result.get("Email") or "",
-        "Current Company": current_company,
-        "Current Title": current_title,
-        "Team": "",
-        "Current Location": result.get("Location") or "",
-        "Expected Location": "",
-        "Gender": "",
-        "Created By": "",
-        "Creation Date": "",
-        "Last Contact": "",
-        "Function": _classify_job_function(current_title),
-        "Industry": [],
-        "Summary": result.get("Summary") or "",
-        "Language Skills": language_skills,
-        "Work Experience": work_experience,
-        "Education": education,
-        "Project Experience": "",
-        "tags": tags,
-        "skills": all_skills,
-    }
+    rec["ID"] = str(result.get("ID", "")) if result.get("ID") is not None else ""
+    rec["Name"] = result.get("Name") or ""
+    rec["Phone"] = result.get("Phone") or ""
+    rec["Email"] = result.get("Email") or ""
+    rec["Current Location"] = result.get("Location") or ""
+    rec["Summary"] = result.get("Summary") or ""
+    refs = result.get("_raw_references") or ""
+    rec["References"] = refs if isinstance(refs, str) else ""
+    hobs = result.get("_raw_hobbies") or ""
+    rec["Hobbies"] = hobs if isinstance(hobs, str) else ""
+    rec["Industry"] = list(result.get("_raw_industry") or [])
+    rec["Language Skills"] = language_skills
+    rec["Certifications"] = certifications
+    rec["hard_skills/tags"] = [s for s in (result.get("_raw_hard_skills") or []) if s]
+    rec["soft_skills/skills"] = [s for s in (result.get("_raw_soft_skills") or []) if s]
+    rec["Achievements"] = list(result.get("_raw_achievements") or [])
+    rec["Work Experience"] = work_experience
+    rec["Project Experience"] = projects
+    rec["Education"] = education
+    rec["Current Company"] = work_experience[0]["company"] if work_experience else ""
+    rec["Current Title"] = work_experience[0]["title"] if work_experience else ""
+    rec["Function"] = _classify_job_function(rec["Current Title"])
+    return rec
 
 
 def generate_reports(results: List[Dict], empty_folders: List[str]):
