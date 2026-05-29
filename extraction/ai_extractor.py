@@ -310,22 +310,24 @@ class AIExtractor:
         )
         for m in re.finditer(label_pattern, header_text, re.IGNORECASE):
             candidate = m.group(1).strip()
-            if self._is_valid_phone(candidate):
+            if self._is_valid_phone(candidate) and not self._is_agency_phone_context(header_text, m.start(), m.end()):
                 self.logger.info(f"Regex found labeled phone: {candidate}")
                 return candidate
 
         # --- Singapore: explicit +65 or 65 country code ---
         sg_pattern = r'(?<!\d)(\+?65[\s\-\.]?[689]\d{3}[\s\-\.]?\d{4})(?!\d)'
-        m = re.search(sg_pattern, header_text)
-        if m:
+        for m in re.finditer(sg_pattern, header_text):
+            if self._is_agency_phone_context(header_text, m.start(), m.end()):
+                continue
             candidate = m.group(1).strip()
             self.logger.info(f"Regex found SG phone: {candidate}")
             return candidate
 
         # --- Malaysia: explicit +60 or 60 country code ---
         my_pattern = r'(?<!\d)(\+?60[\s\-\.]?1[0-9][\s\-\.]?\d{3,4}[\s\-\.]?\d{4})(?!\d)'
-        m = re.search(my_pattern, header_text)
-        if m:
+        for m in re.finditer(my_pattern, header_text):
+            if self._is_agency_phone_context(header_text, m.start(), m.end()):
+                continue
             candidate = m.group(1).strip()
             self.logger.info(f"Regex found MY phone (with code): {candidate}")
             return candidate
@@ -339,13 +341,16 @@ class AIExtractor:
             ctx = header_text[start:m.start()].lower()
             if any(w in ctx for w in ['postal', 'zip', 'nric', 'ic no', 'year', 'batch', 'order']):
                 continue
+            if self._is_agency_phone_context(header_text, m.start(), m.end()):
+                continue
             self.logger.info(f"Regex found SG bare phone: {candidate}")
             return candidate
 
         # --- Malaysia bare mobile starting with 01 (10-11 digits) ---
         my_bare = r'(?<!\d)(01[0-9][\s\-\.]?\d{3,4}[\s\-\.]?\d{4})(?!\d)'
-        m = re.search(my_bare, header_text)
-        if m:
+        for m in re.finditer(my_bare, header_text):
+            if self._is_agency_phone_context(header_text, m.start(), m.end()):
+                continue
             candidate = m.group(1).strip()
             self.logger.info(f"Regex found MY bare phone: {candidate}")
             return candidate
@@ -387,6 +392,259 @@ class AIExtractor:
 
         # Fallback: use first 2000 characters
         return text[:2000] if len(text) > 2000 else text
+
+    def _extract_header_from_table(self, text: str) -> Dict[str, str]:
+        """
+        📋 Parse recruiter 'summary sheet' tables (| Label | Value |) where
+        personal details live in a two-column markdown table rather than free
+        text (e.g. the APBA TG format: "| Candidate Name | Lim Chin Peng |").
+        The free-text header AI prompt routinely misses these, so this fills
+        the gap. Returns only the fields found, keyed to internal field names.
+        """
+        found: Dict[str, str] = {}
+        if not text:
+            return found
+
+        # (label aliases, internal field). Order matters: more specific first.
+        label_map = [
+            (('candidate name', 'full name', 'name'),                 'name'),
+            (('gender', 'sex'),                                       'gender'),
+            (('nationality', 'citizenship'),                          'nationality'),
+            (('email', 'e-mail'),                                     'email'),
+            (('contact number', 'mobile', 'handphone', 'h/p', 'hp',
+              'telephone', 'tel', 'phone', 'contact'),                'phone'),
+            (('residential address', 'address', 'current location',
+              'location', 'residence'),                               'location'),
+            (('date of birth', 'dob', 'd.o.b', 'birth date'),         'dob'),
+        ]
+
+        for raw_line in text.split('\n'):
+            line = raw_line.strip()
+            if line.count('|') < 2:
+                continue
+            cells = [c.strip() for c in line.strip('|').split('|')]
+            if len(cells) < 2:
+                continue
+            label = cells[0].lower().strip(' *:`')
+            value = re.sub(r'<br\s*/?>', ' ', cells[1], flags=re.IGNORECASE)
+            value = re.sub(r'[*`]', '', value).strip()
+            if not label or not value:
+                continue
+            for keys, field in label_map:
+                if field in found:
+                    continue
+                if any(label == k or label.startswith(k + ' ') or label == k
+                       for k in keys):
+                    found[field] = value
+                    break
+
+        # "Lives in <place>" frequently hides inside another cell's value
+        if 'location' not in found:
+            m = re.search(r'Lives?\s+in\s+([A-Z][A-Za-z\s]{2,40})', text)
+            if m:
+                found['location'] = m.group(1).strip(' .')
+
+        if found:
+            self.logger.info(f"📋 Summary-table header fields: {sorted(found)}")
+        return found
+
+    def _is_boilerplate_line(self, line: str) -> bool:
+        """
+        🚫 Recruiter/agency boilerplate and 'reason for leaving' notes that are
+        NOT job responsibilities and must be kept out of descriptions, role
+        titles and company names.
+        """
+        if not line:
+            return True
+        s = line.strip().lower().lstrip('*#-•· ').strip()
+        if not s:
+            return True
+        starts = (
+            'reason for leaving', 'reasons for leaving', 'details given below',
+            'strictly confidential', 'acceptance of terms', 'position submitted',
+            'candidate summary sheet', 'tel.', 'fax.', 'uen', 'ea licence',
+            'ea license',
+            # career-gap narrative notes (not real jobs)
+            'took a short break', 'after completing',
+        )
+        if s.startswith(starts):
+            return True
+        contains = (
+            'apba tg', 'human resource pte', 'international plaza', 'anson road',
+            'www.tg-hr', 'with a view to interview', 'fsg | tg', 'fsg|tg',
+            'looking for suitable job',
+        )
+        return any(c in s for c in contains)
+
+    def _is_agency_phone_context(self, text: str, start: int, end: int) -> bool:
+        """
+        🏢 True when a phone match sits in a recruiter/agency footer (fax line,
+        company registration, agency address) rather than the candidate's own
+        contact details — so we don't return the agency's number as the
+        candidate's phone.
+        """
+        # Window kept tight and markers kept agency-footer-SPECIFIC: generic
+        # terms like "pte ltd" appear next to candidates' own phones (next to
+        # their current employer) and must NOT trigger this.
+        ctx = text[max(0, start - 60):min(len(text), end + 60)].lower()
+        markers = (
+            'fax', 'uen', 'ea licence', 'ea license', 'anson road',
+            'international plaza', 'human resource pte', 'recruitment',
+        )
+        return any(mk in ctx for mk in markers)
+
+    def _phone_is_agency_number(self, text: str, phone: str) -> bool:
+        """
+        🏢 True when `phone` (however formatted — possibly returned by the AI)
+        only ever appears in the source `text` inside agency-footer context.
+        Lets us reject the recruiter's Tel/Fax number even when the LLM, not
+        regex, surfaced it. Returns False if the number also appears somewhere
+        that is NOT agency context (i.e. it might be the candidate's).
+        """
+        digits = re.sub(r'\D', '', phone or '')
+        if len(digits) < 7:
+            return False
+        tail = digits[-8:]
+        # match the digit run allowing the usual separators between digits
+        pat = re.compile(r'[\s.\-()]*'.join(re.escape(c) for c in tail))
+        total = agency = 0
+        for m in re.finditer(pat, text):
+            total += 1
+            if self._is_agency_phone_context(text, m.start(), m.end()):
+                agency += 1
+        # Treat as the agency's number when it shows up in agency-footer context
+        # at least as often as not (it usually repeats in every page footer).
+        return total > 0 and agency * 2 >= total
+
+    def _value_appears_in_text(self, value: str, text: str) -> bool:
+        """
+        🚫 Anti-hallucination check: True only if `value` (a name/email the AI
+        returned) actually occurs in the résumé `text`. The header prompt
+        contains few-shot EXAMPLES with real-looking names/emails, and the model
+        sometimes echoes those (e.g. the example "Nurul Ain Binte Ismail") when
+        unsure. Matches case-insensitively, ignoring punctuation and extra
+        whitespace; for multi-word values it also accepts when every token
+        appears as a whole word (handles dropped middle names / reordering).
+        """
+        if not value or not text:
+            return False
+        norm = lambda s: re.sub(r'\s+', ' ', re.sub(r'[^0-9a-z@.]', ' ', s.lower())).strip()
+        v, t = norm(value), norm(text)
+        if not v:
+            return False
+        if v in t:
+            return True
+        toks = [w for w in v.split() if len(w) > 1]
+        if len(toks) >= 2:
+            tset = set(t.split())
+            return all(tok in tset for tok in toks)
+        return False
+
+    def _phone_digits_in_text(self, phone: str, text: str) -> bool:
+        """🚫 True if the phone's digits actually occur in the résumé text
+        (rejects an AI-hallucinated number echoed from a prompt example)."""
+        d = re.sub(r'\D', '', phone or '')
+        if len(d) < 7:
+            return False
+        td = re.sub(r'\D', '', text)
+        return d in td or d[-8:] in td
+
+    # Words that disqualify a heading line from being a person's name
+    _NOT_NAME_WORDS = {
+        # section headers / labels
+        'education', 'experience', 'experiences', 'skills', 'certifications',
+        'certification', 'summary', 'objective', 'profile', 'references',
+        'projects', 'achievements', 'languages', 'language', 'nationality',
+        'availability', 'age', 'address', 'tel', 'fax', 'phone', 'mobile',
+        'email', 'gender', 'date', 'birth', 'salary', 'notice', 'period',
+        'qualifications', 'particulars', 'candidate', 'summary', 'sheet',
+        'position', 'submitted', 'roles', 'responsibilities', 'project',
+        'employment', 'history', 'work', 'personal', 'details', 'referee',
+        'referees', 'capabilities', 'competencies',
+        # job-title words
+        'engineer', 'engineering', 'administrator', 'manager', 'officer',
+        'executive', 'consultant', 'consultants', 'analyst', 'developer',
+        'designer', 'specialist', 'coordinator', 'director', 'supervisor',
+        'assistant', 'technician', 'support', 'operation', 'operations',
+        'service', 'services', 'network', 'system', 'systems', 'desktop',
+        'security', 'sales', 'protection', 'junior', 'senior', 'lead',
+        # company / org words
+        'pte', 'ltd', 'llp', 'inc', 'corp', 'company', 'solutions', 'global',
+        'technologies', 'holdings', 'enterprise', 'group', 'centre', 'center',
+        # institution words (a school is not a person)
+        'ite', 'nitec', 'polytechnic', 'university', 'college', 'institute',
+        'school', 'academy',
+    }
+
+    def _looks_like_section_header_name(self, name: str) -> bool:
+        """True if a candidate name is really a section header / job-title /
+        company / label (e.g. "Employment History"), so it can be rejected even
+        when the AI returns it and it genuinely appears in the text."""
+        toks = re.findall(r"[a-z]+", (name or '').lower())
+        return bool(toks) and any(t in self._NOT_NAME_WORDS for t in toks)
+
+    def _extract_name_labeled(self, text: str) -> Optional[str]:
+        """
+        📛 Recover a name from an explicit "Name: X" / "Name\\tX" label anywhere
+        in the résumé (e.g. the "PERSONAL DETAILS" block JobStreet exports put
+        at the bottom). More reliable than heading-guessing when present.
+        """
+        if not text:
+            return None
+        m = re.search(
+            r'(?:^|\n)[ \t>*#]*(?:Full\s+|Candidate\s+)?Name\b\s*[:\t]+[ \t]*'
+            r"([A-Za-z][A-Za-z .'\-/]{2,60})",
+            text, re.IGNORECASE,
+        )
+        if not m:
+            return None
+        cand = m.group(1).strip().strip("/.-").strip()
+        if self._looks_like_section_header_name(cand):
+            return None
+        cleaned = self._clean_name(cand)
+        if cleaned and len(cleaned.split()) >= 2:
+            return cleaned
+        return None
+
+    def _extract_name_regex(self, text: str) -> Optional[str]:
+        """
+        📛 Heading-based name fallback for résumés where the candidate's name is
+        a plain heading (NOT a table), e.g. "Li Jing Qiang (Mr)" at the top.
+        Conservative: only a 2-4 word Title-Case / ALL-CAPS line (optionally
+        followed by an honorific in parens). Rejects addresses, labels, job
+        titles, company names and section headers, so it won't grab things like
+        "NCS" (1 word / company) or "Junior System Administrator" (job title).
+        """
+        if not text:
+            return None
+        honorific = re.compile(r'\s*\((?:Mr|Mrs|Ms|Mdm|Dr|Miss|Eng)\.?\)\s*$', re.IGNORECASE)
+        for raw in text[:1500].split('\n')[:25]:
+            line = re.sub(r'^[#>\s]+', '', raw)        # strip markdown heading/quote markers
+            line = re.sub(r'[*_`]+', '', line).strip()  # strip bold/italic/code markers
+            if not line or len(line) > 50:
+                continue
+            # names have no digits, emails, pipes, colons, slashes
+            if any(ch in line for ch in '|@/\\:;') or re.search(r'\d', line):
+                continue
+            core = honorific.sub('', line).strip().strip(',.')
+            words = core.split()
+            # Malay/Indian names run long: "Anugerah Khalis Binte Mohd Sabta" (5)
+            if not (2 <= len(words) <= 5):
+                continue
+            if not all(re.fullmatch(r"[A-Za-z][A-Za-z'\-]*", w) for w in words):
+                continue
+            # every word capitalised, EXCEPT lowercase name particles
+            # (bin/binte/binti/bte/al/von/de/...) common in SG/MY names.
+            particles = {'bin', 'binte', 'binti', 'bte', 'bt', 'al', 'el',
+                         'van', 'von', 'de', 'da', 'ibn', 'do'}
+            if not all((w[:1].isupper() or w.lower() in particles) for w in words):
+                continue
+            if any(w.lower().strip("'-") in self._NOT_NAME_WORDS for w in words):
+                continue
+            cleaned = self._clean_name(core)
+            if cleaned and len(cleaned.split()) >= 2:
+                return cleaned
+        return None
 
     def _extract_summary_regex(self, text: str) -> str:
         """
@@ -854,12 +1112,12 @@ class AIExtractor:
         Think of this like finding the STAR of the show in a lineup! 🌟
         We need to spot them quickly but accurately!
         """
-        if not self.available:
-            return {}
-
-        # 📍 STEP 1: Try regex extraction for email and phone (most reliable!)
+        # 📍 STEP 1: Regex email/phone + summary-table parse run FIRST and
+        # ALWAYS. They are reliable and let header extraction degrade
+        # gracefully to a regex/table-only result when the model is offline.
         regex_email = self._extract_email_regex(text)
         regex_phone = self._extract_phone_regex(text)
+        table = self._extract_header_from_table(text)
 
         # 📍 STEP 2: Search a LARGER text sample (header info can be anywhere!)
         # Like searching for your misplaced wig - check EVERYWHERE! 💁‍♀️
@@ -955,12 +1213,33 @@ class AIExtractor:
 
     **OUTPUT ONLY VALID JSON - NO MARKDOWN, NO EXPLANATIONS:**"""
 
-        # 📍 STEP 4: Call the AI with schema-enforced structured output
-        result = self._call_ollama(prompt, schema=HEADER_SCHEMA)
+        # 📍 STEP 4: Call the AI with schema-enforced structured output.
+        # When the model is unavailable, skip it and rely on regex/table below.
+        result = self._call_ollama(prompt, schema=HEADER_SCHEMA) if self.available else {}
+
+        # 🚫 ANTI-HALLUCINATION: the model sometimes echoes the few-shot EXAMPLE
+        # values baked into the prompt (e.g. the example name "Nurul Ain Binte
+        # Ismail", "john.doe@email.com"). Drop any name/email/phone it returned
+        # that does NOT actually appear in the résumé text, so regex/table fill
+        # the field from real content instead.
+        if result.get('name') and not self._value_appears_in_text(result['name'], text):
+            self.logger.warning(f"🚫 Dropping hallucinated name (not in résumé): {result['name']!r}")
+            result['name'] = None
+        # Also reject a name that's really a section header / job title the model
+        # latched onto (e.g. "Employment History"), even though it IS in the text.
+        if result.get('name') and self._looks_like_section_header_name(result['name']):
+            self.logger.warning(f"🚫 Dropping section-header-like name: {result['name']!r}")
+            result['name'] = None
+        if result.get('email') and not self._value_appears_in_text(result['email'], text):
+            self.logger.warning(f"🚫 Dropping hallucinated email (not in résumé): {result['email']!r}")
+            result['email'] = None
+        if result.get('phone') and not self._phone_digits_in_text(result['phone'], text):
+            self.logger.warning(f"🚫 Dropping hallucinated phone (not in résumé): {result['phone']!r}")
+            result['phone'] = None
 
         # 📍 STEP 5: VALIDATE and ENHANCE the extraction!
         # This is the QUALITY CONTROL stage, sweetie! 💅
-        
+
         # ✅ Validate email - use regex fallback if AI failed
         ai_email = result.get('email')
         if not self._is_valid_email(ai_email):
@@ -1003,6 +1282,33 @@ class AIExtractor:
                 self.logger.warning(f"⚠️ Nationality length suspicious: {nationality[:30]}")
                 result['nationality'] = None
         
+        # 📋 SUMMARY-TABLE FALLBACK — fill any header field the AI left blank
+        # from the | Label | Value | table (recruiter 'summary sheet' resumes).
+        if not result.get('name') and table.get('name'):
+            result['name'] = self._clean_name(table['name'])
+            self.logger.info(f"📋 Name from summary table: {result['name']}")
+        if not result.get('name'):
+            fallback_name = self._extract_name_labeled(text) or self._extract_name_regex(text)
+            if fallback_name:
+                result['name'] = fallback_name
+                self.logger.info(f"📛 Name from labeled/heading fallback: {fallback_name}")
+        if not result.get('location') and table.get('location'):
+            result['location'] = table['location']
+        if not result.get('nationality') and table.get('nationality'):
+            result['nationality'] = table['nationality']
+        if not self._is_valid_email(result.get('email')) and self._is_valid_email(table.get('email', '')):
+            result['email'] = table['email']
+        if not self._is_valid_phone(result.get('phone')) and self._is_valid_phone(table.get('phone', '')):
+            result['phone'] = standardize_phone_number(table['phone'])
+        # Gender is NOT in HEADER_SCHEMA, so the table is its only source.
+        result['gender'] = result.get('gender') or table.get('gender') or ""
+
+        # 🏢 Reject the recruiter/agency footer number even when the AI (not
+        # regex) surfaced it — it's the agency's Tel/Fax, not the candidate's.
+        if result.get('phone') and self._phone_is_agency_number(text, result['phone']):
+            self.logger.warning(f"🏢 Rejected agency phone from header: {result['phone']}")
+            result['phone'] = standardize_phone_number(regex_phone) if regex_phone else ""
+
         self.logger.info(f"✅ Header extraction complete! Found: {', '.join([k for k, v in result.items() if v])}")
 
         # 💎 Remap header fields to canonical schema
@@ -2021,7 +2327,12 @@ class AIExtractor:
         # Matches: "Feb 2016 to Present    Financial Consultant, Prudential Assurance Company Singapore (Pte) Ltd"
         # 🎯 Pattern for date-first format - NOW WITH TAB SUPPORT! 💅
         # Singapore resumes use TAB characters between date and role/company
-        date_first_pattern = r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4})[\s\t]+to[\s\t]+(Present|Current|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4})[\s\t]+([^\n]+)'
+        # NOTE: separators are [^\S\r\n]+ (horizontal whitespace ONLY), not
+        # [\s\t]+ — \s matches newlines, which let the role/company capture
+        # jump to the NEXT line when a date range ended its line (e.g. a
+        # heading "Singapore Turf Club Mar 2013 to July 2017" stole the
+        # following "Reasons for Leaving: ..." line as the role).
+        date_first_pattern = r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4})[^\S\r\n]+to[^\S\r\n]+(Present|Current|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4})[^\S\r\n]+([^\n]+)'
         
         # Find all matches
         matches = list(re.finditer(date_first_pattern, text, re.IGNORECASE | re.MULTILINE))
@@ -2112,7 +2423,11 @@ class AIExtractor:
                     continue
                 
                 consecutive_empty = 0
-                
+
+                # Drop recruiter boilerplate / "reason for leaving" notes
+                if self._is_boilerplate_line(line):
+                    continue
+
                 # 🛑 STOP CONDITIONS: These indicate we've left the job description
                 # Check for date patterns (next job entry)
                 if re.match(r'^(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}', line, re.IGNORECASE):
@@ -2195,7 +2510,11 @@ class AIExtractor:
                     continue
                 
                 consecutive_empty = 0
-                
+
+                # Drop recruiter boilerplate / "reason for leaving" notes
+                if self._is_boilerplate_line(line):
+                    continue
+
                 # 🛑 STOP CONDITIONS: These indicate we've left the job description
                 # Check for date patterns (next job entry)
                 if re.match(r'^(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}', line, re.IGNORECASE):
@@ -2342,9 +2661,14 @@ class AIExtractor:
         # ===================================================================
         month = r'(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?'
         date_tok = r'(?:' + month + r'\s*,?\s*\d{4}|\d{1,2}[/\-]\d{4}|\d{4})'
+        # The START of a range may omit its year ("April to Sept 2025"); the
+        # END still requires a year (or Present), so prose like "April to June"
+        # without a year won't match. The missing start year is back-filled
+        # from the end below.
+        start_tok = r'(?:' + month + r'(?:\s*,?\s*\d{4})?|\d{1,2}[/\-]\d{4}|\d{4})'
         end_tok = r'(?:' + date_tok + r'|Present|Current|Now|Ongoing|Till\s*Date|To\s*Date)'
         date_range_re = re.compile(
-            r'(' + date_tok + r')\s*(?:-|–|—|to|till|until)\s*(' + end_tok + r')',
+            r'(' + start_tok + r')\s*(?:-|–|—|to|till|until)\s*(' + end_tok + r')',
             re.IGNORECASE,
         )
 
@@ -2376,7 +2700,13 @@ class AIExtractor:
             return idx
 
         for i, m in enumerate(anchors):
-            dates = f"{m.group(1).strip()} - {m.group(2).strip()}"
+            g1, g2 = m.group(1).strip(), m.group(2).strip()
+            # Back-fill a yearless start with the end's year ("April"→"April 2025")
+            if not re.search(r'\b(?:19|20)\d{2}\b', g1):
+                yr = re.search(r'\b((?:19|20)\d{2})\b', g2)
+                if yr:
+                    g1 = f"{g1} {yr.group(1)}"
+            dates = f"{g1} - {g2}"
 
             anchor_line = _line_index_of(m.start())
             if i + 1 < len(anchors):
@@ -2388,32 +2718,62 @@ class AIExtractor:
             else:
                 next_anchor_line = len(lines)
 
-            # Header = line above the date line + the date line (date removed)
-            header_bits = []
-            if anchor_line > 0:
-                prev = lines[anchor_line - 1].strip(' \t|·•-')
-                if prev:
-                    header_bits.append(prev)
-            same = date_range_re.sub('', lines[anchor_line]).strip(' \t|·•-,')
-            if same:
-                header_bits.append(same)
-            header = ' '.join(header_bits).strip(' \t|·•-,')
+            # Split the date line at the date's POSITION: text BEFORE the date
+            # is the company, text AFTER it is the role — the dominant SG layout
+            # "Company (dates) Role" (and its OCR variant "Company dates) Role").
+            # Fall back to the line ABOVE only when the date sits alone.
+            line = lines[anchor_line]
+            ls = line_starts[anchor_line]
+            before = re.sub(r'\(\s*\)', ' ', line[:m.start() - ls]).strip(' \t|·•-,(')
+            after = re.sub(r'\(\s*\)', ' ', line[m.end() - ls:]).strip(' \t|·•-,):')
 
-            if any(k in header.lower() for k in edu_kw):
-                self.logger.debug(f"⭐ Skipping education-looking block: {header[:50]}")
+            cont = 0  # extra lines consumed as a wrapped-role continuation
+            if before and after:
+                company, role = before, after
+            elif before:
+                if ',' in before or re.search(r'\s+at\s+', before, re.IGNORECASE):
+                    role, company = self._parse_role_company(before)
+                else:
+                    company, role = before, ""
+            elif after:
+                role, company = self._parse_role_company(after)
+            else:
+                company = role = ""
+                if anchor_line > 0:
+                    prev = lines[anchor_line - 1].strip(' \t|·•-')
+                    if prev and not self._is_boilerplate_line(prev):
+                        role, company = self._parse_role_company(prev)
+
+            probe = f"{company} {role}".strip()
+            if any(k in probe.lower() for k in edu_kw):
+                self.logger.debug(f"⭐ Skipping education-looking block: {probe[:50]}")
+                continue
+            if not probe or (company and self._is_boilerplate_line(company)) \
+                    or (role and self._is_boilerplate_line(role)):
+                self.logger.debug(f"⭐ Skipping boilerplate/empty block: {probe[:50]}")
                 continue
 
-            if ',' in header:
-                role, company = [p.strip() for p in header.split(',', 1)]
-            elif re.search(r'\s+at\s+', header, re.IGNORECASE):
-                parts = re.split(r'\s+at\s+', header, maxsplit=1, flags=re.IGNORECASE)
-                role, company = parts[0].strip(), parts[1].strip()
-            else:
-                role, company = self._split_role_company(header)
+            # Skip date lines whose company AND role are both unusable
+            # (prose, sub-bullets, pipe-delimited export noise) — these are
+            # not real job headers, just dates scattered through summary text.
+            if self._is_header_fragment(company) and self._is_header_fragment(role):
+                self.logger.debug(f"⭐ Skipping prose/fragment block: {probe[:50]}")
+                continue
 
-            desc_lines = []
-            seen = set()
-            for ln in lines[anchor_line + 1:next_anchor_line]:
+            # Re-join a job title that OCR wrapped onto the next line
+            # (e.g. "...) Plant" + "Administrative Assistant (On-site)").
+            if role and anchor_line + 1 < next_anchor_line \
+                    and self._looks_like_role_continuation(lines[anchor_line + 1].strip(' \t|·•-')):
+                role = f"{role} {lines[anchor_line + 1].strip(' \t|·•-')}".strip()
+                cont = 1
+
+            # Build responsibilities, re-joining lines that OCR wrapped
+            # mid-sentence: a line is a NEW bullet if it carries a list marker
+            # (incl. OCR "e"/"o" bullets) OR starts with a capital; a line that
+            # starts lowercase continues the previous bullet.
+            bullet_re = re.compile(r'^(?:[\*\-•·►➢▪▸◗‹◗¦]|[eo]\s+(?=[A-Z]))')
+            desc_items = []
+            for ln in lines[anchor_line + 1 + cont:next_anchor_line]:
                 ln = ln.strip()
                 if len(ln) < 4:
                     continue
@@ -2421,22 +2781,43 @@ class AIExtractor:
                             r'References|Projects|Languages|Hobbies|Co-Curricular|'
                             r'Additional|Qualifications?)\s*$', ln, re.IGNORECASE):
                     break
-                ln = re.sub(r'^[\*\-•·►➢▪▸]\s*', '', ln).strip()
-                key = ln.lower()
-                if ln and key not in seen:
-                    seen.add(key)
-                    desc_lines.append(ln)
+                if self._is_boilerplate_line(ln):
+                    continue
+                is_bullet = bool(bullet_re.match(ln))
+                clean = self._strip_bullet(ln)
+                if not clean:
+                    continue
+                if desc_items and not is_bullet and clean[:1].islower():
+                    desc_items[-1] = f"{desc_items[-1]} {clean}".strip()
+                else:
+                    desc_items.append(clean)
+
+            # de-duplicate exact repeats (OCR pages repeat content) in order
+            seen = set()
+            desc_lines = []
+            for it in desc_items:
+                k = it.lower()
+                if k not in seen:
+                    seen.add(k)
+                    desc_lines.append(it)
 
             description = ' | '.join(desc_lines) if desc_lines else "Description not available"
 
+            # Cosmetic cleanup: collapse double-spaces and trim stray edge
+            # punctuation. Parens are NOT stripped here — orphan parens were
+            # already removed at the positional split, and balanced ones
+            # ("(On-site)") are legitimate and should be kept.
+            role = re.sub(r'\s{2,}', ' ', role or '').strip(' \t|·•-,:')
+            company = re.sub(r'\s{2,}', ' ', company or '').strip(' \t|·•-,:')
             jobs.append({
-                "company": (company or "Company not specified")[:200],
-                "role": (role or "Role not specified")[:200],
+                "company": company[:200] or "Company not specified",
+                "role": role[:200] or "Role not specified",
                 "dates": dates,
                 "description": description,
             })
             self.logger.info(f"✅ Extracted: {role[:40]} at {company[:40]}")
 
+        jobs = self._dedup_experience(jobs)
         self.logger.info(f"💼 Regex experience extraction found {len(jobs)} job(s)")
         return jobs
 
@@ -2479,11 +2860,15 @@ class AIExtractor:
         ]
 
         # Pattern for date-first education entries
-        edu_pattern = r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{4})\s+(?:to|till|until|-|"“)\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}|Present|Current)\s+([^\n]+)'
+        # Separators are [^\S\r\n]+ (horizontal whitespace ONLY): \s matches
+        # newlines, which let group(3) capture the line BELOW a date range —
+        # so a WORK date like "Mar 2013 to July 2017" grabbed the next line
+        # ("Reasons for Leaving: ...") and logged it as an education degree.
+        edu_pattern = r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{4})[^\S\r\n]+(?:to|till|until|-|"“)[^\S\r\n]+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}|Present|Current)[^\S\r\n]+([^\n]+)'
 
         # Find education section first - expanded patterns
         edu_section_patterns = [
-            r'Education(?:al)?\s*(?:Background|History|Qualifications?)?\s*\n(.*?)(?=\n\s*(?:Achievements?|Skills?|Co-?Curricular|Additional|Work|Experience|Employment|Certification|Award|Language|Hobbies?|Interest|Reference|$))',
+            r'Education(?:al)?(?:\s*(?:&|and)\s*Training|\s*(?:Background|History|Qualifications?))?\s*\n(.*?)(?=\n\s*(?:Achievements?|Skills?|Co-?Curricular|Additional|Work|Experience|Employment|Certification|Award|Language|Hobbies?|Interest|Reference|$))',
             r'Academic\s+(?:Background|Qualifications?|History)\s*\n(.*?)(?=\n\s*(?:Experience|Employment|Work|Skills|$))',
             r'Qualifications?\s*\n(.*?)(?=\n\s*(?:Experience|Employment|Work|Skills|$))',
         ]
@@ -2751,6 +3136,83 @@ class AIExtractor:
         self.logger.info(f"🎓 Highest Qualification inline format: {degree[:50]}")
         return education
 
+    def _extract_education_inline_dash_format(self, text: str) -> list:
+        """
+        🎓 Parse one-line education entries inside the EDUCATION section of the
+        form:
+          "<Institution> - <Qualification> - <Year>"   or
+          "<Institution> (<Level>) - <Year>"
+        Common in Singapore resumes, e.g.
+          "Bishan ITE(Centre) - NITEC Service Skill (OFFICE Skill) - 2008"
+          "Navel Base Secondary School ('N' Level) - 2007"
+
+        Scoped to the detected education section so it never grabs work dates.
+        """
+        education: list = []
+        edu_text = self._prevent_section_bleeding(
+            text, 'education',
+            ['experience', 'skills', 'certifications', 'achievements', 'projects'],
+        )
+        if not edu_text or len(edu_text) < 5:
+            return education
+
+        qual_kw = re.compile(
+            r"(?:Higher\s+Nitec|NITEC|ITE|GCE|['\"]?[NOA]['\"]?\s*Level|PSLE|"
+            r"Advanced\s+Diploma|Diploma|Bachelor|Master|Doctorate|PhD|Degree|"
+            r"Certificate)",
+            re.IGNORECASE,
+        )
+        inst_kw = re.compile(
+            r'(?:School|Polytechnic|University|College|Institute|Academy|ITE)',
+            re.IGNORECASE,
+        )
+
+        for raw in edu_text.split('\n'):
+            line = raw.strip().strip('*-•·►➢▪▸ ').strip()
+            if len(line) < 5 or self._is_boilerplate_line(line):
+                continue
+            if not (qual_kw.search(line) or inst_kw.search(line)):
+                continue
+
+            # trailing year → dates
+            dates = ''
+            ym = re.search(r'((?:19|20)\d{2})\s*$', line)
+            if ym:
+                dates = ym.group(1)
+                line = line[:ym.start()].strip(' -–—,')
+
+            institution, degree = '', ''
+            parts = re.split(r'\s[-–—]\s', line, maxsplit=1)
+            if len(parts) == 2:
+                institution, degree = parts[0].strip(), parts[1].strip()
+            else:
+                # qualification in parentheses: "... ('N' Level)"
+                pm = re.search(
+                    r"^(.*?)\s*\(([^)]*(?:Level|NITEC|Diploma|Cert|Degree)[^)]*)\)\s*$",
+                    line, re.IGNORECASE,
+                )
+                if pm:
+                    institution, degree = pm.group(1).strip(), pm.group(2).strip()
+                else:
+                    qm = qual_kw.search(line)
+                    if qm and qm.start() > 0 and inst_kw.search(line[:qm.start()]):
+                        institution = line[:qm.start()].strip(' -–—,(')
+                        degree = line[qm.start():].strip()
+                    else:
+                        institution = line
+
+            if not institution:
+                continue
+            education.append({
+                "institution": institution[:250],
+                "degree": (degree or "Qualification not specified")[:500],
+                "dates": dates,
+            })
+
+        if education:
+            self.logger.info(f"🎓 Inline dash education format: {len(education)} entries")
+        return education
+
     def _extract_education_regex(self, text: str) -> list:
         """
         Extract education using multi-format waterfall v8.0
@@ -2777,6 +3239,11 @@ class AIExtractor:
         highest_qual_edu = self._extract_education_highest_qualification_inline(text)
         if highest_qual_edu and len(highest_qual_edu) >= 1:
             return highest_qual_edu
+
+        # === STEP 3.5: Inline dash format ("<Institution> - <Qual> - <Year>") ===
+        dash_edu = self._extract_education_inline_dash_format(text)
+        if dash_edu and len(dash_edu) >= 1:
+            return dash_edu
 
         # === STEP 4: Fallback - institution pattern matching ===
         education = []
@@ -2806,7 +3273,7 @@ class AIExtractor:
             self.logger.warning("⚠️ No education section found via boundaries - trying pattern matching")
 
             edu_patterns = [
-                r'(?:EDUCATION(?:AL)?|ACADEMIC)\s*(?:BACKGROUND|HISTORY|QUALIFICATIONS?)?\s*:?\s*\n(.*?)(?=\n\s*(?:EXPERIENCE|EMPLOYMENT|WORK|SKILLS|CERTIFICATIONS?|AWARDS?)\s*(?:[:\n])|$)',
+                r'(?:EDUCATION(?:AL)?(?:\s*(?:&|AND)\s*TRAINING)?|ACADEMIC)\s*(?:BACKGROUND|HISTORY|QUALIFICATIONS?)?\s*:?\s*\n(.*?)(?=\n\s*(?:EXPERIENCE|EMPLOYMENT|WORK|SKILLS|CERTIFICATIONS?|AWARDS?)\s*(?:[:\n])|$)',
                 r'QUALIFICATIONS?\s*:?\s*\n(.*?)(?=\n\s*(?:EXPERIENCE|EMPLOYMENT|WORK|SKILLS)\s*(?:[:\n])|$)',
             ]
 
@@ -3453,6 +3920,8 @@ Return ONLY this JSON:
             return {}
 
         # ─── Build the canonical output skeleton ───
+        # Key ORDER here defines the canonical output order (and must stay in
+        # lockstep with core.main.format_result_as_export_json).
         canonical = {
             "ID": internal.get("id", "") or "",
             "Name": internal.get("name", "") or "",
@@ -3469,19 +3938,19 @@ Return ONLY this JSON:
             "Creation Date": internal.get("creation_date", "") or "",
             "Last Contact": internal.get("last_contact", "") or "",
             "Function": internal.get("function", "") or "",
-            "Industry": internal.get("industry", []) if isinstance(internal.get("industry"), list) else [],
             "Summary": internal.get("summary", "") or "",
+            "References": "",
+            "Hobbies": "",
+            "Industry": internal.get("industry", []) if isinstance(internal.get("industry"), list) else [],
             "Language Skills": [],
-            "Work Experience": [],
-            "Project Experience": [],
-            "Education": [],
             "Certifications": [],
             # 💎 Skills get cleaned through the validator (rejects sentences, fragments, etc.)
             "hard_skills/tags": self._clean_skills_list(internal.get("hard_skills", []) or []),
             "soft_skills/skills": self._clean_skills_list(internal.get("soft_skills", []) or []),
             "Achievements": internal.get("achievements", []) or [],
-            "References": "",
-            "Hobbies": "",
+            "Work Experience": [],
+            "Project Experience": [],
+            "Education": [],
         }
 
         # ─── Work Experience: working_experience → Work Experience ───
@@ -3860,6 +4329,118 @@ Return ONLY this JSON:
         # STRATEGY 4: Give up gracefully — full header as role, blank company
         # (Better than fake "See description" — at least it's truthful)
         return (header, "")
+
+    def _strip_bullet(self, line: str) -> str:
+        """
+        Strip a leading list marker from a description line, including the
+        OCR artifacts seen in scanned resumes: "•" frequently OCR's to a lone
+        "e", and indented sub-bullets render as a lone "o".
+        """
+        s = re.sub(r'^\s*[\*\-•·►➢▪▸◗‹◗¦]\s*', '', line)
+        s = re.sub(r'^\s*[eo]\s+(?=[A-Z])', '', s)
+        return s.strip()
+
+    def _is_header_fragment(self, s: str) -> bool:
+        """
+        True when a candidate company/role string is NOT a usable job header:
+        empty, a sub-bullet/OCR-bullet ("o ...", "e ..."), pipe-delimited
+        export noise ("X | Y | Z"), a "N years of total experience" summary
+        line, lowercase-leading prose, or a "not specified" placeholder. Used
+        to drop entries that pipe-delimited (JobStreet) exports scatter around
+        date lines.
+        """
+        s = (s or '').strip()
+        if not s:
+            return True
+        if re.match(r'^[eo]\s', s):
+            return True
+        if ' | ' in s:
+            return True
+        if re.search(r'\d+\s+years?\s+of\s+total\s+experience', s, re.IGNORECASE):
+            return True
+        if s[:1].islower():
+            return True
+        if 'not specified' in s.lower():
+            return True
+        if len(s.split()) > 8:   # real company/role names are short; this is prose
+            return True
+        return False
+
+    def _parse_role_company(self, header: str) -> tuple:
+        """
+        Parse a header string into (role, company). Handles the explicit
+        "Role, Company" and "Role at Company" forms, else delegates to the
+        heuristic _split_role_company.
+        """
+        header = (header or '').strip(' \t|·•-,:')
+        if not header:
+            return ("", "")
+        if ',' in header:
+            a, b = [p.strip() for p in header.split(',', 1)]
+            return (a, b)
+        if re.search(r'\s+at\s+', header, re.IGNORECASE):
+            parts = re.split(r'\s+at\s+', header, maxsplit=1, flags=re.IGNORECASE)
+            return (parts[0].strip(), parts[1].strip())
+        return self._split_role_company(header)
+
+    def _looks_like_role_continuation(self, s: str) -> bool:
+        """
+        True when `s` looks like the tail of a job title that OCR wrapped onto
+        the next line (e.g. "Administrative Assistant (On-site)") — a short,
+        mostly title-cased phrase with no year and no bullet marker. Used to
+        re-join a title that was split across two lines.
+        """
+        if not s or len(s) > 60:
+            return False
+        if s.startswith(('*', '-', '•', '·', '►', '➢', '▪', '▸')):
+            return False
+        if re.search(r'\b(?:19|20)\d{2}\b', s):
+            return False
+        core = re.sub(r'\([^)]*\)', '', s).strip()
+        words = core.split()
+        if not words or len(words) > 5:
+            return False
+        titlecased = sum(1 for w in words if w[:1].isupper())
+        return titlecased / len(words) >= 0.6
+
+    def _dedup_experience(self, jobs: list) -> list:
+        """
+        Drop 'summary' work-experience entries: a date-anchored line that gives
+        only a company + total tenure (no real description) while the detailed
+        sub-roles for that same company appear as separate entries.
+        E.g. "Singapore Turf Club  Mar 2013 to July 2017" is a header for the
+        two "(Nov 2015 to Jul 2017)/(March 2013 to Oct 2015)" jobs below it.
+        """
+        if len(jobs) < 2:
+            return jobs
+
+        def norm(s: str) -> str:
+            return re.sub(r'[^a-z0-9 ]', '', (s or '').lower()).strip()
+
+        kept = []
+        for idx, j in enumerate(jobs):
+            desc = j.get('description') or ''
+            no_desc = (not desc) or desc == 'Description not available'
+            jc = norm(j.get('company'))
+            # When no real company was parsed, the company name often landed in
+            # the role field (summary line), so probe that too.
+            probe = jc if (jc and 'not specified' not in jc) else norm(j.get('role'))
+            is_summary = False
+            if no_desc and probe and len(probe) >= 4:
+                for k, other in enumerate(jobs):
+                    if k == idx:
+                        continue
+                    od = other.get('description') or ''
+                    other_has_desc = od and od != 'Description not available'
+                    oc = norm(other.get('company'))
+                    if other_has_desc and oc and (probe == oc or probe in oc):
+                        is_summary = True
+                        break
+            if is_summary:
+                self.logger.info(f"🧹 Dropped summary/duplicate experience: {probe!r}")
+            else:
+                kept.append(j)
+        return kept
 
     def _clean_markdown(self, text: str) -> str:
         """

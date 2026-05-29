@@ -189,7 +189,7 @@ _SECTION_PATTERNS: list[tuple[str, str]] = [
     ("experience",       r"(?:^|\n)\s*EXPERIENCE[S]?\s*[:\n]"),
 
     # ── Education ─────────────────────────────────────────────────────────
-    ("education",        r"(?:^|\n)\s*EDUCATION(?:AL)?(?:\s+(?:BACKGROUND|HISTORY|QUALIFICATIONS?|AND\s+TRAINING))?\s*[:\n]"),
+    ("education",        r"(?:^|\n)\s*EDUCATION(?:AL)?(?:\s*(?:&|AND)\s*TRAINING|\s+(?:BACKGROUND|HISTORY|QUALIFICATIONS?))?\s*[:\n]"),
     ("qualifications",   r"(?:^|\n)\s*(?:ACADEMIC\s+|PROFESSIONAL\s+)?QUALIFICATIONS?\s*[:\n]"),
 
     # ── Certifications ────────────────────────────────────────────────────
