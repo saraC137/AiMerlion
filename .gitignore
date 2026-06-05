@@ -3,3 +3,4 @@ raw_text_output
 old_merlion_resumes
 *.csv
 *.json
+.env
