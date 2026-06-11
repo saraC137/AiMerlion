@@ -28,8 +28,8 @@ OUTPUT_FILENAME_PREFIX = "extracted_resume_data"
 
 # --- AI Model Selection (OPTIMIZED FOR ENGLISH!) ---
 # 💅 Smaller, faster models for English-only processing!
-FAST_MODEL = "merlion:latest"              # Quick extractions (headers, simple fields)
-SMART_MODEL = "merlion:latest"             # Complex extractions (experience, education)
+FAST_MODEL = "qwen3-embedding"              # Quick extractions (headers, simple fields)
+SMART_MODEL = "qwen3-embedding"             # Complex extractions (experience, education)
 DEFAULT_MODEL = FAST_MODEL         # Which model to use by default
 
 # 🎯 These are the variables other modules actually import:
