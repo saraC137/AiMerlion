@@ -43,19 +43,25 @@ import requests
 OLLAMA_URL = "http://127.0.0.1:11434"
 LOCAL_MODEL = "qwen2.5:32b-instruct-q4_K_M"
 
-# ─── Gemini integration (Pattern B: polish Qwen output) ────────────────────
-GEMINI_AVAILABLE = False
-gemini_client = None
-try:
-    from gemini_client import GeminiClient
-    try:
-        gemini_client = GeminiClient(model="flash-lite")
-        GEMINI_AVAILABLE = True
-    except ValueError as e:
-        print(f"⚠️  Gemini not configured: {e}")
-        print(f"⚠️  Will run pure-local without polish step")
-except ImportError:
-    print("⚠️  gemini_client.py not found — skipping polish step")
+# ─── Content banks loader (built by build_content_banks.py) ────────────────
+BANKS_DIR = Path("content_banks")
+BANKS = {}
+
+def load_content_banks(banks_dir: Path = BANKS_DIR) -> Dict:
+    """Load all JSON banks. Returns dict of bank_name → bank_data."""
+    banks = {}
+    if not banks_dir.exists():
+        print(f"⚠️  No content_banks/ directory found.")
+        print(f"⚠️  Run `python build_content_banks.py` first, OR continue with Qwen fallback only.")
+        return banks
+    for json_file in banks_dir.glob("*.json"):
+        try:
+            with open(json_file, "r", encoding="utf-8") as f:
+                banks[json_file.stem] = json.load(f)
+            print(f"   📚 Loaded {json_file.name}")
+        except json.JSONDecodeError as e:
+            print(f"   ⚠️  Could not parse {json_file.name}: {e}")
+    return banks
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -121,27 +127,27 @@ CANONICAL_SCHEMA_KEYS = [
 ETHNICITY_GUIDANCE = {
     "malay_sg": {
         "name_pattern": "Use Malay name with bin (for males) or binti/binte (for females) patronymic. Example: 'Ahmad bin Abdullah', 'Siti binti Mohamed'.",
-        "phone_format": "Singapore 8-digit phone starting with 8 or 9. Format: '+65 8XXX XXXX' or '+65 9XXX XXXX' or '8XXXXXXX'.",
+        "phone_format": "Use the MANDATORY PHONE provided above. Do not invent a different phone.",
         "country_context": "Singapore — use Pte Ltd suffix for companies, Singapore polytechnic/university names."
     },
     "chinese_sg": {
         "name_pattern": "Chinese Singaporean name, typically 3 characters (e.g., 'Tan Wei Ming', 'Lim Hui Ling') or with English first name ('Jeremy Tan', 'Vanessa Chua').",
-        "phone_format": "Singapore 8-digit phone starting with 8 or 9.",
+        "phone_format": "Use the MANDATORY PHONE provided above. Do not invent a different phone.",
         "country_context": "Singapore — use Pte Ltd suffix."
     },
     "indian_sg": {
         "name_pattern": "Indian Singaporean name often with s/o (son of) or d/o (daughter of) patronymic. Example: 'Rajesh s/o Kumar', 'Priya d/o Selvam'. Or simpler form like 'Shivani Iyer'.",
-        "phone_format": "Singapore 8-digit phone.",
+        "phone_format": "Use the MANDATORY PHONE provided above. Do not invent a different phone.",
         "country_context": "Singapore — Pte Ltd suffix."
     },
     "chinese_my": {
         "name_pattern": "Chinese Malaysian name, similar to SG but may use 'Wong', 'Lee', 'Chong' surnames more commonly.",
-        "phone_format": "Malaysia phone: +60 1X-XXXX XXXX (where X = 0-9, e.g., +60 12-345 6789).",
+        "phone_format": "Use the MANDATORY PHONE provided above. Do not invent a different phone.",
         "country_context": "Malaysia — use Sdn Bhd suffix, Malaysian university names (UM, UKM, UTM, USM)."
     },
     "malay_my": {
         "name_pattern": "Malay Malaysian name with bin/binti patronymic, e.g., 'Mohd Faiz bin Rahman', 'Aisyah binti Yusof'.",
-        "phone_format": "Malaysia phone: +60 1X-XXXX XXXX.",
+        "phone_format": "Use the MANDATORY PHONE provided above. Do not invent a different phone.",
         "country_context": "Malaysia — Sdn Bhd suffix."
     },
 }
@@ -159,6 +165,11 @@ NAME_POOLS = {
         "Iskandar bin Rosli", "Razak bin Salleh", "Amir bin Zainal",
         "Hisham bin Daud", "Asyraf bin Ramli", "Danial bin Hashim",
         "Imran bin Jamal", "Luqman bin Saad",
+        # Additional names
+        "Rizwan bin Karim", "Faris bin Sulaiman", "Adli bin Ahmad",
+        "Iqbal bin Mansor", "Aziz bin Halim", "Shafiq bin Razali",
+        "Hairul bin Bakar", "Zulhilmi bin Yusoff", "Ridhwan bin Talib",
+        "Aiman bin Salim",
     ],
     "malay_sg_female": [
         "Siti Aishah binti Mohamed", "Nurul Huda binti Ibrahim",
@@ -168,6 +179,11 @@ NAME_POOLS = {
         "Nadia binti Ismail", "Farhana binti Rosli", "Zarina binti Ali",
         "Shamsiah binte Latif", "Norizan binti Hashim",
         "Roziana binti Ahmad", "Liyana binti Kamal", "Hidayah binti Hamid",
+        # Additional names
+        "Nuraini binti Mansor", "Suria binte Yaakob", "Zalina binti Hassan",
+        "Sakinah binti Bakri", "Hidayu binte Razali", "Rohaya binti Daud",
+        "Mariam binti Yusuf", "Sharifah binti Omar", "Norhanim binti Sulaiman",
+        "Fauziah binti Anwar",
     ],
     "chinese_sg": [
         "Tan Wei Ming", "Lim Hui Ling", "Wong Kah Seng", "Lee Jia Min",
@@ -177,6 +193,18 @@ NAME_POOLS = {
         "Cheryl Ng Hui Yi", "Benjamin Goh Wei Liang", "Stephanie Lee Mei Hui",
         "Daryl Wong Kai Xuan", "Rachel Teo Shi Min", "Kelvin Tan Yong Sheng",
         "Melissa Chua Wei Ting", "Nicholas Ong Jia Hao", "Janice Sim Hui Min",
+        # Additional names for diversity (expanded pool prevents collisions)
+        "Aaron Chong Jun Hao", "Bryan Tan Yi Jie", "Clarissa Ng Hui Min",
+        "Darryl Goh Cheng Wei", "Eunice Lim Pei Shan", "Fiona Lee Wei Ling",
+        "Gabriel Chua Jun Kai", "Hannah Teo Jia Hui", "Ivan Wong Boon Keng",
+        "Jolene Khoo Yan Ling", "Kenneth Sim Wei Jun", "Lydia Ang Hui Xuan",
+        "Mervyn Goh Kah Yong", "Natalie Foo Jia Yi", "Oliver Tan Wei Hao",
+        "Patricia Chen Mei Yi", "Quinn Lim Jia Wei", "Reuben Ng Cheng Kang",
+        "Serena Wong Hui Qi", "Terrence Tay Jun Wei", "Ursula Liew Pei Ling",
+        "Vincent Chua Yong Sheng", "Wendy Ong Hui Min", "Xavier Goh Jun Yu",
+        "Yvonne Lim Wei Ting", "Zachary Tan Kah Hao",
+        "Adeline Yeo Hui Lin", "Brendan Sim Jia Wei", "Charlene Toh Mei Xin",
+        "Donovan Heng Kai Wen", "Eileen Quek Pei Yi",
     ],
     "indian_sg": [
         "Rajesh s/o Kumar", "Priya d/o Selvam", "Shivani Iyer",
@@ -222,6 +250,268 @@ def pick_random_name(ethnicity: str, rng: random.Random) -> Tuple[str, str]:
     return "", "any"
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# 📱 PHONE GENERATORS — prevent Qwen from copying example phones from prompt
+# ════════════════════════════════════════════════════════════════════════════
+
+def generate_phone(country: str, rng: random.Random) -> str:
+    """Generate a realistic, UNIQUE phone number for SG or MY.
+
+    SG format: +65 8XXX XXXX or +65 9XXX XXXX (always 8 digits after +65)
+    MY format: +60 1X-XXX XXXX (X = 0-9, mobile prefix)
+    """
+    if country == "sg":
+        # SG mobile: starts with 8 or 9
+        prefix = rng.choice(["8", "9"])
+        # Build 7 more random digits, broken into XXX XXXX
+        rest = "".join(str(rng.randint(0, 9)) for _ in range(7))
+        # Avoid the dreaded "123 4567" pattern that Qwen kept copying
+        while rest in ("1234567", "0000000", "1111111", "9999999"):
+            rest = "".join(str(rng.randint(0, 9)) for _ in range(7))
+        return f"+65 {prefix}{rest[:3]} {rest[3:]}"
+    elif country == "my":
+        # MY mobile: +60 1X-YYY YYYY (X = 0-9 for celcom/digi/maxis/u mobile)
+        x = rng.randint(0, 9)
+        rest = "".join(str(rng.randint(0, 9)) for _ in range(7))
+        while rest in ("3456789", "0000000", "1234567"):
+            rest = "".join(str(rng.randint(0, 9)) for _ in range(7))
+        return f"+60 1{x}-{rest[:3]} {rest[3:]}"
+    return ""
+
+
+def generate_email(name: str, rng: random.Random) -> str:
+    """Generate a plausible email from the assigned name."""
+    if not name:
+        return ""
+    # Take 1-2 words from the name
+    # Strip patronymics like "bin", "binti", "s/o", "d/o"
+    clean = name.lower()
+    for skip in ["bin ", "binti ", "binte ", "s/o ", "d/o ", "s/o", "d/o"]:
+        clean = clean.replace(skip, " ")
+    words = [w for w in clean.split() if len(w) >= 2 and w.isalpha()]
+    if not words:
+        return f"candidate{rng.randint(100, 9999)}@gmail.com"
+
+    # Combine first 1-2 names
+    style = rng.choice(["dotted", "joined", "first_only", "numbered"])
+    if style == "dotted":
+        local = ".".join(words[:2]) if len(words) >= 2 else words[0]
+    elif style == "joined":
+        local = "".join(words[:2]) if len(words) >= 2 else words[0]
+    elif style == "first_only":
+        local = words[0]
+    else:  # numbered
+        local = words[0] + str(rng.randint(1, 99))
+
+    domain = rng.choice(["gmail.com", "outlook.com", "yahoo.com.sg", "hotmail.com"])
+    return f"{local}@{domain}"
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 🏦 BANK PICKERS — Pull specific items from content banks
+# ════════════════════════════════════════════════════════════════════════════
+
+# Track which fields had to fall back to Qwen invention
+FALLBACK_LOG = {"companies": 0, "schools": 0, "certs": 0, "skills": 0, "industry": 0, "function": 0}
+
+
+def pick_companies(country: str, industry: str, n: int, rng: random.Random) -> List[str]:
+    """Pull n company names from the appropriate bank."""
+    bank_key = "sg_companies" if country == "sg" else "my_companies"
+    bank = BANKS.get(bank_key, {})
+    pool = bank.get(industry, [])
+    if not pool:
+        FALLBACK_LOG["companies"] += 1
+        return []  # Empty signal: let Qwen invent
+    return rng.sample(pool, min(n, len(pool)))
+
+
+def pick_schools(country: str, education_path: str, rng: random.Random) -> List[str]:
+    """Pick schools matching the education path."""
+    bank_key = "sg_schools" if country == "sg" else "my_schools"
+    bank = BANKS.get(bank_key, {})
+    if not bank:
+        FALLBACK_LOG["schools"] += 1
+        return []
+
+    schools = []
+    if country == "sg":
+        if education_path == "polytechnic_then_uni":
+            polys = bank.get("polytechnics", [])
+            unis = bank.get("universities", [])
+            if polys:
+                schools.append(rng.choice(polys))
+            if unis:
+                schools.append(rng.choice(unis))
+        elif education_path == "uni_local":
+            unis = bank.get("universities", [])
+            if unis:
+                schools.append(rng.choice(unis))
+        elif education_path == "ITE_then_uni":
+            ites = bank.get("ITE", [])
+            polys = bank.get("polytechnics", [])
+            unis = bank.get("universities", [])
+            if ites:
+                schools.append(rng.choice(ites))
+            if polys:
+                schools.append(rng.choice(polys))
+            if unis:
+                schools.append(rng.choice(unis))
+        elif education_path == "diploma_only":
+            polys = bank.get("polytechnics", [])
+            if polys:
+                schools.append(rng.choice(polys))
+    else:  # my
+        if education_path in ("uni_local", "uni_overseas"):
+            unis = bank.get("public_universities", []) + bank.get("private_universities", [])
+            if unis:
+                schools.append(rng.choice(unis))
+        elif education_path == "diploma_only":
+            polys = bank.get("polytechnics", [])
+            if polys:
+                schools.append(rng.choice(polys))
+
+    if not schools:
+        FALLBACK_LOG["schools"] += 1
+    return schools
+
+
+def pick_certifications(industry: str, n: int, rng: random.Random) -> List[str]:
+    """Pick relevant certifications from the cert bank.
+    Matches the actual bank structure: flat keys like 'finance_sg_cmfas', 'tech_aws', etc.
+    """
+    bank = BANKS.get("certifications", {})
+    if not bank:
+        FALLBACK_LOG["certs"] += 1
+        return []
+
+    # 💎 Match the bank's flat key structure (e.g. finance_sg_cmfas, tech_aws, tech_azure)
+    industry_prefixes = {
+        "finance": ["finance_sg_cmfas", "finance_sg_ibf", "finance_general"],
+        "tech": ["tech_aws", "tech_azure", "tech_gcp", "tech_other"],
+        "healthcare": ["healthcare_general", "healthcare"],
+    }
+    relevant_keys = industry_prefixes.get(industry, [])
+
+    pool = []
+    for key in relevant_keys:
+        items = bank.get(key, [])
+        if isinstance(items, list):
+            pool.extend(items)
+
+    # Add a sprinkle of generals (PMP, ITIL, etc. apply to many roles)
+    pool.extend(bank.get("general", []))
+
+    if not pool:
+        FALLBACK_LOG["certs"] += 1
+        return []
+
+    # 💎 BIAS: for finance, ensure CMFAS gets picked (it's the SG-critical cert)
+    # For tech, ensure at least 1 AWS cert
+    must_include = []
+    if industry == "finance":
+        cmfas_pool = bank.get("finance_sg_cmfas", [])
+        if cmfas_pool:
+            # Pick 1-2 CMFAS modules MANDATORY
+            must_include.extend(rng.sample(cmfas_pool, min(2, len(cmfas_pool))))
+    elif industry == "tech":
+        aws_pool = bank.get("tech_aws", [])
+        if aws_pool:
+            must_include.append(rng.choice(aws_pool))
+
+    # Build final list: must-includes first, then random from remaining pool
+    remaining_pool = [c for c in pool if c not in must_include]
+    extras_needed = max(0, n - len(must_include))
+    extras = rng.sample(remaining_pool, min(extras_needed, len(remaining_pool))) if remaining_pool else []
+    result = must_include + extras
+    return result[:n]
+
+
+def pick_skills(industry: str, hard_n: int, soft_n: int,
+                rng: random.Random) -> Tuple[List[str], List[str]]:
+    """Pick hard + soft skills for an industry."""
+    bank = BANKS.get("skills_by_industry", {})
+    industry_bank = bank.get(industry, {})
+    hard_pool = industry_bank.get("hard", [])
+    soft_pool = industry_bank.get("soft", [])
+
+    if not hard_pool and not soft_pool:
+        FALLBACK_LOG["skills"] += 1
+        return [], []
+
+    hard = rng.sample(hard_pool, min(hard_n, len(hard_pool))) if hard_pool else []
+    soft = rng.sample(soft_pool, min(soft_n, len(soft_pool))) if soft_pool else []
+    return hard, soft
+
+
+def pick_industry_label(industry: str, rng: random.Random) -> List[str]:
+    """Pick the formal Industry label(s) from the industries bank."""
+    bank = BANKS.get("industries", {})
+    industries_list = bank.get("industries", [])
+    if not industries_list:
+        FALLBACK_LOG["industry"] += 1
+        return []
+
+    # Map our internal industry key to formal industry name (best match)
+    name_map = {
+        "finance": "Banking & Finance",
+        "tech": "Technology",
+        "healthcare": "Healthcare",
+        "hospitality": "Hospitality",
+        "education": "Education",
+        "manufacturing": "Manufacturing",
+        "logistics": "Logistics",
+        "government": "Government",
+        "fmcg": "FMCG",
+    }
+    target = name_map.get(industry, industry)
+    # Find best matching industry entry
+    for entry in industries_list:
+        if isinstance(entry, dict):
+            name = entry.get("name", "")
+            if target.lower() in name.lower() or name.lower() in target.lower():
+                subcats = entry.get("subcategories", [])
+                # Return formal industry name + 1 subcategory if exists
+                if subcats:
+                    return [name, rng.choice(subcats)]
+                return [name]
+    FALLBACK_LOG["industry"] += 1
+    return []
+
+
+def pick_function_label(industry: str, role_hint: str, rng: random.Random) -> str:
+    """Pick a Function label that matches the industry/role."""
+    bank = BANKS.get("functions", {})
+    functions_list = bank.get("functions", [])
+    if not functions_list:
+        FALLBACK_LOG["function"] += 1
+        return ""
+
+    # Heuristic mapping industry → function
+    industry_to_function = {
+        "finance": ["Finance & Accounting", "Sales & Business Development"],
+        "tech": ["Engineering", "Product Management", "Data & Analytics"],
+        "healthcare": ["Operations", "Research & Development"],
+        "hospitality": ["Operations", "Customer Success"],
+        "education": ["Research & Development", "Administration"],
+        "manufacturing": ["Engineering", "Operations"],
+        "logistics": ["Operations"],
+        "government": ["Administration", "Legal & Compliance"],
+        "fmcg": ["Marketing & Communications", "Sales & Business Development"],
+    }
+    candidate_names = industry_to_function.get(industry, [])
+    if not candidate_names:
+        FALLBACK_LOG["function"] += 1
+        return ""
+
+    chosen_name = rng.choice(candidate_names)
+    # Verify it exists in the bank
+    for entry in functions_list:
+        if isinstance(entry, dict) and entry.get("name", "").lower() == chosen_name.lower():
+            return chosen_name
+    return chosen_name  # use it anyway even if not exact in bank
+
+
 
 SENIORITY_GUIDANCE = {
     "fresh_grad":    "0-1 year experience. 1 job (internship or first role). Recently graduated.",
@@ -255,7 +545,15 @@ EDUCATION_GUIDANCE = {
 
 def build_generation_prompt(ethnicity: str, industry: str, seniority: str,
                             education_path: str, is_hard: bool = False,
-                            assigned_name: str = "", gender_hint: str = "") -> str:
+                            assigned_name: str = "", gender_hint: str = "",
+                            assigned_phone: str = "", assigned_email: str = "",
+                            bank_companies: Optional[List[str]] = None,
+                            bank_schools: Optional[List[str]] = None,
+                            bank_certs: Optional[List[str]] = None,
+                            bank_hard_skills: Optional[List[str]] = None,
+                            bank_soft_skills: Optional[List[str]] = None,
+                            bank_industry: Optional[List[str]] = None,
+                            bank_function: str = "") -> str:
     """Build the prompt sent to the teacher LLM."""
     eth_info = ETHNICITY_GUIDANCE.get(ethnicity, {})
     sen_info = SENIORITY_GUIDANCE.get(seniority, "")
@@ -270,12 +568,13 @@ def build_generation_prompt(ethnicity: str, industry: str, seniority: str,
         "Current Company": "",
         "Current Title": "",
         "Summary": "",
+        "Function": "",
+        "Industry": [],
         "Work Experience": [{"company": "", "title": "", "from": "", "to": "", "responsibility": []}],
         "Education": [{"school": "", "major": "", "degree": "", "dates": ""}],
         "Certifications": [],
         "hard_skills/tags": [],
         "soft_skills/skills": [],
-        "Industry": [],
         "Language Skills": [],
     }, indent=2)
 
@@ -290,17 +589,52 @@ EDGE CASE: This is a HARD case. Include at least one of:
 - An unusual layout (bilingual EN+Mandarin or EN+Malay code-switching in summary)
 """
 
-    # 💎 INJECT THE ASSIGNED NAME — this prevents Qwen from defaulting to "Ahmad"
+    # 💎 INJECT THE ASSIGNED NAME + PHONE + EMAIL — prevents Qwen defaults
     name_directive = ""
     if assigned_name:
         gender_note = f" (gender: {gender_hint})" if gender_hint and gender_hint != "any" else ""
         name_directive = f"""
-MANDATORY NAME (use EXACTLY this name, do not modify):
-  {assigned_name}{gender_note}
+MANDATORY IDENTITY (use EXACTLY these values, do not modify):
+  Name:  {assigned_name}{gender_note}
+  Phone: {assigned_phone}
+  Email: {assigned_email}
 """
 
+    # 💎 INJECT BANK INGREDIENTS — Qwen uses these REAL items
+    bank_directive = ""
+    bank_lines = []
+    if bank_companies:
+        bank_lines.append(f"COMPANIES (use 2-3 of these, in chronological order, latest first):")
+        for c in bank_companies:
+            bank_lines.append(f"  - {c}")
+    if bank_schools:
+        bank_lines.append(f"\nSCHOOLS (use these in your Education section):")
+        for s in bank_schools:
+            bank_lines.append(f"  - {s}")
+    if bank_certs:
+        bank_lines.append(f"\nCERTIFICATIONS (use 3-5 of these, with FULL official names):")
+        for c in bank_certs:
+            bank_lines.append(f"  - {c}")
+    if bank_hard_skills:
+        bank_lines.append(f"\nHARD SKILLS (use 8-12 of these in the skills section):")
+        for s in bank_hard_skills:
+            bank_lines.append(f"  - {s}")
+    if bank_soft_skills:
+        bank_lines.append(f"\nSOFT SKILLS (use 4-6 of these):")
+        for s in bank_soft_skills:
+            bank_lines.append(f"  - {s}")
+    if bank_industry:
+        bank_lines.append(f"\nINDUSTRY LABEL (set the Industry JSON field to this list):")
+        bank_lines.append(f"  {bank_industry}")
+    if bank_function:
+        bank_lines.append(f"\nFUNCTION LABEL (set the Function JSON field to this string):")
+        bank_lines.append(f"  {bank_function}")
+
+    if bank_lines:
+        bank_directive = "\n💎 USE THESE REAL INGREDIENTS (don't invent SG/MY names if these are provided):\n" + "\n".join(bank_lines) + "\n"
+
     return f"""You are generating a SYNTHETIC RESUME for training a Singapore/Malaysia resume extraction model.
-{name_directive}
+{name_directive}{bank_directive}
 ETHNICITY/NAME PATTERN: {eth_info.get('name_pattern', '')}
 PHONE FORMAT: {eth_info.get('phone_format', '')}
 COUNTRY CONTEXT: {eth_info.get('country_context', '')}
@@ -311,14 +645,15 @@ EDUCATION PATH: {edu_info}
 {hard_case_extra}
 
 INSTRUCTIONS:
-1. Use the MANDATORY NAME exactly as given above (do not change it!).
-2. Generate a REALISTIC resume that matches all the above constraints.
-3. Use REAL Singapore/Malaysia company names (DBS, OCBC, Grab, Shopee, Sea, etc. for SG; Maybank, CIMB, Petronas, AirAsia, etc. for MY).
-4. Use REAL polytechnic/university names from the country.
-5. Include 2-5 work experiences appropriate for seniority.
+1. Use the MANDATORY IDENTITY (name + phone + email) EXACTLY as given above. Do not modify them.
+2. The phone number MUST appear in the resume header verbatim. The email MUST appear verbatim.
+3. If REAL INGREDIENTS are provided above, USE them (don't invent your own SG/MY companies/schools/certs/skills).
+4. If a category has no ingredients listed, you may invent realistic SG/MY equivalents (with proper Pte Ltd / Sdn Bhd suffix).
+5. Include 2-5 work experiences matching the seniority level.
 6. Include 1-3 education entries matching the education path.
-7. Include relevant certifications (CMFAS for finance, AWS for tech, etc.).
-8. Generate a UNIQUE phone number and email — do NOT use generic ones like "name@email.com".
+7. Set the "Industry" JSON field as a list (e.g., ["Banking & Finance", "Private Banking"]).
+8. Set the "Function" JSON field as a single string (e.g., "Finance & Accounting").
+9. Use the EXACT Industry label provided above — do not change "Banking & Finance" to just "Banking".
 
 OUTPUT FORMAT (CRITICAL):
 Return TWO sections separated by ===SPLIT===
@@ -365,57 +700,9 @@ def call_ollama(prompt: str, model: str = LOCAL_MODEL, timeout: int = 300) -> Op
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# 💎 GEMINI POLISH (Pattern B) — Polish Qwen-generated resumes
+# 💎 NOTE: Gemini polish step removed.
+# Gemini is now used ONCE to build content banks via build_content_banks.py
 # ════════════════════════════════════════════════════════════════════════════
-
-POLISH_PROMPT = """You are reviewing a synthetic Singapore/Malaysia resume for a training dataset.
-
-ORIGINAL (generated by a local LLM):
-===
-{original}
-===
-
-YOUR TASK: Polish this resume + ground truth JSON for SG/MY authenticity.
-
-Check and fix these issues if present:
-1. Names — ensure bin/binti patronymics are correct for Malay names, s/o or d/o for Indian
-2. Phone numbers — Singapore should be 8-digit starting 8 or 9; Malaysia +60 1X-XXXX XXXX
-3. Company names — should have realistic Pte Ltd (SG) or Sdn Bhd (MY) suffix
-4. School names — must be REAL SG/MY institutions
-5. Certifications — CMFAS modules should be valid (5, 9, 9A, HI, M9, M5) for SG finance
-6. JSON structure — Title Case keys (Name, Phone, Work Experience, etc.)
-7. Internal consistency — dates make sense, seniority matches years of experience
-
-OUTPUT FORMAT (CRITICAL — same as input):
-Return TWO sections separated by ===SPLIT===
-
-SECTION 1: The polished resume text
-===SPLIT===
-SECTION 2: The polished ground truth JSON
-
-Do not add commentary. Just output the polished version.
-"""
-
-
-def polish_with_gemini(qwen_output: str) -> Optional[str]:
-    """
-    Pattern B: Take Qwen's output, ask Gemini to polish it.
-    Returns the polished version, or the original if Gemini fails.
-    """
-    if not GEMINI_AVAILABLE or gemini_client is None:
-        return qwen_output  # No-op if Gemini unavailable
-
-    prompt = POLISH_PROMPT.format(original=qwen_output)
-    polished = gemini_client.generate(
-        prompt,
-        temperature=0.3,  # Lower temp for polish — we want consistency
-        max_output_tokens=4096,
-    )
-
-    if polished and "===SPLIT===" in polished:
-        return polished
-    # Polish failed — return original unchanged
-    return qwen_output
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -554,9 +841,17 @@ def save_progress(progress_path: Path, progress: Dict):
 # ════════════════════════════════════════════════════════════════════════════
 
 def main():
+    global BANKS
     print("╔" + "═" * 68 + "╗")
     print("║" + "  💎  STAGE 0 LITE — 100 SYNTHETIC SG/MY RESUMES  💎  ".center(68) + "║")
     print("╚" + "═" * 68 + "╝")
+
+    print("\n📚 Loading content banks...")
+    BANKS = load_content_banks()
+    if BANKS:
+        print(f"   ✨ {len(BANKS)} banks loaded\n")
+    else:
+        print(f"   ⚠️  No banks — Qwen will invent everything (lower quality)\n")
 
     output_dir = Path("data_gen")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -594,10 +889,13 @@ def main():
             if cell_key in completed_cells:
                 continue
 
-            engine = "Qwen-32B + Gemini-polish" if GEMINI_AVAILABLE else "Qwen-32B"
+            engine = "Qwen-32B + Banks" if BANKS else "Qwen-32B (no banks)"
             print(f"🎨 Cell {cell_idx+1}/{len(DIVERSITY_MATRIX)}: "
                   f"{ethnicity} | {industry} | {seniority} | {edu_path} "
                   f"→ {count} resumes via {engine}")
+
+            # Resolve country from ethnicity tag
+            country = "sg" if ethnicity.endswith("_sg") else "my"
 
             for i in range(count):
                 # 💎 Pick a unique name from the pool (no duplicates!)
@@ -608,22 +906,38 @@ def main():
                     attempts += 1
                 used_names.add(assigned_name)
 
+                # 💎 Generate a unique phone (no more "+65 8123 4567" copies!)
+                assigned_phone = generate_phone(country, rng)
+                # 💎 Generate an email tied to the name
+                assigned_email = generate_email(assigned_name, rng)
+
+                # 💎 Pull ingredients from banks
+                bank_companies = pick_companies(country, industry, n=3, rng=rng)
+                bank_schools = pick_schools(country, edu_path, rng=rng)
+                bank_certs = pick_certifications(industry, n=5, rng=rng)
+                bank_hard, bank_soft = pick_skills(industry, hard_n=12, soft_n=6, rng=rng)
+                bank_industry = pick_industry_label(industry, rng=rng)
+                bank_function = pick_function_label(industry, "", rng=rng)
+
                 prompt = build_generation_prompt(
                     ethnicity, industry, seniority, edu_path,
                     is_hard=is_hard,
                     assigned_name=assigned_name,
                     gender_hint=gender_hint,
+                    assigned_phone=assigned_phone,
+                    assigned_email=assigned_email,
+                    bank_companies=bank_companies,
+                    bank_schools=bank_schools,
+                    bank_certs=bank_certs,
+                    bank_hard_skills=bank_hard,
+                    bank_soft_skills=bank_soft,
+                    bank_industry=bank_industry,
+                    bank_function=bank_function,
                 )
                 start_time = time.time()
 
-                # 💎 PATTERN B: Always generate with local Qwen 32B
+                # 🦙 Generate with local Qwen 32B (no Gemini polish — using banks instead)
                 raw = call_ollama(prompt)
-
-                # If generation worked AND Gemini is available, POLISH it
-                if raw and GEMINI_AVAILABLE:
-                    polished = polish_with_gemini(raw)
-                    if polished:
-                        raw = polished
 
                 elapsed = time.time() - start_time
 
@@ -728,6 +1042,10 @@ def main():
     print(f"   Rejected:   {rejected_so_far}")
     print(f"   Output:     {output_path}")
     print(f"   Rejected log: {rejected_path}")
+    print(f"\n📊 Bank fallback log (how often Qwen had to invent items):")
+    for key, count in FALLBACK_LOG.items():
+        if count > 0:
+            print(f"   - {key:12s}: {count} times")
     print(f"\n💋 Next step: Hand-inspect 10 random samples before fine-tuning!")
 
 
