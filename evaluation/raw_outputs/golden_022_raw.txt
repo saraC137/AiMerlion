@@ -1,0 +1,74 @@
+=== INPUT INFO ===
+original_resume_tokens: 7383
+truncated: True
+final_input_tokens: 6093
+max_new_tokens: 2048
+
+=== RAW OUTPUT (424 tokens) ===
+{
+  "Name": "Murugeshan Manikandan",
+  "Phone": "+60 16-xxx xxx",
+  "Email": "",
+  "Current Location": "Jurong Gateway Road, Singapore",
+  "Current Company": "Vopak Terminals Singapore Pte Ltd",
+  "Current Title": "Engineer",
+
+  "Summary": "Experienced Engineer proficient in various engineering disciplines including process control systems, automation solutions, and industrial plant operations management.",
+  
+  "Function": ["Engineering"],
+  "Industry": [
+    "Transport & Logistics"
+  ],
+  "Language Skills": [],
+
+  "Work Experience": [
+    {
+      "company": "Vopak Terminal Singapore Pte Ltd",
+      "title": "Engineer",
+      "from": "Sep 2016",
+      "to": "Present",
+      "responsibility": [
+        "Responsible for overseeing the installation and maintenance of process control systems across multiple facilities."
+      ]
+    }
+  ],
+
+  "Education": [
+    {
+      "_id": "$oid",
+      "school": "Anna University, Chennai",
+      "major": "Bachelor’s Degree With Honors (First Class)",
+      "degree": "Engineering",
+      "dates": "Aug 2006 – May 2010"
+    }
+  ],
+
+  // No certifications listed explicitly
+  
+  "hard_skills/tags": [
+    "Process Control Systems",
+    "Automation Solutions",
+    "Industrial Plant Operations Management",
+    "PLC Programming",
+    "HMI Software Development",
+    "SCADA System Integration",
+    "Control Valve Maintenance",
+    "Instrument Calibration",
+    "PID Tuning Techniques",
+    "Safety Instrumented Systems (SIS)"
+  ],
+  
+  "soft_skills/skills": [
+    "Team Leadership",
+    "Problem-Solving",
+    "Technical Writing",
+    "Project Coordination",
+    "Risk Analysis",
+    "Quality Assurance",
+    "Continuous Improvement",
+    "Time Management",
+    "Decision Making Under Pressure",
+    "Cross-functional Collaboration"
+  ]
+}
+=== END ===

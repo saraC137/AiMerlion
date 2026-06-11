@@ -1,0 +1,167 @@
+=== INPUT INFO ===
+original_resume_tokens: 1795
+truncated: False
+final_input_tokens: 2080
+max_new_tokens: 2048
+
+=== RAW OUTPUT (1289 tokens) ===
+{
+  "Name": "Nurul Ain Binte Isma il",
+  "Phone": "+65 90 937602",
+  "Email": "nurulainbteismail@gmail.com",
+  "Current Location": "",
+  "Current Company": "",
+  "Current Title": ""
+},
+{
+  "Summary": "To obtain an interesting and challenging posi tion with wide tasks, allowing advancement towards professional growth.",
+  "Function": "",
+  "Industry": [
+    "Retail"
+  ],
+  "Language Skills": [
+    {
+      "language": "English",
+      "level": "Fluent"
+    },
+    {
+      "language': "Malay",
+      "level": 'Fluent'
+    }
+  ],
+  "Work Experience": [
+    {
+      {
+        "company": "Ferragamo (Singapore) Pvt Ltd",
+        "title": "Full-Time Sales Assistant",
+        "from": "Jun 2015",
+        "to": "Aug 2016",
+        "responsibility": [
+          "Sales generation",
+          "Customer recruitment targets",
+          "Individual KPI targets",
+          "Customer service",
+          "Listening, recommending of products based customer’s needs",
+          "Up-selling & cross-selling",
+          "Closing on sales & recruiting customer into CRM base",
+          "Creating personalized customer service",
+          "Maintaining product knowledge",
+          "Handling customer inquiries, feedback & complaints",
+          "Providing after-sales services including repairs & handling follow-ups",
+          "Telephone etiquette",
+          "Goals & target-oriented daily briefings",
+          "Visual & Merchandising - Maintaining visual and housekeeping standards",
+          "Ensuring stocks are well-replenished",
+          "Displaying new arrivals",
+          "Handling stock takes",
+          "Administrative work such as creating reports on incentives",
+          "Checking transfers",
+          "Cashiering duties like settlement of credits, nets & cash",
+          "Opening POS registers",
+          "Daily counts of stocks & gift cards",
+          "Packing & unpacking of stocks",
+          "Referring to DN papers & locations to locations transfers"
+        ]
+      }
+    },
+    {
+      {
+        {
+          "company": "Esprit Retail Pte Ltd",
+          "title": "WSQ Retail Certification Holder",
+          "from": "June 2012",
+          "to": "May 2014",
+          "responsibility": [
+            "Apply color theory",
+            "Provide advice on fashion & apparel",
+            "Maintain professional image",
+            "In-charge of certain divisions",
+            "Various roles & tasks",
+            "Senior sales associate",
+            "Training responsibilities",
+            "Setting up main store for JEM outlet",
+            "Customer service & sales generation",
+            "Actively addressing customer needs",
+            "Promoting new arrivals & memberships",
+            "Giving best deals",
+            "Maintaining product knowledge & care",
+            "Participating in product shipment, receiving & transferring",
+            "Repricing & re-tagging",
+            "Stocking up & replenishing according to guidelines",
+            "Handling customer inquiries, complaints & feedback",
+            "Taking measurements for alterations",
+            "Providing telephone service",
+            "Monthly divisional targets",
+            "Morning briefings on store targets & KPI goals",
+            "Maintaining visual & housekeeping standards",
+            "Proper folding, hanging, steamed & sized displays",
+            "Ensuring stocks are replenished",
+            "Displaying new arrivals weekly",
+            "Changing walls for visual merchandizing",
+            "Scanning items, planning store layouts & manpower assignments",
+            "Calculations of KPIs for staff",
+            "Recording petty cash, bank-ins & store floats",
+            "Recording alterations & gift cards",
+            "Stationery requisitions",
+            "End-of-day POS register operations",
+            "Settlement of credits, nets & payments",
+            "Tax refunds, credit refunds & customer refunds",
+            "Buying gift cards",
+            "Counting float money",
+            "Daily counts of gift cards",
+            "Packing & unpackaging of stocks",
+            "Referencing DN papers & location-to-location transfers"
+          ]
+        }
+      }
+    },
+    ...
+  ],
+  "Education": [
+    {
+      {"school": "Singapore Institute of Retail Studies", "major": "", "degree": "Diploma in Retail Management", "dates": "Oct 2015 - Sep 2016"}
+    },
+    {
+      {"school":"Advanced Certificate in Retail Supervision", "major": "", “degree”: "Advanced Certificate in Retail Supervisions", "dates": "Jan 2015-Sept 2015"}
+    },
+    {
+       {"school": "Private Candidate for GCE ‘ O ’ Level", "major": "",“degree”: "GCE ‘ O ’ Level”, "dates": "Feb 2009-Nov 2009"}
+    },
+    {
+     {"school": "Jurong West Secondary School", "major": "","degree": "Secondary 4 Express Stream", "dates": "2005-2008"}
+    },
+    {
+    {"school": "Juying Primary School", "major": ""，“degree”: "PSLE", "dates": "1999-2004"}
+   }
+],
+  "Certifications": [],
+  "hard_skills/tags": [
+    "Sales Generation",
+    "Customer Recruitment Targets",
+    "Individual KPI Targets",
+    "Customer Service",
+    "Product Knowledge",
+    "After-Sales Services",
+    "Telephone Etiquette",
+    "Goals & Target-Oriented Briefings",
+    "Visual Merchandising",
+    "Housekeeping Standards",
+    "Stock Replenishment",
+    "New Arrivals Display",
+    "Stock Takes",
+    "Administrative Tasks",
+    "Credit Refunds",
+    "Gift Cards Management",
+    "Fast-Pace Environment",
+    "Rotating Shifts",
+    "Teamwork",
+    "Initiative Taking",
+    "Adaptability",
+    "Conversational Ability",
+    "Peer Relationships",
+    "Quick Learner",
+    "Proactive Behavior"
+  ],
+  "soft_skills/skills": []
+}
+=== END ===

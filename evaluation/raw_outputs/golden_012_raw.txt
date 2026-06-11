@@ -1,0 +1,117 @@
+=== INPUT INFO ===
+original_resume_tokens: 811
+truncated: False
+final_input_tokens: 1095
+max_new_tokens: 2048
+
+=== RAW OUTPUT (846 tokens) ===
+{
+  "Name": "Mohd Aini Hussien",
+  "Phone": "+65 9763 0535",
+  "Email": "[ahmad_hussein@outlook.com](mailto:ahmed_hussein@outLOOK.com)",
+  "Current Location": "Singapore",
+  "Current Company": "",
+  "Current Title": "",
+  "Summary": "- Extensive experience providing chauffeur services including company directors, families, and VIPs.\n- Proficient in ensuring compliance with traffic laws and maintaining vehicles.\n- Skilled at handling administrative tasks such as running errands.",
+  "Function": "Personal/Company Drivers",
+  "Industry": [
+    "Transportation"
+  ],
+  "Language Skills": [],
+  "Work Experience": [
+    {
+      "company": "Promet Pte Ltd",
+      "title": "Company Driver",
+      "from": "Apr 1980",
+      "to": "Jun 1984",
+      "responsibility": []
+    },
+    {
+      "company': 'Marine Offshore Services (Consultant)',
+      "title": "Personal/Family Driver",
+      "from': 'Jan 1986',
+      "to': 'Dec 1992',
+      "responsibility": [
+        "Provided personal/family chauffeur service."
+      ]
+    },
+    {
+      'company': 'Kurihara Kogyo (Singapore) Co Ltd',
+      "title": "Family Driver",
+      "from”: ‘July 1993’,
+      “to”: ‘Sept 2000’,
+      “responsibility”: [
+        "Ensured passenger safety during commutes."
+      ]
+    },
+     {
+       "company": "Yokogawa Engineering Asia Private Limited",
+       "title": "Personal Driver",
+       "from": "June 2001",
+       "to": "Sep 2006",
+       "responsibility": [
+         "Provided personal/familial chauffeur service."
+       ]
+     },
+     {
+       "Company": "Foster Wheeler Eastern Singapore",
+       "Title": "Company Driver",
+       "From": "Nov 1st 2007",
+       "To": "May 13th 2010",
+       "Responsibility": [
+         "Ensured safe transportation of company director."
+       ]
+     },
+    {
+      "Company": "Megaway Pte Ltd",
+      “Title”: "Personal Driver",
+      "From": "Jun 1st 2100",
+      "To": "Jul 28th 2013",
+      "Responsibility": [
+        "Managed private transport needs effectively."
+      ]
+    },
+   {
+      "Company": “Jacobs Engineering Private Limited”,
+      "Title": "Personal Driver",
+      “From”: "Aug 1st 22014",
+      "To": “Dec 28th 152015”
+      "Responsibility": []
+    }
+  ],
+  "Education": [
+    {
+      “School”: "Dunearn Primary School",
+      "Major": "",
+      "Degree": "",
+      "Dates": "(1967-72)"
+    },
+    {
+      “School": "Buona Vista Secondary School",
+      "Major”: "",
+      "Degree": "GCE O-level",
+      "Dates": "(73-76)"
+    },
+    {
+       "School": "Singapore Technical Institute (STI)",
+       "Major": "M&E Drafting",
+       "Degree": "Certificate NTC III",
+       "Dates": ""
+    }
+  ],
+  “Certifications”: [],
+  "hard_skills/tags": [
+    "Chauffeur Service",
+    "Traffic Safety Compliance",
+    "Vehicle Maintenance",
+    "Administrative Duties",
+    "VIP Transport"
+  ],
+  "soft_skills/skills": [
+    "Passenger Safety Assurance",
+    "Compliance Awareness",
+    "Customer Satisfaction Focus",
+    "Professionalism"
+  ]
+}
+=== END ===

@@ -1,0 +1,70 @@
+=== INPUT INFO ===
+original_resume_tokens: 335
+truncated: False
+final_input_tokens: 620
+max_new_tokens: 2048
+
+=== RAW OUTPUT (387 tokens) ===
+{
+  "Name": "Aw Bee Lian",
+  "Phone": "+65 91721xxx",
+  "Email": "bliancheah@yahoo.com",
+  "Current Location": "Singapore",
+  "Summary": "",
+  "Function": [
+    "Information Technology"
+  ],
+  "Industry": [],
+  "Language Skills": [],
+  "Work Experience": [
+    {
+      "company": "IDA",
+      "title": "Project Manager",
+      "from": "Jan 1996",
+      "to": "Jun 2002",
+      "responsibility": [
+        "Handle from project planning, specification definitions, procurement to vendor and contractor management.",
+        "Staff development and appraisal."
+      ]
+    },
+    {
+      "company': 'NCB',
+      "title": 'IT Analyst',
+      "from": "Aug 1993",
+      "to": 'Dec 1996',
+      "responsibility": []
+    },
+    {
+      'company': 'Part-Time Administrative and Training Officer',
+      "title": '',
+      "from": "Jul 2015",
+      "to": ''
+    }
+  ],
+  "Education": [
+    {
+      'school': 'National University of Singapore',
+      'major': '',
+      'degree': 'Bachelor of Science (Computer and Informations Science)',
+      'dates': '1993'
+    }
+  ],
+  'Certifications': [],
+  'hard_skills/tags': [
+    'Microsoft Office',
+    'SQL',
+    'Unix',
+    'HTML',
+    'Lotus Notes',
+    'Java Scripting'
+  ],
+  'soft_skills/skills': [
+    'Project Management',
+    'Administration',
+    'System Development Life Cycle',
+    'Business Analysis',
+    'Government Procurement Process',
+    'Vendor and Customer Management'
+  ]
+}
+=== END ===

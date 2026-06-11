@@ -1,0 +1,142 @@
+=== INPUT INFO ===
+original_resume_tokens: 1077
+truncated: False
+final_input_tokens: 1362
+max_new_tokens: 2048
+
+=== RAW OUTPUT (851 tokens) ===
+{
+  "Name": "Li Meihui",
+  "Phone": "+65 9668XXXX",
+  "Email": "sanae84@yahoo.co.uk",
+  "Current Location": "Singapore",
+  "Current Company": "",
+  "Current Title": "",
+  "Summary": "",
+  "Function": [
+    "Creative"
+  ],
+  "Industry": [],
+  "Language Skills": [
+    {
+      "language": "English",
+      "fluency": ""
+    },
+    {
+      "language': "Chinese",
+      "fluency': ""
+    },
+    {
+        "language": "Japanese",
+        "fluency": "basic"
+    }
+  ],
+  "Work Experience": [
+    {
+      "_id": "0001",
+      "company": "Nanyang Technological Universit",
+      "title": "Multimedia Specialist",
+      "from": "Apr 2016",
+      "to": "current",
+      "responsibility": [
+        "Meeting and liaising with content development teams and providing technical recommendations.",
+        "Creating multimedia designs collaboratively with content developers."
+      ]
+    },
+    {
+      "_id":"0002",
+      "company": Temasek Polytechnic,
+      "title": "Management Support Officer",
+      "from": 'Apr 2013',
+      "to": 'Apr 2106',
+      "responsibility": []
+    },
+    {
+      '_id':'0003',
+      "company": "United Overseas Bank Limited",
+      "title": 'Associate Officer (Class II)',
+      "from": 'Dec 2009',
+      "to": "Mar 2013",
+      "responsibility":[]
+    },
+    {
+      _id:'0004',
+      "company": Middle Earth Media Pte Ltd,
+      "title": 'Video Editor / Project Coordinator',
+      "from": 'Aug 2007',
+      "to":'Oct 2009'
+    },
+    {
+      id:'0005',
+      "company": Frontier Force Technology Pte Ltd,
+      'title': 'Junior Web Designer',
+      "from": '',
+      "to": ''
+    },
+    {
+      'id':'0006',
+      "company": 'Singapore National Employers Federation',
+      "title": 'Intern',
+      "from": "2004",
+      "to": ""
+    }
+  ],
+  'Education':[
+    {
+      "school": Nanyang Technological University,
+      "major": "",
+      "degree": "Multimedia Specialist"
+    },
+    {
+      “school”: "Temasek Polytechni",
+      "major": "",
+       "degree": "Diploma in Internet Computin"
+     },
+     {
+      "school": "Nanyang Academi of Fine Arts",
+      "major": "", 
+      "degree": "Bachelor of Fine Arts"
+     },
+     {
+       "school": "Temasek Polytne",
+       "major": "",
+       “degree”: "Diploma in Intemet Comuting"
+     },
+     {
+         "school": "Holy Innoents' High Schoo",
+         "major": "",
+         "degree": "GCE 'O' Level"
+     }
+   ],
+   "Certifications": [],
+   "hard_skills/tags": [
+     "Adobe Photoshop",
+     "Adobe Premiere",
+     "Adobe Illustrator",
+     "Adobe Dreamweaver",
+     "HTML",
+     "CSS",
+     "Microsoft Word",
+     "Excel",
+     "PowerPoint",
+     "Final Cut Pro",
+     "Articulate Storyline",
+     "Module 1A",
+     "Module 5",
+     "Module 6",
+     "Module 8",
+     "Module 9",
+     "HI"
+   ],
+   "soft_skills/skills": [
+     "Technical Recommendations",
+     "Collaboration",
+     "Customer Services",
+     "Problem Solving",
+     "Attention to Detail",
+     "Time Management",
+     "Adaptability",
+     "Creativity"
+   ]
+}
+=== END ===

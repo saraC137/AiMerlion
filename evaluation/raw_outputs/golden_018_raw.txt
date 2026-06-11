@@ -1,0 +1,190 @@
+=== INPUT INFO ===
+original_resume_tokens: 1630
+truncated: False
+final_input_tokens: 1915
+max_new_tokens: 2048
+
+=== RAW OUTPUT (1310 tokens) ===
+{
+  "Name": "Lalitha D/O Thamaraselvam",
+  "Phone": "+60 1X-X XXX XX",
+  "Email": "",
+  "Current Location": "Singapore",
+  "Current Company": "",
+  "Current Title": "",
+  "Summary": "Highly motivated and adaptable administrative professional with extensive experience in hospitality management, customer service, and telecommunications support.",
+  "Function": [
+    "Administration"
+  ],
+  "Industry": [],
+  "Language Skills": [
+    {
+      "language": "Tamil",
+      "level": ""
+    }
+  ],
+  "Work Experience": [
+    {
+      "_id": "5f8b7a7a4b0a8c001bcbaccc",
+      "company": "Wildlife Reserves Singapore",
+      "title": "Admin Executive",
+      "from": "Mar 2016",
+      "to": "Jun 2013",
+      "responsibility": [
+        "Handling animal presentations across multiple parks including Night Safari, River Safari, Singapore Zoo, and sometimes Jurong Bird Park.",
+        "Managing budgets and financial year listings.",
+        "Issuing purchase orders, raising purchase requests, and managing internal store orders through SAP.",
+        "Performing Goods Received checks post-contractor invoicing.",
+        "Communicating with vendors regarding renovation works and item purchases.",
+        "Tracking ongoing renovation projects' statuses.",
+        "Updating staff medical certificates, annual leave records, and other leave details in the system.",
+        "Responding to emails regularly."
+      ]
+    },
+    {
+      "_id': '5f8b7aa44b0a8cc001cbadcd',
+      "company": "Mapletree Investments Pte Limited",
+      "title": "'Secretary cum Admin Executive'",
+      "from": "Nov 2012",
+      "to": "'Dec 2010\"",
+      "responsibility": []
+    },
+    {
+      "company": "Four Seasons Hotel",
+      "title": "\"Team Leader (Business Center)",
+      "from": "Sep 2010",
+      "to": "\"Mar 2006\"",
+      "responsibility\": [
+        "Trouble-shooting internet issues for guests.",
+        "Assisting walk-in guests.",
+        "Organizing monthly department meetings.",
+        "Submitting standard testing results via Lotus Notes database.",
+        "Training new staff members and management trainees.",
+        "Handling outbound shipping logistics such as FedEx/DHL/SingPost.",
+        "Setting up telecommunication devices in guest rooms upon request.",
+        "Providing various secretarial services including binding, laminating, faxes, prints, copies, dictation tasks."
+      ]
+    },
+     {
+      "company": "\"Department Trainer (Telecoms Dept.)\"",
+      "title": "\"\"",
+      "from": "\"Mar 210\"",
+      "to": "\"\"",
+      "responsibility\"": [
+        "Continued responsibilities from previous role plus training new hires and management trainees.",
+         "Organizing regular department meetings.",
+          "Weekly submission of test results via Lotus Notes database."
+      ]
+    },
+   {
+      "company": \"Guest Relations Officer (Telecoms Dept)\",
+      "title": "\",
+      "from": "\"March 2004\"",
+      "to": "\",
+      "responsibility\": [\"
+        "Answering and routing incoming calls.",
+        "Operating the main switchboard.",
+        "Fixing faulty phones in guest rooms when needed.",
+        "Handling wake-up call schedules.",
+        "Coordinating with Singtel and Radiance providers concerning installation of new phone lines.",
+        "Processing purchase requisitions for telecom supplies."
+      \]
+    }
+  ],
+  "
+Education": [
+    {
+      school": "Polytechnic Singapore",
+      "major": "",
+      "degree": "",
+      "dates": "2000 - 2004"
+    }
+  ],
+  '
+Certifications": [
+    "WSQ Course",
+    "Supervisory Course",
+    "Department Trainer’s Course"
+  ],
+  "hard_skills/tags": [
+    "Microsoft Office Suite",
+    "SAP",
+    "Opera",
+    "Micros",
+    "Lotus Notes",
+    "Resaweb",
+    "Trouble Shooting Internet Connection Issues",
+    "Standard Testing Procedures",
+    "Gift Shop Management",
+    "Outbound Shipping Logistics",
+    "Secretarial Services",
+    "Customer Service",
+    "Communication Skills",
+    "HR Processes",
+    "Travel Arrangements",
+    "Expense Claims Handling",
+    "Petty Cash Management",
+    "Medical Claim Reimbursements",
+    "Dental Claim Reimbursements"
+  ],
+  "soft_skills/skills": [
+    "Creativity",
+    "Adaptability",
+    "Attention to Detail",
+    "Problem-Solving",
+    "Time Management",
+    "Multi-tasking",
+    "Patience",
+    "Flexibility",
+    "Resourcefulness",
+    "Initiative",
+    "Professionalism",
+    "Ethical Standards",
+    "Integrity",
+    "Empathy",
+    "Critical Thinking",
+    "Analytical Skills",
+    "Decision Making",
+    "Negotiation",
+    "Conflict Resolution",
+    "Stress Management",
+    "Self-Discipline",
+    "Goal Orientation",
+    "Innovation",
+    "Strategic Planning",
+    "Leadership",
+    "Motivation",
+    "Teamwork",
+    "Interpersonal Communication",
+    "Active Listening",
+    "Public Speaking",
+    "Presentation Skills",
+    "Writing Skills",
+    "Reading Comprehension",
+    "Verbal Fluency",
+    "Nonverbal Communication",
+    "Cultural Sensitivity",
+    "Emotional Intelligence",
+    "Social Perceptiveness",
+    "Service Orientation",
+    "Complex Problem Solving",
+    "Systems Evaluation",
+    "Quality Control Analysis",
+    "Operations Monitoring",
+    "Equipment Maintenance",
+    "Installation",
+    "Repair",
+    "Maintenance Activities",
+    "Production Process Development",
+    "Process Improvement",
+    "Product Quality Assurance",
+    "Technical Drawing",
+    "Design Engineering",
+    "Mechanical Design",
+    "Electrical Design",
+    "Civil Drafting",
+    "Structural Drafting",
+    "Architectural Drafting",
+    "
+}
+=== END ===

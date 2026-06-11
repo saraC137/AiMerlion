@@ -1,0 +1,129 @@
+=== INPUT INFO ===
+original_resume_tokens: 1047
+truncated: False
+final_input_tokens: 1332
+max_new_tokens: 2048
+
+=== RAW OUTPUT (934 tokens) ===
+{
+  "Name": "Noralisah bte Ali",
+  "Phone": "+65 9093 3326",
+  "Email": "noralisah@hotmail.com",
+  "Current Location": "",
+  "Current Company": "",
+  "Current Title": ""
+} {
+  "Summary": "- Fluent in English, Malay, and basic Mandarin\n- Multi-tasker capable of handling high-pressure situations\n- Strong team player with excellent motivational skills\n- Skilled at managing logistics operations including imports/export, warehousing, and documentation",
+  "Function": [
+    "Logistics"
+  ],
+  "Industry": [
+    "Transportation",
+    "Warehousing",
+    "Trade"
+  ],
+  "Language Skills": [
+    "English",
+    "Malay",
+    "Mandarin"
+  ]
+} {
+  "Work Experience": [
+    {
+      "company": "OM Log (Asia) Ltd",
+      "title": "Customer Services cum Operations Coordinator",
+      "from": "Sep 2015",
+      "to": "Jun 2016",
+      "responsibility": [
+        "Liased with warehouse regarding shipment movements schedules",
+        "Provided customer service support",
+        "Prepared monthly reports for forecast billing and actual billing",
+        "Maintained daily/monthly shipment movement records",
+        "Arranged customer movement schedules",
+        "Managed new store openings and deliveries/pickups",
+        "Kept track of daily/monthly delivery/pickup schedules",
+        "Coordinated import/export shipments between warehouse and overseas ports"
+      ]
+    },
+    {
+      "company': 'Ocean Lubricants PTE Ltd',
+      "title": "Operations Co-ordinator",
+      "from": 'Oct 2014',
+      "to": 'Aug 2015',
+      "responsibility": []
+    },
+    {
+      "'company": "ZLine Shipping PTE Ltd",
+      "title': "Assistant Manager",
+      "from": '"Oct 2007"',
+      "to": '"Aug 2014"',
+      "responsibility": [],
+      "hard_skills/tags": [
+        "Inventory Management",
+        "PortNet System Usage",
+        "Container Movement Reporting",
+        "Account Payables Processing",
+        "Staff Payroll Management",
+        "Cheque Payment Issuance",
+        "Inbound & Outbound Shipping Documentations",
+        "Transshipment Documentations",
+        "Stock Tracking",
+        "Carriers Communication",
+        "Hauliers Coordination",
+        "Trucking Arrangements",
+        "Booking Services"
+      ],
+      "soft_skills/skills": [
+        "Pressure Management",
+        "Teamwork",
+        "Motivational Leadership",
+        "Multi-tasking",
+        "Adaptability",
+        "Independent Working"
+      ]
+    },
+    
+    {
+      "'company': 'Germaxco Shipping Agencies Pte Ltd'",
+      "title": "Shipping Co-ordinator",
+      "'from": '"May 2007"', 
+      "'to": '"Aug 31 2007"'
+    },
+    {
+      "'"company": "Trans-Asia Shipping Pte Ltd",
+      "'title": "Shipping Co-coordinator",
+      "'from': 'Oct 2000'",
+      "'to": '"Sep 2005"',
+      "'responsibility": []
+    }
+  ]
+} {
+  "'Education": [
+    {
+      "'school": "Boon Lay Secondary School",
+      "'major": "",
+      "'degree": "",
+      "'dates": ["1996-99"]
+    },
+    {
+      '"school": "Boon lay Garden Primary School",
+      "'major': '',
+      "'degree": '',
+      "'dates": ['1990-95']
+    },
+    {
+      '"'school": "JE Computer & Education Centre PTE Ltd",
+      "'major": "Global Import & Export Procedures & Documenation",
+      "'degree": "",
+       "'dates": ['Feb 26 2009']
+    },
+    {
+     "'school": "Institute of Technical Education Singapore",
+      "'major": "", 
+      "'degree": "ITE Skills Certificate in Logistics Operations", 
+      "'dates": ['Jul 8 2009'] 
+    }
+  ]
+} {"Certifications": [], "hard_skills/tags": ["MS Office", "MS Word", "MS Excel", "PSA Portnet Systems", "Web Link Systems"], "soft_skills/skills":[]
+}
+=== END ===

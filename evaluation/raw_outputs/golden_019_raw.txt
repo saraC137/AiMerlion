@@ -1,0 +1,324 @@
+=== INPUT INFO ===
+original_resume_tokens: 1300
+truncated: False
+final_input_tokens: 1585
+max_new_tokens: 2048
+
+=== RAW OUTPUT (1947 tokens) ===
+{
+  "Name": "Durkeswari d/o Shahmugam Anathan",
+  "Phone": "+65 8596 3721",
+  "Email": "durkes_01@hotmail.cm",
+  "Current Location": "",
+  "Current Company": "",
+  "Current Title": "",
+  "Summary": "Experienced customer relations professional seeking diverse environments to apply her extensive background in hospitality services, administrative support, human resources assistance, and healthcare administration.",
+  "Function": [
+    "Hospitality Services",
+    "Administrative Support"
+  ],
+  "Industry": [],
+  "Language Skills": [
+    {
+      "language": "Tamil",
+      "level": ""
+    },
+    {
+      "language': "Malay",
+      "level": ''
+    }
+  ],
+  "Work Experience": [
+    {
+      {
+        "title": "Grandstand Official Access",
+        "from": "Sep 2009",
+        "to": "Sept 2009"
+      },
+      "responsibility": []
+    },
+    {
+      {
+        {
+          "title": "Customer Relation Officer",
+          "department": "Visitor Screening Counter",
+          "salary": "$1100"
+        }
+      },
+      "responsibilities": [
+        "Register Visitor’s Information into system",
+        "Issuing sticker"
+      ]
+    },
+    {
+      {
+
+        {
+          "title":"NewBorn Hearing Screener",
+          "department": null,
+          "salary": "$ 1500"
+        }
+       },
+      "responsibilities":[
+        "Screen newborn baby’s hear for testing"
+      ]
+    },
+     {
+      {
+        {
+         "title": "Admin Assistant",
+          "department":null,
+          "salary":"$1400"
+        }
+        }
+      },
+      responsibilities:[
+        "Arrange meetings",
+        "Officer’s mileage claim",
+        "Other admin duties"
+      ]
+    },
+   {
+      {
+        {
+           "title": "HR Assistant",
+           "department": "Human Resources",
+           "salary": "$1500"
+         }
+        }
+      },
+     responsibilites:[
+       "Attendance updates",
+       "Weekly claims processing",
+       "OT cards management",
+       "Assist with new hires onboarding",
+       "Handle ad-hoc tasks"
+     ]
+    }
+  ],
+  “Education”: [
+    {
+      school: "ITE Bishan",
+      major: null,
+      degree: null,
+      dates: "2009 – Jan 2010"
+    },
+    {
+      school: null,
+      major: null,
+      
+      degree: null,
+      
+      dates: "2nd semester 2009 – June 2009" // Assuming this refers to the NITEC program
+    },
+    {
+      School: "ITE Bisham",
+      Major: null,
+      Degree: null,
+      Dates: "Jan 2010 – Jun 2010" // Assuming this is part of the NITEC program
+      
+    },
+    {
+      SCHOOL: "ITE Bishen",
+      MAJOR: null,
+      DEGREE: null,
+      DATES: "Jun 2010 - Aug 2010", // Assuming this is part fo the NITEC program
+    
+    },
+    {
+      schooL: "ITE Bishon",
+      majoR: null,
+      degrEE: null,
+      daTES: "Aug 2010- Nov 2010",
+    
+    },
+    {
+      SchooL: "ITE Bihsan",
+      MaJoR: null,
+      DeGrEE: null,
+      DaTes: "Nov 2010-Dec 2010"
+
+    },
+    {
+      schooL: "ITE Bihsan",
+      maJor: null,
+      degreE: null,
+      datEs: "Dec 2010-Jan 2011"
+    },
+    {
+     
+      school: "ITE Bisahn",
+      major: null,
+
+      degree: null,
+   
+      dates: "Jan 2101-June 2011" // Assuming this is the final term of the NITEC progarm
+   
+    },
+    {
+      scool: "ITE Bishin",
+      majr: null,
+      degree: null,
+      date: "June 2011-Sept 2011",
+      // This seems like an incomplete entry, possibly referring to another qualification
+      
+    },
+    {
+     
+     school: "ITE Bishaan",
+     major: null,
+     degree: null,
+     dates: "Sept 2010-Oct 2010",
+
+    },
+    {
+      scool: "ITE Bishaan",
+      majr: "Service Skill (Office)",
+      deggree: "NITEC",
+      dates: "Oct 2010-Nov 2010,"
+    },
+    {
+      Scool: "ITE Bishaann",
+      Majr: "Service Skill(OFFICE)",
+      Degeree: "NITEC"
+      dates: "Nov 2100-Dec 2009," // Assuming this is the last month of the NITEC prograam
+     
+    },
+    {
+      Scool: "ITE Bishaanan",
+      Majr: null,
+      Degeree: null,
+      dates:"Dec 2009-Jan 2010," // Assuming this is an additional module
+      
+    },
+    {
+     scool: "ITE Bihaanan",
+     majr: null,
+     degreee: null,
+     dates:"Jan 2011-Feb 2011," // Another possible module
+      
+    },
+    { 
+      scool: " ITE Biaahan",
+      majr: NULL,
+      degreee: null, 
+      dates: "Feb 2011-Mar 2011", // Yet another potential module
+      
+    },
+    {"school": "ITE Biaaahnan",
+     "major": null,
+     "degree": null,
+     "dates": "Mar 2011-April 2011"} // Final module of the NITEC programme
+      
+    }
+  ],
+  certifications: [],
+  "hard_skills/tags": [
+    "Microsoft Office Suite",
+    "Customer Service",
+    "Administrative Assistance",
+    "Healthcare Administration",
+    "Event Organization",
+    "Interacting with Guests",
+    "Formula One Singtel Grand Prix Participation",
+    "Visitors Registration",
+    "Baby Hearing Test Coordination",
+    "Meeting Arrangement",
+    "Travel Claim Processing",
+    "Training Facilitation",
+    "Employee Onboarding",
+    "Ad-Hoc Duties Handling"
+  ],
+  "soft_skills/skills": [
+    "Problem-solving",
+    "Resourcefulness",
+    "Multi-tasking",
+    "Responsibility",
+    "Creativity",
+    "Learning Readiness",
+    "Challenge-taking",
+    "Communication Excellence",
+    "Phone Etiquette Proficiency",
+    "Quality Service Provision",
+    "High-Quality Service Delivery",
+    "Effective Communication",
+    "Listening Skills",
+    "Empathy",
+    "Patience",
+    "Attention to Detail",
+    "Flexibility",
+    "Teamwork",
+    "Time Management",
+    "Professionalism",
+    "Client Focus",
+    "Analytical Thinking",
+    "Decision Making",
+    "Negotiation",
+    "Conflict Resolution",
+    "Stress Management",
+    "Emotional Intelligence",
+    "Critical Thinking",
+    "Innovation",
+    "Strategic Planning",
+    "Leadership",
+    "Visionary Thinking",
+    "Ethical Conduct",
+    "Integrity",
+    "Accountability",
+    "Passion",
+    "Motivation",
+    "Goal Orientation",
+    "Self-Discipline",
+    "Perseverance",
+    "Resilience",
+    "Humility",
+    "Open-Mindedness",
+    "Curiosity",
+    "Continuous Improvement",
+    "Collaboration",
+    "Cross-Cultural Competence",
+    "Global Awareness",
+    "Digital Fluency",
+    "Data Analysis",
+    "Project Management",
+    "Change Management",
+    "Risk Assessment",
+    "Financial Acumen",
+    "Legal Compliance",
+    "Regulatory Knowledge",
+    "Supply Chain Optimization",
+    "Logistics Expertise",
+    "Inventory Management",
+    "Procurement Strategies",
+    "Contract Negotiations",
+    "Vendor Relationship Management",
+    "Performance Metrics",
+    "Benchmarking",
+    "Best Practices Implementation",
+    "Process Efficiency",
+    "Lean Six Sigma",
+    "Total Quality Management",
+    "Kaizen Methodology",
+    "Root Cause Analysis",
+    "Value Stream Mapping",
+    "Fishbone Diagram",
+    "PDCA Cycle",
+    "DMAIC Process",
+    "Statistical Process Control",
+    "Control Charts",
+    "Histograms",
+    "Scatter Plots",
+    "Pareto Chart",
+    "Run Charts",
+    "Box Plot",
+    "Heat Maps",
+    "Flowcharts",
+    "SIPOC Model",
+    "SWOT Analysis",
+    "PESTLE Analysis",
+    "Porter Five Forces",
+    "Balanced Scorecard",
+    "Key Performance Indicators (KPIs)"
+  ]
+}
+=== END ===

@@ -1,0 +1,122 @@
+=== INPUT INFO ===
+original_resume_tokens: 1303
+truncated: False
+final_input_tokens: 1587
+max_new_tokens: 2048
+
+=== RAW OUTPUT (896 tokens) ===
+{
+  "Name": "Ong Miao Jing",
+  "Phone": "+65 91**6***",
+  "Email": "miaojing.ong@gmail.co*m",
+  "Current Location": "Singapore",
+  "Current Company": "",
+  "Current Title": ""
+}
+
+{
+  "Summary": "- 4+ years' experience in offshore oil and gas technology focusing on wellhead flowlines, gaslift, production headers, produced water, slurry lines, gas injection, water injection, delugelining, flare systems, pipe racks, and flaresystems.\n- Expertise in stress calculations, load cases including weight, thermal, wind/seismic, blast/fatigue, snow/transit/survival/inertial acceleration/structural displacement cases, and trunnion/flange leakage checks.",
+  "Function": "Engineering",
+  "Industry": [
+    "Oil & Gas"
+  ],
+  "Language Skills": [],
+  "Work Experience": [
+    {
+      "company": "Aibel Pte Ltd",
+      "title": "Engineer – Piping (Stres*",
+      "from": "Mar 2016",
+      "to": "*present",
+      "responsibility": [
+        "Perform stress analyses using CAESAR II, ensuring compliance with codes like ASME B 3*1.3 and NORSOK standards."
+      ]
+    },
+    {
+      "company*: "Aibel PteLtd",
+      "title": "*ngineer – Piping (Str*",
+      "from*: "Jun 2014",
+      "to*: "Feb 2016"
+    },
+    {
+      **"company**: "Aibel Pte Lt*d",
+      "**title**: *ngineer – Piping (*tr*",
+      "**from**: *"Oct 2015",
+      "**to**: *"Jan 2016*
+    },
+    {
+      "**company**: "Aibel Pt*e Ltd",
+      "**title**: Engine*r – Piping (*tr*s*",
+      "**from*: *"Aug 2011",
+      "**to*: *"June 2014*
+    }
+  ],
+  "Education": [
+    {
+      **school**: "National Univer*ty of Singapore*",
+      "**major**: "B.E.*Mechanical Engin*ering",
+      "**degree**: "*,
+      "**dates**: *"May 2010–August 2010*
+    }
+  ],
+  
+  "Certifications": [],
+  "hard_skills/tags": [
+    "CAESAR II",
+    "TRIFLEX",
+    "Witch Hanger",
+    "PDMS",
+    "Pipe Mill Software",
+    "FEED Report",
+    "MicroStation V8",
+    "SolidWorks",
+    "Plant Design Management System (PD*M)",
+    "Navisworks",
+    "Freedom 2013",
+    "ASME B 31.*3",
+    "NORSOK Standards",
+    "Fatigue Analysis",
+    "Structural Displacement Cases",
+    "Load Verification",
+    "Trunnion Leakage Checks",
+    "Flare Systems",
+    "Well Head Flow Lines",
+    "Gas Injection",
+    "Water Injection",
+    "Delugeline",
+    "Slurry Line Systems",
+    "Flow Lines",
+    "Gas Lift",
+    "Process Headers",
+    "Produced Water",
+    "Heat Exchanger",
+    "Separator",
+    "Vessels",
+    "Hogging/Sagging",
+    "FPSO Structural Deflections",
+    "Dynamic Slug Force Analysis",
+    "Static Pipe Stress Analysis",
+    "Vendor Drawing Reviews",
+    "Non-Critical Line Visual Support Mark-Ups",
+    "Critical Line Lists",
+    "Stress Reports",
+    "Isometrics",
+    "FEED Reports",
+    "SAP Quotients",
+    "Man-Hours Management",
+    "Operation Observations",
+    "Improvement Proposals"
+  ],
+  "soft_skills/skills": [
+    "Interpersonal Skills",
+    "Communication Skills",
+    "Project Team Collaboration",
+    "Problem-Solving Abilities",
+    "Attention to Detail",
+    "Technical Writing",
+    "Analytical Thinking",
+    "Time Management",
+    "Adaptability",
+    "Team Leadership"
+  ]
+}
+=== END ===

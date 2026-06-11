@@ -1,0 +1,135 @@
+=== INPUT INFO ===
+original_resume_tokens: 771
+truncated: False
+final_input_tokens: 1056
+max_new_tokens: 2048
+
+=== RAW OUTPUT (837 tokens) ===
+{
+  "Name": "Nur Shali Hutabarat",
+  "Phone": "+65 8298 5878",
+  "Email": "shali.hutabarat@outlook.com",
+  "Current Location": "Singapore",
+  "Summary": "",
+  "Function": [
+    "Sales"
+  ],
+  "Industry": [],
+  "Language Skills": [
+    {
+      "language": "Bahasa Melayu",
+      "level": ""
+    },
+    {
+      "language":
+        "Inggeris",
+      "level": "both spoken and written"
+    }
+  ],
+  "Work Experience": [
+    {
+      "_id": "$oid",
+      "company": "Hotel 81 Management PTE LTD",
+      "title": "Senior Front Office Executive",
+      "from": "October 2013",
+      "to": "September 2015",
+      "responsibility": [
+        "- Responsible for check-in and check-out of guests",
+        "- Assist customers in their individual needs",
+        "- Able to handle guest’s requests & inquiries",
+        "- Handles bookings via email & travel agents",
+        "- Answer all internal/external calls",
+        "- Maintain cleanliness of guest’s rooms & public areas",
+        "- Maintenance checks (e.g., air conditioner)"
+      ]
+    },
+    {
+      "_id$: "$oid",
+      "title": "(Sales Assistant)",
+      "company": "Sports Fashion Pte Ltd",
+      "from": null,
+      "to": "May 2014",
+      "responsibility":[
+        "- Provide customer service",
+        "- Assist customers individually",
+        "- Attend to phone calls & enquires"
+      ]
+    },
+    // Add more work experience entries here...
+  ],
+  "Education": [
+    {
+      _id: "$oid",
+      school: "Kaplan Higher Education Institute",
+      major: "Hospitality & Tourism Management",
+      degree: "Diploma in Commerce",
+      dates: "2012 – Jan 2013"
+    },
+    {
+      _id:"$oid",
+      school: 'National Service',
+      major: '',
+      degree: '',
+      dates: 'Sep 2009 – Aug 2011'
+    },
+    {
+      school: "ITE College East (Semi)",
+      major: "Mechanical Technology",
+      degree: "Nitec",
+      dates: "Aug 2007 – Jul 2009"
+    },
+    {
+    	school: "Teck Whye Secondary Scholl",
+      major: "",
+      degree: "Gce N-Level",
+      dates: "Jul 2003 - May 2006"
+    }
+  ],
+  
+  "Certifications": [],
+  "hard_skills/tags": [
+    "customer service",
+    "sales",
+    "cashier",
+    "food preparation",
+    "stage management",
+    "props handling",
+    "costume changes",
+    "fly rail operation",
+    "general labor",
+    "cleanliness maintenance",
+    "air conditioning inspection",
+    "phone call handling",
+    "travel agent communication",
+    "guest request handling",
+    "internal call answering",
+    "public area cleaning",
+    "room service coordination",
+    "freelance job",
+    "part-time employment",
+    "national service completion",
+    "dispatch rider duties",
+    "delivery order handling",
+    "customer assistance",
+    "prop change support",
+    "scene reset",
+    "stage setting",
+    "lighting control",
+    "sound system operation",
+    "technical crew role",
+    "theatrical production involvement",
+    "ticket sales",
+    "event planning",
+    "venue setup",
+    "security patrol",
+    "installation protection",
+    "infantry training",
+    "close combat training",
+    "basic military training",
+    "advance close combat training",
+    "intermediate close combat training",
+    // Add more skills tags here if needed
+  ],
+  "soft_skills/skills": []
+}
+=== END ===

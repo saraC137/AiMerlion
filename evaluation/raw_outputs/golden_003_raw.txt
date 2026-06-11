@@ -1,0 +1,69 @@
+=== INPUT INFO ===
+original_resume_tokens: 843
+truncated: False
+final_input_tokens: 1128
+max_new_tokens: 2048
+
+=== RAW OUTPUT (437 tokens) ===
+{
+  "Name": "Nigel Tan Kee Miann",
+  "Phone": "+65 9815 3946",
+  "Email": "nigeltkm@gmail.com",
+  "Current Location": "Singapore",
+  "Current Company": "",
+  "Current Title": ""
+} {
+  "Summary": "Experienced Financial Consultant specializing in policy reviews, client management, and network building within the insurance sector.",
+  "Function": [
+    "Finance"
+  ],
+  "Industry": [
+    "Insurance"
+  ],
+  "Language Skills": [
+    "English",
+    "Chinese"
+  ]
+} {
+  "Work Experience": [
+    {
+      "company": "Prudential Assurance Company Singapore Pte Ltd",
+      "title": "Financial Consultant",
+      "from": "Feb 2017",
+      "to": "Present",
+      "responsibility": [
+        "Performed comprehensive policy reviews."
+      ]
+    },
+    {
+      "company': 'TWH Consultancy PteLtd',
+      "title": "Business Consultant",
+      "from': 'Jan 2016',
+      "to": 'Jan 2020',
+      "responsibility": []
+    },
+    {
+      "'company": 'SKF Asia Pacific Pte Ltd',
+      "title": 'Accounts Assistant',
+      "from": 'Dec 2014',
+      "to": "Nov 2015",
+      "responsibility":[]
+    }
+  ]
+} {
+  "'Education": [
+    {
+      "'school": 'Singapore Polytechnic',
+      "major": '',
+      "degree": 'Diploma in Banking and Finance',
+      "dates": 'Apr 2009'
+    },
+    {
+      '"school": 'Deyi Secondary School',
+      "major": "",
+      "degree": 'GCE “O” Level',
+      "dates": ''
+    }
+  ]
+} {"Certifications": [], "hard_skills/tags": ["Treasury Options", "Macroeconomic Analysis", "Goal Setting and Decision Making"], "soft_skills/skills": []}
+=== END ===

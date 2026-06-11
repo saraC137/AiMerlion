@@ -1,0 +1,203 @@
+=== INPUT INFO ===
+original_resume_tokens: 985
+truncated: False
+final_input_tokens: 1270
+max_new_tokens: 2048
+
+=== RAW OUTPUT (1292 tokens) ===
+{
+  "Name": "Noraini binti Mohamed",
+  "Phone": "+65 8444 8888",
+  "Email": "",
+  "Current Location": "Singapore",
+  "Current Company": "",
+  "Current Title": "",
+  "Summary": "Experienced finance and administration professional with over two decades of experience across multiple sectors including oil and gas, insurance, and education.",
+  "Function": [
+    "Administration"
+  ],
+  "Industry": [
+    "Oil & Gas",
+    "Insurance",
+    "Education"
+  ],
+  "Language Skills": [
+    {
+      "language": "English",
+      "fluency": ""
+    },
+    {
+      "language': "Malay",
+      "fluency': 'Fluent'
+    }
+  ],
+  "Work Experience": [
+    {
+      "_id": "$oid",
+      "company": "Raffles Girls School (Secondary)",
+      "title": "Administrative Assistant",
+      "from": "Jul 2013",
+      "to": "Dec 2014",
+      "responsibility": [
+        "Screened and transferred calls",
+        "Monitored deliveries of goods",
+        "Prepared stationery needs for meetings",
+        "Maintained lost-and-found counter",
+        "Provided assistance during sick bay visits",
+        "Notified teachers via email about parental notifications",
+        "Supported PRGS activities administratively",
+        "Ordered newspapers for departments",
+        "Managed incoming/outgoing mail",
+        "Placed stationery orders"
+      ]
+    },
+    {
+      "_id$: "$oid",
+      "Company": "NOV ASEP Elmar",
+      "Title": "Finance & Admin Assistant/Sales Cum Admin Assistant/Receptionists",
+      "From": "Nov 2002",
+      "To": "May 2012",
+      "Responsibility": [
+        "Processed sales orders through Sage system",
+        "Sent sales acknowledgements",
+        "Prepared quotations and tenders",
+        "Handled customer inquiries and complaints",
+        "Supervised delivery schedules",
+        "Generated certificates of origin",
+        "Updated sales documentation systems",
+        "Drafted invoices",
+        "Compiled weekly/monthly sales reports",
+        "Recorded meeting minutes",
+        "Coordinated production-engineering processes",
+        "Answered phones and greeted guests",
+        "Kept customer-supplier profiles updated",
+        "Scanned documents and sent emails",
+        "Ensured cleanliness of facilities",
+        "Set up meeting spaces",
+        "Restocked office supplies",
+        "Handled ad-hoc administrative tasks assigned by supervisors"
+      ]
+    },
+     {
+      "_id$: ": "$oid",
+      "COMPANY": "NTUC Income",
+      "TITLE": "Finance & Admin Asst",
+      "FROM": "JUL 2001",
+      "TO": "June 2002 (Contract Basis)",
+      "RESPONSIBILITY": [
+        "Perfomed data entry",
+        "Issued policyholder checks",
+        "Prepared financial statements/reports",
+        "Responded to policyholder inquiries",
+        "Filed documents",
+        "Completed ad-hoc administrative duties"
+      ]
+    }
+  ],
+  “Education”: [
+    {
+      "school": "Institute of Technical Education Bisham",
+      "major": "",
+      "degree": "Certificate in Business Studies (Accountig)",
+      "dates": "1999-2001"
+    },
+    {
+      “school”: "Institute of Technical Edcuation Bisham",
+      “major”: "",
+      “degree”: "Certificat in Office Skills",
+      “dates”: "1998-1999"
+    },
+    {
+     “school”: "Springfield Secondary School",
+     “major”: "",
+     “degree”: "GCE O Levels",
+     “dates”: "1494-1997"
+   }
+],
+“certifications”: [],
+“hard_skills/tags”: [
+  "MS Office Suite",
+  "Sage Software",
+  "MSoft Accounting System",
+  "Financial Reporting",
+  "Sales Order Management",
+  "Customer Service",
+  "Document Filing",
+  "Meeting Coordination",
+  "Office Supplies Management",
+  "Travel Arrangements",
+  "Event Planning",
+  "Vendor Communication",
+  "Invoice Preparation",
+  "Expense Tracking",
+  "Timekeeping",
+  "Budget Management",
+  "Inventory Control",
+  "Procurement",
+  "Logistics Support",
+  "Client Relationship Management",
+  "Compliance Monitoring",
+  "Quality Assurance",
+  "Performance Evaluation",
+  "Risk Assessment",
+  "Supply Chain Optimization",
+  "Project Management",
+  "Resource Allocation",
+  "Operational Efficiency",
+  "Cost Reduction Strategies",
+  "Revenue Growth Strategies",
+  "Market Analysis",
+  "Competitive Intelligence Gathering",
+  "Negotiation Tactics",
+  "Strategic Partnerships",
+  "Cross-functional Collaboration",
+  "Change Management",
+  "Process Improvement",
+  "Continuous Learning",
+  "Adaptability",
+  "Problem-solving",
+  "Decision-making",
+  "Critical Thinking",
+  "Attention to Detail",
+  "Organizational Skills",
+  "Multi-tasking",
+  "Stress Management",
+  "Patience",
+  "Persistence",
+  "Flexibility",
+  "Creativity",
+  "Empathy",
+  "Active Listening",
+  "Conflict Resolution",
+  "Teamwork",
+  "Leadership",
+  "Motivation",
+  "Integrity",
+  "Ethical Conduct",
+  "Professionalism",
+  "Resilience",
+  "Self-motivation",
+  "Goal Orientation",
+  "Analytical Thinking",
+  "Numeracy",
+  "Verbal Communication",
+  "Written Communication",
+  "Presentation Skills",
+  "Public Speaking",
+  "Interpersonal Skills",
+  "Emotional Intelligence",
+  "Cultural Sensitivity",
+  "Global Awareness",
+  "Digital Literacy",
+  "Cybersecurity Knowledge",
+  "Blockchain Understanding",
+  "Artificial Intelligence Familiarity",
+  "Machine Learning Basics",
+  "Big Data Analytics",
+  "Cloud Computing Fundamentals",
+  "Internet of Things (IoT)"
+],
+
+"soft_skills/skills": []
+}
+=== END ===

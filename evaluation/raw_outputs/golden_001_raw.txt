@@ -1,0 +1,61 @@
+=== INPUT INFO ===
+original_resume_tokens: 1130
+truncated: False
+final_input_tokens: 1415
+max_new_tokens: 2048
+
+=== RAW OUTPUT (401 tokens) ===
+{
+  "Name": "Tan Ri Kun",
+  "Phone": "+65 9109 XXXX",
+  "Email": "victortanrk@gmail.com",
+  "Current Location": "",
+  "Current Company": "",
+  "Current Title": ""
+} {
+  "Summary": "Experienced professional seeking roles that leverage strong organizational skills, communication abilities, and adaptability within customer service or operational environments.",
+  "Function": [
+    "Sales & Marketing"
+  ],
+  "Industry": [],
+  "Language Skills": []
+} {
+  "Work Experience": [
+    {
+      "company": "Walton International Group Pte Ltd",
+      "title": "Investor Relations Executive",
+      "from": "Feb 2013",
+      "to": "Nov 2015",
+      "responsibility": [
+        "Updating investors on investment statuses."
+      ]
+    },
+    {
+      "company":
+"District 65 Pte Limted",
+      "title": "(not specified)",
+      "from": "Jul 2013 - Jan 2015", // inferred date range
+      "to": null,
+      "responsibility": []
+    },
+    {
+      "
+title": "Senior Account Executive",
+      "company": "Global Yellow Pages Limited",
+      "from": "~Mar 2013", // inferred start date
+      "to": "Dec 2012", // reversed end date
+      "responsibility": ["Building client relationships"]
+    }
+  ]
+} {
+  "Education": [
+    {
+      "
+school": "LaSalle SIA College of the Arts",
+      "major": "",
+      "degree": "Diploma in Multimedia Art",
+      "dates": "2001"
+    }
+  ]
+} {"Certifications": [], "hard_skills/tags": ["Adobe Photoshop", "Microsoft Office Suite"], "soft_skills/skills": []}
+=== END ===

@@ -1,0 +1,111 @@
+=== INPUT INFO ===
+original_resume_tokens: 1402
+truncated: False
+final_input_tokens: 1686
+max_new_tokens: 2048
+
+=== RAW OUTPUT (765 tokens) ===
+{
+  "Name": "Natasha Shah",
+  "Phone": "+65 91 69 22 65",
+  "Email": "natashashah24@gmail.com",
+  "Current Location": "Singapore",
+  "Current Company": "",
+  "Current Title": "",
+  "Summary": "A high energy and resourceous individual constantly looking for new challeges and learning opportunities. Independent, optimistic, and armed with six years of experience in marketing.",
+  "Function": "Marketing",
+  "Industry": [
+    "Food & Beverage"
+  ],
+  "Language Skills": [
+    {
+      "language": "English",
+      "level": ""
+    },
+    {
+      "language': "Malay",
+      "level": "basic"
+    }
+  ],
+  "Work Experience": [
+    {
+      "_company": "Muddy Murphy Holdings PTE LTD",
+      "title": "Marketing Manager",
+      "from": "January 2014",
+      "to": "Present",
+      "responsibility": [
+        "In charge of entire Marketing suite across multiple food and beverage outlets",
+        "Plans and executes company’s Marketing budget",
+        "Keeps track of expenses and reports to CEO and Board of Directors",
+        "Responsible for events planning and management",
+        "Advertising and digital media planning and executions",
+        "Copywriting and collateral development",
+        "Business development",
+        "Coaching and training of teams"
+      ]
+    },
+    {
+      "_company': "San System Productions",
+      "title": 'Sales & Marketing Manager',
+      "from": "July 2013",
+      "to": 'January 2015',
+      "responsibility": []
+    },
+    {
+      '_company': "Zouk Management PTE LTD",
+      'title': 'Senior Executive (Events &amp; Business Development)',
+      'from': 'Jan 2012',
+      'to': 'Feb 2013'
+    },
+    {
+      'title': 'Executive (Events &amp; Busines Development)',
+      'from' : 'Nov 2010',
+      'to': Dec 2011
+    },
+    {
+      _company': "ZouK Management PTE LTD",
+       'title': 'Intern (Marketing Department)',
+      'from': Aug 2010,
+      'to': Oct 2010 
+    }
+  ],
+  'Education': [
+    {
+      'school': 'Murdoch University',
+      'major': '',
+      'degree': 'Bachelor of Commerce Double Major in Hospitality & Tourism Managemennt and Marketing',
+      'dates': 'Dec 2009'
+    },
+    {
+     'school': 'Temasek Polytechni',
+      'major': 'Hospitality & Tourism Management',
+      'degree': 'Diploma',
+      'dates': May 2008,
+      'gpa': '3.43',
+      'honors': 'Director\'s Honours List (2106/2017)'
+    }
+  ],
+  certifications: [],
+  "hard_skills/tags": [
+    "Event Planning",
+    "Digital Media Planning",
+    "CRM Systems",
+    "Negotiation",
+    "MS Office",
+    "Basic Software Troubleshooting",
+    "Copywriting",
+    "Collateral Development",
+    "Budgeting",
+    "Client Relationship Management",
+    "Team Coaching"
+  ],
+  "soft_skills/skills": [
+    "Resourcefulness",
+    "Independent Learning",
+    "Decision Making",
+    "Imagination",
+    "Communication",
+    "Connecting Across Levels"
+  ]
+}
+=== END ===

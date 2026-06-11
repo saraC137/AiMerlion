@@ -1,0 +1,16 @@
+=== INPUT INFO ===
+original_resume_tokens: 729
+truncated: False
+final_input_tokens: 1014
+max_new_tokens: 2048
+
+=== RAW OUTPUT (61 tokens) ===
+{
+  "Name": "Lim Bee Hua",
+  "Phone": "+65 9113 0200",
+  "Email": "bee.happy.house@gmail.cm",
+  "Current Location": "",
+  "Current Company": "",
+  "Current Title": ""
+}
+=== END ===

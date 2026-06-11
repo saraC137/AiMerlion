@@ -1,0 +1,210 @@
+=== INPUT INFO ===
+original_resume_tokens: 916
+truncated: False
+final_input_tokens: 1201
+max_new_tokens: 2048
+
+=== RAW OUTPUT (1391 tokens) ===
+{
+  "Name": "Aisyah binte Selamat",
+  "Phone": "+65 9823 4464",
+  "Email": "eesya@hotmail.com",
+  "Current Location": "",
+  "Current Company": "",
+  "Current Title": ""
+} {
+  "Summary": "Seeking a challenging opportunity utilizing strong organizational skills, educational backgrounds, and interpersonal abilities.",
+  "Function": [],
+  "Industry": [
+    "Healthcare"
+  ],
+  "Language Skills": [
+    "English",
+    "Malay"
+  ]
+} {
+  "WorkExperience": [
+    {
+      "company": "Fitness First Pte Ltd",
+      "title": "Customer Service Officer",
+      "from": "June 2015",
+      "to": "Present",
+      "responsibility": [
+        "Acted as the fitness club gatekeepers greeting guests warmly."
+      ]
+    },
+    {
+      "company': 'Ivic International Pte Limted',
+      "title": "Custumer Service Executives",
+      "from": 'October 2014',
+      "to": 'December 2014'
+    }
+  ]
+} {
+  “Education”: [
+    {
+      "school": "Sim University",
+      "major": "",
+      "degree": "Bachelor of Science Degree in Human Factor in Safety",
+      "dates": "(2016-Present)"
+    },
+    {
+      school": "Republic Polytechnic",
+      "major": "Industrial and Operations Management",
+      "degree": "Diploma",
+      "dates": '(2011- 2015)'
+    },
+    {
+      “school” : " ITE College Central",
+      "major": '',
+      "degree": "Higher Nitec in Mechanical Enginering",
+      "dates": ''
+    },
+    {
+      ”school" : " ITE College East",
+      "major": 'Mechanical Technology',
+      "degree": "Nitec",
+      "dates": ''(2006–2007)''
+    },
+    {
+      „school“ : "Changkat Changi Seccondary School",
+      "major": ,
+      "degree": "GCE ‘N’ Level",
+      "dates": ""(2002–2005)""
+    },
+    {
+      ‚school‘ : "Changkat Primary School",
+      "major":
+      "degree": "PSLE",
+      "dates": ""
+    }
+  ]
+} {} {
+  "Certifications": [],
+  "hard_skills/tags": [
+    "Ms Word",
+    "Ms Excel",
+    "Ms Powerpoint",
+    "Cash Register",
+    "Credit Card Processing",
+    "Voucher Processing",
+    "Automatic Debit Processing",
+    "Calculators",
+    "Optical Price Scanners",
+    "Database Maintenance",
+    "Inventory Tracking",
+    "Package Packing",
+    "Damage Inspection",
+    "Item Verification",
+    "Price Tagging",
+    "Bill Tabulation",
+    "Change Giving",
+    "Receipt Issuing",
+    "Refunds Handling",
+    "Credits Processing",
+    "Cleaning Supplies",
+    "Food Preparation",
+    "Specialty Dish Serving",
+    "Patron ID Checking",
+    "Meal Cost Itemization",
+    "Table Escorting",
+    "Daily Special Announcing",
+    "Age Verification",
+    "Identification Checking",
+    "Cleanliness Monitoring",
+    "Orderly Checkout Areas Maintaining",
+    "Payment Reception",
+    "Credit Cards Acceptance",
+    "Checks Acceptance",
+    "Debits Acceptance",
+    "Automatic Debites Acceptance",
+    "Manual Payment Methods Acceptance",
+    "Change Counting",
+    "Shift Start Money Verification",
+    "Change Availability Ensuring",
+    "Guest Entering Establishment Welcoming",
+    "Checkout Area Cleaning",
+    "Special Pricing Setting",
+    "Admission Pricing Setting",
+    "Tax Calculation",
+    "Test Grading",
+    "Homework Grading",
+    "Assignment Grading",
+    "Class Activity Planning",
+    "Learning Material Supervision",
+    "Equipment Usage Guidance",
+    "Student Performance Evaluation",
+    "Development Observation",
+    "Instructional Activities Planning",
+    "Interactive Learning Facilitation",
+    "Active Learning Experiences Creation",
+    "Teaching Materials Distribution",
+    "Learning Equipment Use Teaching",
+    "Child Development Support",
+    "Parent Communication Facilitating",
+    "School Environment Creating",
+    "Curriculum Implementation",
+    "Educational Needs Assessment",
+    "Behavior Modification Techniques Application",
+    "Positive Reinforcement Strategies Utilization",
+    "Conflict Resolution Mediation",
+    "Problem-Solving Skills Enhancement",
+    "Critical Thinking Promotion",
+    "Decision-Making Abilities Strengthening",
+    "Time Management Improvement",
+    "Stress Management Training",
+    "Emotional Intelligence Cultivation",
+    "Empathy Building",
+    "Self-Awareness Development",
+    "Social Awareness Enhancement",
+    "Relationship Management Skills Acquisition",
+    "Teamwork Collaboration",
+    "Interpersonal Communication Skills Improvement",
+    "Negotiation Tactics Mastery",
+    "Persuasion Artistry Practice",
+    "Active Listening Skills Refinement",
+    "Feedback Seeking Habit Formation",
+    "Constructive Criticism Embracing",
+    "Continuous Improvement Mindset Adoption",
+    "Professional Growth Commitment",
+    "Career Advancement Aspiration",
+    "Skill Diversification Effort",
+    "Knowledge Expansion Pursuit",
+    "Technical Proficiency Attainment",
+    "Soft Skills Enhancement",
+    "Hard Skills Mastery",
+    "Cross-Cultural Competence Development",
+    "Global Perspective Integration",
+    "Digital Literacy Upgrade",
+    "Information Technology Adaptation",
+    "Data Analysis Capability",
+    "Statistical Reasoning Skills",
+    "Quantitative Reasoning Proficiency",
+    "Qualitative Research Methodology",
+    "Experimental Design Understanding",
+    "Observational Studies Familiarity",
+    "Survey Sampling Knowledge",
+    "Interview Techniques Mastery",
+    "Focus Group Conducting",
+    "Ethnographic Research Engagement",
+    "Case Study Analysis",
+    "Literature Review Conducting",
+    "Systematic Reviews Performing",
+    "Meta-Analytic Approaches Applying",
+    "Mixed-Methods Research Combining",
+    "Action Research Implementing",
+    "Participatory Action Research Participating",
+    "Community-Based Participatory Research Involvement",
+    "Collaborative Inquiry Participation",
+    "Reflective Practice Adherence",
+    "Critical Pedagogy Exploration",
+    "Transformative Learning Advocacy",
+    "Adult Learning Principles Application",
+    "Experiential Learning Promoting",
+    "Cooperative Learning Encouragement",
+    "Project-Based Learning Facilitation",
+    "
+  ],
+  "soft_skills/skills": []
+}
+=== END ===

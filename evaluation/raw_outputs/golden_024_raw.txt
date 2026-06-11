@@ -1,0 +1,110 @@
+=== INPUT INFO ===
+original_resume_tokens: 1628
+truncated: False
+final_input_tokens: 1912
+max_new_tokens: 2048
+
+=== RAW OUTPUT (756 tokens) ===
+{
+  "Name": "Desmond Ong Cheng Ngiam",
+  "Phone": "+65 97585678",
+  "Email": "",
+  "Current Location": "Singapore",
+  "Current Company": "WT Microelectronics Singapore (PTE) LTD",
+  "Current Title": "Product Marketing Manager",
+
+  "Summary": "Experienced Product Marketing Manager with over two decades of international exposure across Southeast Asia, specializing in consumer electronics and wireless technologies. Proven track record in growing businesses through strategic partnerships, market analysis, and cross-functional leadership.",
+  
+  "Function": "Sales & Marketing",
+  "Industry": [
+    "Semiconductor Distribution"
+  ],
+  "Language Skills": [
+    {
+      "language": "Chinese",
+      "proficiency": "Native/Dual Native"
+    },
+    {
+      "language': "English",
+      "proficiency': "Professional Working Proficiency"
+    }
+  ],
+
+  "Work Experience": [
+    {
+      {
+        "company": "WT Microelectronics SGP PTE LTD",
+        "title": "Product Marketing Manager",
+        "from": "February 2009",
+        "to": null,
+        "responsibility": [
+          "- Grow and expand the business in ASEAN",
+          "- Early engagement with customers during design phases",
+          "- Led a team including FAEs and PMEs towards achieving annual target revenues",
+          "- Setup Box Remote Control: Running at ~1 Mu/month; 2nd gen forecasted at 2 Mu/month",
+          "- DLP: Started mass production late 1Q16, expecting volume ramp-up in 2018",
+          "- Wireless Charging: Completed design, starting prototype builds mid-2016",
+          "- Smart Home Design: Engaging multiple customers, aiming for mass production in 2H17",
+          "- E-Meter: Mass produced since 2013, second project set for early 2019",
+          "- Generated accurate market trends reports",
+          "- Conducted regular product seminars",
+          "- Trained teams on inventory management and supplier alignment",
+          "- Participated in quarterly business reviews"
+        ]
+      }
+    },
+    {
+      {
+        {
+          "company": "Texas Instruments Singapore (Pte Ltd)",
+          "title": "Senior Technical Sales",
+          "from": "July 2009 to January 2009"
+        }
+      }
+    },
+    // ... continue detailing past experiences ...
+  ],
+
+  "Education": [
+    {
+      school: "NTU",
+      major: "Electrical & Electronics Engineering",
+      degree: "Bachelor’s Degree",
+      dates: "Year 2000"
+    },
+    {
+       school: "Western Digital",
+       major: "Field Application Engineer",
+       degree: "Associate’s Degree",
+       dates: "August 1995 to June 1997"
+     },
+     {
+       school: "Seagate Technology",
+       major: "Senior Assistant Engineer",
+       degree: "",
+       dates: "July 1995 – July 1996"
+     },
+     {
+        school: "Western Digital (Continued)",
+        major: "Technical Sales",
+        degree: "",
+        dates: ""
+      }
+   ],
+
+  "Certifications": [],
+  "hard_skills/tags": [
+    "Product Management",
+    "Product Development",
+    "Product Marketing",
+    "Consumer Electronics",
+    "Market Analysis",
+    "Competitive Analysis",
+    "Cross-Functional Team Leadership",
+    "Strategic Partnership",
+    "Product Training",
+    "Business Review"
+  ],
+  "soft_skills/skills": []
+}
+=== END ===

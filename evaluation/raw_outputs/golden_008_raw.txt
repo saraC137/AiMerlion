@@ -1,0 +1,110 @@
+=== INPUT INFO ===
+original_resume_tokens: 503
+truncated: False
+final_input_tokens: 788
+max_new_tokens: 2048
+
+=== RAW OUTPUT (634 tokens) ===
+{
+  "Name": "Seah Sze Yong Kayson",
+  "Phone": "+65 94360481",
+  "Email": "kayson.seah@gmail.com",
+  "Current Location": "",
+  "Current Company": "",
+  "Current Title": ""
+} {
+  "Summary": "",
+  "Function": [],
+  "Industry": []
+} {
+  "Work Experience": [
+    {
+      "company": "StarHub",
+      "title": "Mobile Tester",
+      "from": "Jun 12",
+      "to": "Aug 13",
+      "responsibility": []
+    },
+    {
+      "company': 'Success Resources',
+      "title": "Event Crew",
+      "from": 'May 12',
+      "to": 'Jun 12',
+      'responsibility': []
+    },
+    {
+        "company": "Singapore Post",
+        "title": "Promoter",
+        "from": "2011",
+        "to": "2012",
+        "responsibility": []
+     },
+     {
+         "company": "Giant",
+         "title": "Sales Promoter",
+         "from": "2XX",
+         "to": "2XX",
+          "responsibility": []
+       },
+       {
+           "company": "Fish & Co.",
+           "title": "Waiter",
+           "from": "2XXXX",
+           "to": "2XXXX",
+            "responsibility": []
+         },
+         {
+             "company": "Breeks",
+             "title": "Waitress",
+             "from": "2XXX",
+             "to": "2XXX",
+              "responsibility": []
+           }
+   ]
+} {
+  "Education": [
+    {
+      'school': 'Murdoch University',
+      'major': '',
+      'degree': 'Bachelor of Arts In Tourism And Event Management',
+      'dates': '2013-2016'
+    },
+    {
+        'school': 'Temasek Polytechnique',
+        'major': '',
+        'degree': 'Diploma in Telecommunications',
+        'dates': '2XXX-2XXX'
+     },
+     {
+         'school': 'Ngee Ann Secondary School',
+         'major': '',
+         'degree': '',
+         'dates': '2XXXX-2XXXX'
+     },
+     {
+        'school': "Ngee Ann Primary School",
+        'major': '',
+         "degree": "",
+         "dates": "2XXXX-2XXXX"
+     }
+]
+} {
+  "Certifications": [],
+  "hard_skills/tags": [
+    "MS Windows",
+    "Word",
+    "Excel",
+    "Adobe Acrobat",
+    "PowerPoint",
+    "Class 3 Driving License",
+    "Inspiration 6.0",
+    "Microsoft Excel 20XX",
+    "Leadership Training Camp",
+    "Patrol Leader (Scouts)"
+],
+"soft_skills/skills": [
+    "Up Your Service Bronze",
+    "National Service Officer Cadet School"
+]
+}
+=== END ===

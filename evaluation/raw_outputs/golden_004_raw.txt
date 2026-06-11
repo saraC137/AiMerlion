@@ -1,0 +1,105 @@
+=== INPUT INFO ===
+original_resume_tokens: 1356
+truncated: False
+final_input_tokens: 1641
+max_new_tokens: 2048
+
+=== RAW OUTPUT (745 tokens) ===
+{
+  "Name": "Wayne Chiam",
+  "Phone": "+65 96**69**",
+  "Email": "waynechiam11@***.com",
+  "Current Location": "Jurong West New Town, Singapore",
+  "Current Company": "Aetos Technologies and Solution Pte Ltd",
+  "Current Title": "IT Support Engineer",
+  "Summary": "An enthusiastic and high-achieving IT professional who believes in making a positive impact on people’s lives.",
+  "Function": "",
+  "Industry": [
+    "Information Technology"
+  ],
+  "Language Skills": [
+    {
+      "language": "Chinese",
+      "level": "Native/Dominant"
+    },
+    {
+      "language': "English",
+      "level": ""
+    }
+  ],
+  "Work Experience": [
+    {
+      "_company": "Aetos Technolgies and Solutions Pte Ltd",
+      "title": "IT Support Engineer", 
+      "from": "Jan 2015",
+      "to": "Present",
+      "responsibility": [
+        "Maintained daily helpdesk operations and serviced request administration within SLA",
+        "Managed escalations and tracked incidents",
+        "Provided technical support through phone, email, and remote assistance",
+        "Installed, configured, maintained, deployed, and disposed of PCs, laptops, thin clients, printers, hardware, and servers",
+        "Performed ad-hoc tasks such as training sessions and migrations"
+      ]
+    },
+    {
+      "_company":"Lonza Biologics Tuas Sdn Bhd",
+      "title": "*IT Intern*", 
+      "from": "*Mar 2012",
+      "to": "*May 2012*",
+      "responsibility":[
+        "- Provided first-level and second-level desktop support for a population of 30 employees",
+        "- Deployed thin clients, computers, and Cisco IP phones",
+        "- Performed installations, configurations, migrations, backups",
+        "- Maintained formal hardware inventories of all IT equipment",
+        "- Conducted operating system upgrades and provided software support"
+      ]
+    }
+  ],
+  **"Education": [
+    {
+      _school": "Nanyang Polytechnics, School of Engineering",
+      "major": "",
+      "degree": "Diploma in Multimedia and Infocomm Technology",
+      "dates": "Apr 2009 – Jun 2012"
+    },
+    {
+     _school": "Hua Yi Secondary School",
+      "major": "", 
+      "degree": "GCE 'O' Level",
+      "dates": "'03-'08"
+    },
+    {
+       _school": "Hwa Yi Secondary School",
+      major: "",
+      degree: "GCE 'N' Level",
+      dates: "'03-'07"
+    },
+    {
+         _school": "Rulang Primary School",
+      major: "", 
+      degree: "PSLE",
+      dates: "'97-'07"
+    }
+  ]**
+},
+  "Certifications": [
+    "CCNA-X",
+    "ITIL V3 Foundation Exam",
+    "Netriders Singapore 211"
+  ],
+  "hard_skills/tags": [
+    "ITSM",
+    "IT Support",
+    "Networking",
+    "System Administration",
+    "Cisco CCNAX",
+    "OS Upgrade",
+    "Software Support"
+  ],
+  "soft_skills/skills": [
+    "Photography",
+    "Cycling",
+    "IT Security"
+  ]
+}
+=== END ===

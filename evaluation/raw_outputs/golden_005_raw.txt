@@ -1,0 +1,113 @@
+=== INPUT INFO ===
+original_resume_tokens: 2332
+truncated: False
+final_input_tokens: 2617
+max_new_tokens: 2048
+
+=== RAW OUTPUT (976 tokens) ===
+{
+  "Name": "Liáng Zeena bin Liáng",
+  "Phone": "+65 9111 7255",
+  "Email": "liangzeena@hotmail.com",
+  "Current Location": "",
+  "Current Company": "",
+  "Current Title": ""
+} {
+  "Summary": "Passionate professional seeking a challenging role within a progressive organization that offers ample opportunities for growth and development.",
+  "Function": [
+    "Administration"
+  ],
+  "Industry": [],
+  "Language Skills": [
+    {
+      "language": "English",
+      "level": "Fluent"
+    },
+    {
+      "language': "Mandarin",
+      "level": 'Fluent'
+    }
+  ]
+} {
+  "Work Experience": [
+    {
+      {
+        "company": "Di Yi F&B PTE LTD",
+        "title": "Administrator",
+        "from": "Oct 2011",
+        "to": "Present",
+        "responsibilities": [
+          "Providing clerical and administrative support",
+          "Managing time effectively",
+          "Self-discipline",
+          "Completing tasks on schedule",
+          "Handling stock records",
+          "Performing mystery shopping assignments",
+          "Designing mystery shopping forms and objectives",
+          "Collecting and keying in transportation claims",
+          "Generating reports",
+          "Participating in F1 race events"
+        ]
+      },
+      {
+        "company': "SASA Products",
+        "title": "- Retail Sales",
+        "from": 'Jun 2011',
+        "to": 'Mar 2012',
+        "responsibilities": []
+      },
+      {
+        {
+          "company": "Sheng Shiong",
+          "title": "- Mystery Shopping",
+          "from": "Jan 2012",
+          "to": "Apr 2012"
+        },
+        {
+          "company': "CEVA Logistics",
+          "title": '- Warehouse Staff',
+          "from": "Dec 2011 - Jan 2012", 
+          "responsibilities": [
+            "Monitoring progress",
+            "Taking photos",
+            "Creating instruction manuals",
+            "Preparing PowerPoint presentations",
+            "Writing self-progress reports",
+            "Constructing mind maps",
+            "Working flexibly across multiple sites"
+          ]
+        },
+        {
+          {
+            "company": "Universal Studios Singapore",
+            "title": "- Sales Associate",
+            "from": "Dec'2009",
+            "to": "'Jan 2010",
+            "responsibilities": [
+              "Retail training",
+              "Highest service standards",
+              "Housekeeping duties",
+              "Merchandising",
+              "Price memorization",
+              "Answering consumer inquiries",
+              "Assisting store leaders and assistants"
+            ]
+          },
+          {
+            "company': "STARHUB",
+            "title": '- Direct Sales',
+            "from": "Nov 2008",
+            "to": "Jan 210",
+            "Responsibilities": [
+              "Standing/walking for extended periods",
+              "Persistence through rejection",
+              "Improving communication skills",
+              "Withstanding long working hours"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+} {"Education": [{"school": "James Cook University", "major": "", "degree": "Bachelor of Psychology", "dates": "2013-16"}, {"school": "Nanyang Polytechnique", "major": "Business Management", "degree": "Diploma", "dates": "Aug 2010 - May 2013"}, {"school": "Melior International College", "major": "Psychology", "degree": "Advanced Diploma", "dates": "Sep 2012 - Dec 2012"}, {"school": "ERC Institute", "major": "Psycho-Business", "degree": "Certificate", "dates": "Jul 2011"}, {"school": "Outram Secondary School", "major": "", ""degree": "O-Level", "dates": "May 2006 - Apr 2009"}]} {"Certifications": [], "hard_skills/tags": ["time_management", "self_discipline", "customer_service", "cashiering", "stock_taking", "sales_techniques", "beauty_products_knowledge", "service_standards", "retail_sales_training", "universal_studio_singapore", "starhub_direct_sales"], "soft_skills/skills": ["effective_communication", "writing_skills", "teamwork", "adaptability", "flexibility", "initiative"]}
+=== END ===

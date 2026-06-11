@@ -1,0 +1,132 @@
+=== INPUT INFO ===
+original_resume_tokens: 7617
+truncated: True
+final_input_tokens: 6093
+max_new_tokens: 2048
+
+=== RAW OUTPUT (858 tokens) ===
+{
+  "Name": "Hasshim Ali bin Hassan",
+  "Phone": "+65 98XX XX71",
+  "Email": "exilemirror@yahoo.com",
+  "Current Location": "Singapore",
+  "Current Company": "",
+  "Current Title": ""
+}
+
+{
+  "Summary": "Experienced Systems Engineer specializing in server administration across multiple platforms including Windows, Linux, and Docker environments. Proven track record in implementing complex systems, managing internal IT infrastructure, and ensuring compliance through robust security measures.",
+  "Function": "Technical Support",
+  "Industry": [
+    "Information Technology"
+  ],
+  "Language Skills": []
+}
+
+{
+  "Work Experience": [
+    {
+      "company": "NCS Pte Ltd",
+      "title": "System Engineer",
+      "from": "2016",
+      "to": "Present",
+      "responsibility": [
+        "Performed system implementation, administration (Windows, Hyper-V & Linux)",
+        "Managed monthly patch management processes",
+        "Set up new infrastructure components like Windows 2016 servers, Linux Red Hat 7.3, domain controllers, DNS/DHCP/file/smtp/proxy servers."
+      ]
+    },
+    {
+      "company': "Civica Pte Lt",
+      "title": 'System Support Administrator',
+      "from": "Jan 2013",
+      "to": "'Jun 2016",
+       "responsibility": [
+         "Provided Level 2 support services",
+         "Managed Spydus Library Management systems on MS 2008/2012, IIS/Microsoft SQL databases/Nginx",
+         "Installed MSSQL database instances, performed basic SQL scripting tasks",
+         "Balanced load using NGINX",
+         "Maintained internal IT infrastructure elements like Active Directory, DNS, Microsoft LYNC, DHCP",
+         "Executed system backups/recovery operations",
+         "Allocated budgets for capital/expenditure expenses",
+         "Administered Microsoft Exchange Server 2.07"
+       ]
+     }
+   ]
+ }
+
+{
+  "Education": [
+    {
+      'school': "Kaplan Higher Education",
+      "major": "",
+      "degree": "Diploma in Information technology",
+      "dates": "2009 - Present"
+    },
+    {
+      'school':"ITE West Dover",
+      "major": '',
+      "degree": "Higher Nitec in electrical engineering",
+      "dates": ''
+    },
+    {
+      school: "Ng ee Ann Pol Technic",
+      major: '',
+      degree: "Film sound & video",
+      dates: ''
+    },
+    {
+     school: "Polytechnic Dover",
+      major: '',
+     degree: "Higher Nitec",
+      dates: ''
+     },
+     {
+      school: "Yu Hua Secondary School",
+      major: '',
+       degree: "GCE O levels",
+       dates: ''
+     },
+    {
+      school:"Rulang Primary School",
+      major: "",
+      degree: "PSLE",
+      dates: ""
+    }
+  ]
+}
+
+{
+  "Certifications": [
+    "MCSA Windows Server v2012",
+    "W3schools HTML Certification",
+    "BM-RM-3E01 Introduction to Personal Data Protection Act",
+    "IT-SO-3S-1 Perform network vulnerability assessment"
+  ],
+  "hard_skills/tags": [
+    "Windows Server 20xx",
+    "Linux CentOS / RedHat",
+    "Docker",
+    "Ansible",
+    "AWS",
+    "SQL 2012 / 2014",
+    "Apache",
+    "VMware ESXi 5",
+    "HTML",
+    "IIS",
+    "Load Balancer",
+    "Microsoft Exchange Server 2016"
+  ],
+  "soft_skills/skills": [
+    "Problem Resolution",
+    "Performance Tuning",
+    "Security Patching",
+    "Change Management",
+    "Network Security",
+    "Customer Service",
+    "Budget Allocation",
+    "Reference Services",
+    "Data Protection Compliance"
+  ]
+}
+=== END ===
