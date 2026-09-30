@@ -1495,7 +1495,7 @@ def get_candidate_detail(candidate_id: int) -> Optional[Dict]:
 
     # ── All annotations for this document ──────────────────────────────
     anns = db.execute("""
-        SELECT entity_type, char_start, char_end, text, layer,
+        SELECT entity_type, char_start, char_end, text_content AS text, layer,
                confidence, annotator, updated_at
         FROM ner_annotations
         WHERE doc_id = ?
@@ -1545,7 +1545,7 @@ def get_annotations_for_candidate(candidate_id: int) -> List[Dict]:
         return []
 
     rows = db.execute("""
-        SELECT entity_type, text, layer, char_start, char_end
+        SELECT entity_type, text_content AS text, layer, char_start, char_end
         FROM ner_annotations
         WHERE doc_id = ? AND layer = 0
     """, (doc["doc_id"],)).fetchall()

@@ -1330,7 +1330,8 @@ class AIExtractor:
             result = self._pure_manual_extraction(text)
             if self._ner_enabled:
                 result = self._enhance_with_bert_ner(result, text)
-            return result
+            # Same output schema whether or not Ollama is up
+            return self._remap_to_canonical_schema(result)
 
         self.logger.info("🎭 Starting MANUAL-FIRST extraction...")
 

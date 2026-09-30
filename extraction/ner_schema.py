@@ -3398,12 +3398,12 @@ class PreAnnotator:
                 # Only from documents marked 'completed' (human-verified!)
                 # Minimum 2 characters to avoid junk
                 rows = conn.execute("""
-                    SELECT DISTINCT LOWER(TRIM(a.text)) as term
+                    SELECT DISTINCT LOWER(TRIM(a.text_content)) as term
                     FROM ner_annotations a
                     JOIN ner_documents d ON a.doc_id = d.doc_id
                     WHERE a.entity_type = ?
                       AND d.status = 'completed'
-                      AND LENGTH(TRIM(a.text)) >= 2
+                      AND LENGTH(TRIM(a.text_content)) >= 2
                     ORDER BY term
                 """, (entity_type,)).fetchall()
                 
