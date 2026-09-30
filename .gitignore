@@ -4,3 +4,11 @@ old_merlion_resumes
 *.csv
 *.json
 .env
+
+# model weights (~100GB) and caches
+resume_model_*/
+unsloth_compiled_cache/
+__pycache__/
+*.pyc
+*.gguf
+*.db
