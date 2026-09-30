@@ -33,7 +33,7 @@ root_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if root_path not in sys.path:
     sys.path.append(root_path)
 
-from db_manager import DatabaseManager
+from data.db_manager import DatabaseManager
 
 
 # =============================================================================
@@ -292,7 +292,7 @@ For each case:
 1. **Run your current pipeline** on the raw text:
    ```python
    # Pseudocode — adjust to your ai_extractor entry point
-   from ai_extractor import extract_resume
+   from extraction.ai_extractor import extract_resume
    raw = open('diagnostic/case_01_raw.txt').read()
    # strip the header comments (lines starting with #)
    raw_clean = '\\n'.join(l for l in raw.split('\\n') if not l.startswith('#'))

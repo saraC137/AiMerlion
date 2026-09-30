@@ -24,8 +24,8 @@ import logging
 import coloredlogs
 
 # Import helper functions from your utils.py
-from utils import standardize_phone_number, standardize_date
-import config
+from core.utils import standardize_phone_number, standardize_date
+from core import config
 from extraction.text_preprocessor import clean as _pp_clean, detect_sections as _pp_detect_sections
 
 # =====================================================================

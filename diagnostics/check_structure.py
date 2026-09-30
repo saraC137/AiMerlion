@@ -1,8 +1,7 @@
 # Save as check_structure.py
 import os
 import re
-import config
-
+from core import config
 def check_structure():
     print("="*70)
     print("FOLDER STRUCTURE DIAGNOSTIC")

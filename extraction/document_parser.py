@@ -37,10 +37,10 @@ from PIL import Image
 import pytesseract
 
 # Import configuration
-from config import TESSERACT_CONFIG, SUPPORTED_EXTENSIONS, OCR_CONFIG
+from core.config import TESSERACT_CONFIG, SUPPORTED_EXTENSIONS, OCR_CONFIG
 
 # Import PDF Inspector
-from pdf_inspector import analyze_pdf_type, inspect_pdf
+from extraction.pdf_inspector import analyze_pdf_type, inspect_pdf
 
 # Setup logging with visual clarity
 logger = logging.getLogger(__name__)

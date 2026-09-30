@@ -6,7 +6,7 @@ gemini_client.py
 Lightweight REST-based Gemini client. No SDK install needed, just `requests`.
 
 Usage:
-    from gemini_client import GeminiClient
+    from data.gemini_client import GeminiClient
     
     gem = GeminiClient()  # reads GEMINI_API_KEY from environment
     response = gem.generate("Hello, how are you?")

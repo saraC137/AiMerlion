@@ -459,9 +459,8 @@ def main():
             print("Please enter a valid number.")
     
     # Import your extractor
-    from main import UltimateResumeExtractor
-    import config
-    
+    from core.main import UltimateResumeExtractor
+    from core import config
     # Initialize extractor
     print(f"\nInitializing extractor with model: {config.MODEL_NAME}")
     extractor = UltimateResumeExtractor(config.MODEL_NAME)

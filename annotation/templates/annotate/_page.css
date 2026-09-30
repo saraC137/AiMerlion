@@ -1,0 +1,1850 @@
+
+
+    /* ============ ANNOTATION LAYOUT ============ */
+
+    /*
+     * --side-width drives the right panel column.
+     * The JS resize handler updates this variable on drag so the
+     * grid reflows instantly without any layout thrashing. 💅
+     */
+    :root { --side-width: 320px; }
+
+    .anno-layout {
+        display: grid;
+        /*
+         * 🎭 THE GRAND STAGE:
+         *   col 1 → text panel (flexible, takes all leftover space)
+         *   col 2 → 5px drag handle (the velvet rope between our two rooms 🚪)
+         *   col 3 → side panel (width driven by --side-width CSS variable)
+         */
+        grid-template-columns: 1fr 5px var(--side-width);
+        height: calc(100vh - 88px);
+        overflow: hidden;
+    }
+
+    /* LEFT: Text area with inline annotations */
+    .text-panel {
+        overflow-y: auto;
+        padding: 24px 28px;
+        line-height: 1.9;
+        position: relative;
+        /* Guard against grid blowout if text is very wide */
+        min-width: 0;
+    }
+
+    /* ─── DRAG HANDLE ──────────────────────────────────────────────
+     * Lives between the text panel and side panel.
+     * Thin by default, widens on hover/drag for easy grabbing.
+     * Think of it as the bouncer deciding how much room each section gets! 🚪
+     * ────────────────────────────────────────────────────────────── */
+    .resize-handle {
+        background: var(--border);
+        cursor: col-resize;
+        position: relative;
+        transition: background 0.15s;
+        user-select: none;
+    }
+    /* Wider invisible hit-area so the user doesn't need to be pixel-perfect */
+    .resize-handle::after {
+        content: '';
+        position: absolute;
+        inset: 0 -6px;
+        cursor: col-resize;
+    }
+    .resize-handle:hover,
+    .resize-handle.dragging {
+        background: var(--accent-cyan);
+    }
+    /* Three-dot grip icon that appears on hover */
+    .resize-handle::before {
+        content: '⋮';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        color: var(--text-muted);
+        font-size: 0.9rem;
+        line-height: 1;
+        opacity: 0;
+        transition: opacity 0.15s;
+        pointer-events: none;
+    }
+    .resize-handle:hover::before,
+    .resize-handle.dragging::before { opacity: 1; }
+    .text-panel .text-content {
+        font-family: var(--font-mono);
+        font-size: 0.88rem;
+        white-space: pre-wrap;
+        word-break: break-word;
+        cursor: text;
+        user-select: text;
+        position: relative;
+    }
+
+    /* Highlighted annotation spans */
+    .anno-span {
+        border-radius: 3px;
+        padding: 1px 2px;
+        cursor: pointer;
+        position: relative;
+        transition: opacity 0.15s;
+        border-bottom: 2px solid;
+    }
+    .anno-span:hover { opacity: 0.85; }
+    .anno-span .anno-label {
+        position: absolute;
+        top: -18px;
+        left: 0;
+        font-size: 0.58rem;
+        font-family: var(--font-body);
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        white-space: nowrap;
+        padding: 1px 4px;
+        border-radius: 3px;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.15s;
+    }
+    .anno-span:hover .anno-label { opacity: 1; }
+
+    /* RIGHT: Entity palette + controls */
+    .side-panel {
+        background: var(--bg-primary);
+        border-left: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        /*
+         * overflow:hidden keeps panel width rock-solid at --side-width.
+         * No panel-level scrollbar = no 15px width-theft on children.
+         * Each child that needs scrolling (palette) does it internally. 💅
+         */
+        overflow: hidden;
+        box-sizing: border-box;
+        /* Clamp so the user can't drag to an unusable size */
+        min-width: 220px;
+        max-width: 600px;
+    }
+    .side-section {
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--border);
+    }
+    .side-section h3 {
+        font-size: 0.72rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 10px;
+    }
+
+    /* Entity buttons in palette */
+    .entity-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 10px;
+        margin: 2px;
+        border: 2px solid transparent;
+        border-radius: 6px;
+        font-size: 0.72rem;
+        font-family: var(--font-body);
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.12s;
+        opacity: 0.7;
+    }
+    .entity-btn:hover { opacity: 1; transform: scale(1.03); }
+    .entity-btn.active {
+        opacity: 1;
+        border-color: #fff;
+        box-shadow: 0 0 12px rgba(255,255,255,0.15);
+    }
+    .entity-btn .key-hint {
+        font-family: var(--font-mono);
+        font-size: 0.6rem;
+        opacity: 0.5;
+        padding: 1px 4px;
+        border: 1px solid rgba(255,255,255,0.2);
+        border-radius: 3px;
+    }
+
+    /* Annotation list in sidebar */
+    .anno-list-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        padding: 6px 0;
+        border-bottom: 1px solid rgba(42,49,64,0.3);
+        font-size: 0.78rem;
+    }
+    .anno-list-item .anno-type {
+        font-weight: 700;
+        font-size: 0.65rem;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+        flex-shrink: 0;
+        padding: 2px 6px;
+        border-radius: 4px;
+    }
+    .anno-list-item .anno-text {
+        color: var(--text-secondary);
+        word-break: break-word;
+        flex: 1;
+    }
+    .anno-list-item .delete-btn {
+        flex-shrink: 0;
+        width: 18px;
+        height: 18px;
+        border: none;
+        background: rgba(218,54,51,0.2);
+        color: var(--accent-red);
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.65rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .anno-list-item .delete-btn:hover { background: rgba(218,54,51,0.5); }
+
+    /* BIO preview panel */
+    .bio-preview {
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        max-height: 260px;
+        overflow-y: auto;
+        background: var(--bg-deep);
+        padding: 10px;
+        border-radius: var(--radius);
+    }
+    .bio-row { display: flex; gap: 12px; padding: 1px 0; }
+    .bio-token { color: var(--text-secondary); min-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bio-tag { font-weight: 600; }
+    .bio-tag.tag-o { color: var(--text-muted); }
+    .bio-tag.tag-b { color: var(--accent-green); }
+    .bio-tag.tag-i { color: var(--accent-cyan); }
+
+    /* Toast notification */
+    .toast {
+        position: fixed;
+        bottom: 24px;
+        right: 24px;
+        padding: 12px 20px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--accent-green);
+        border-radius: var(--radius);
+        color: var(--accent-green);
+        font-size: 0.85rem;
+        z-index: 999;
+        animation: slideUp 0.3s ease;
+    }
+    @keyframes slideUp {
+        from { transform: translateY(20px); opacity: 0; }
+        to { transform: translateY(0); opacity: 1; }
+    }
+
+    /* ===========================================
+     * 🪞 SAVE PREVIEW MODAL — QA Gate Before Save
+     * "Check your reflection before the runway!" 💅
+     * =========================================== */
+
+    .preview-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.78);
+        z-index: 600;
+        align-items: flex-start;
+        justify-content: center;
+        padding: 30px 20px;
+        overflow-y: auto;
+    }
+    .preview-overlay.open { display: flex; }
+
+    .preview-modal {
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        width: 100%;
+        max-width: 960px;
+        box-shadow: var(--shadow);
+        overflow: hidden;
+        position: relative;
+        animation: previewSlideIn 0.25s ease;
+    }
+    @keyframes previewSlideIn {
+        from { transform: translateY(-20px); opacity: 0; }
+        to   { transform: translateY(0);     opacity: 1; }
+    }
+
+    .preview-header {
+        background: var(--bg-secondary);
+        border-bottom: 1px solid var(--border);
+        padding: 18px 24px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+    .preview-header h2 {
+        font-family: var(--font-display);
+        font-size: 1.1rem;
+        font-weight: 800;
+        letter-spacing: -0.5px;
+    }
+    .preview-close {
+        width: 32px; height: 32px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--bg-elevated);
+        color: var(--text-secondary);
+        cursor: pointer;
+        font-size: 1rem;
+        display: flex; align-items: center; justify-content: center;
+        transition: all 0.15s;
+    }
+    .preview-close:hover {
+        background: var(--accent-red);
+        color: #fff;
+        border-color: var(--accent-red);
+    }
+
+    .preview-body {
+        padding: 24px 28px;
+        max-height: 72vh;
+        overflow-y: auto;
+    }
+
+    /* Stats banner cards */
+    .preview-stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 12px;
+        margin-bottom: 20px;
+    }
+    .preview-stat-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 12px 14px;
+        text-align: center;
+    }
+    .preview-stat-card .stat-number {
+        font-size: 1.5rem;
+        font-weight: 800;
+        font-family: var(--font-display);
+        line-height: 1;
+    }
+    .preview-stat-card .stat-label {
+        font-size: 0.65rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-top: 4px;
+    }
+
+    /* Warning items */
+    .preview-warnings { margin-bottom: 18px; }
+    .preview-warning-item {
+        padding: 8px 12px;
+        margin: 4px 0;
+        border-radius: 6px;
+        font-size: 0.78rem;
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        line-height: 1.4;
+    }
+    .preview-warning-item.critical {
+        background: rgba(218, 54, 51, 0.12);
+        border-left: 3px solid var(--accent-red);
+        color: var(--accent-red);
+    }
+    .preview-warning-item.warning {
+        background: rgba(240, 136, 62, 0.12);
+        border-left: 3px solid var(--accent-orange);
+        color: var(--accent-orange);
+    }
+    .preview-warning-item.info {
+        background: rgba(86, 211, 100, 0.10);
+        border-left: 3px solid var(--accent-green);
+        color: var(--accent-green);
+    }
+    .preview-warning-icon {
+        flex-shrink: 0;
+        font-size: 0.9rem;
+    }
+
+    /* Entity summary rows */
+    .preview-entity-group { margin-bottom: 14px; }
+    .preview-entity-group h4 {
+        font-size: 0.68rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 6px;
+        padding-bottom: 4px;
+        border-bottom: 1px solid var(--border);
+    }
+    .preview-entity-row {
+        display: flex;
+        align-items: center;
+        padding: 5px 8px;
+        border-radius: 4px;
+        margin: 2px 0;
+        font-size: 0.78rem;
+        transition: background 0.1s;
+    }
+    .preview-entity-row:hover { background: var(--bg-hover); }
+    .preview-entity-color {
+        width: 10px; height: 10px;
+        border-radius: 50%;
+        margin-right: 8px;
+        flex-shrink: 0;
+    }
+    .preview-entity-label { font-weight: 600; flex: 1; }
+    .preview-entity-count {
+        font-weight: 700;
+        font-family: var(--font-display);
+        margin-left: 8px;
+        min-width: 24px;
+        text-align: right;
+    }
+    .preview-entity-limit {
+        font-size: 0.65rem;
+        color: var(--text-muted);
+        margin-left: 4px;
+    }
+    .preview-entity-texts {
+        font-size: 0.68rem;
+        color: var(--text-muted);
+        margin-left: 18px;
+        padding: 2px 0 4px 0;
+        word-break: break-word;
+    }
+
+    /* ── Editable preview fields ─────────────────────────────────── */
+    .preview-edit-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin: 3px 0 3px 18px;
+    }
+    .preview-edit-input {
+        flex: 1;
+        background: var(--bg-deep);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        color: var(--text-primary);
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        padding: 4px 8px;
+        outline: none;
+        transition: border-color 0.15s;
+    }
+    .preview-edit-input:focus {
+        border-color: var(--accent-cyan);
+    }
+    .preview-edit-input.edited {
+        border-color: var(--accent-yellow);
+        background: rgba(240,166,17,0.06);
+    }
+    .preview-edit-delete {
+        background: none;
+        border: 1px solid transparent;
+        color: var(--text-muted);
+        cursor: pointer;
+        padding: 2px 5px;
+        border-radius: 4px;
+        font-size: 0.68rem;
+        transition: all 0.15s;
+    }
+    .preview-edit-delete:hover {
+        color: var(--accent-red);
+        border-color: var(--accent-red);
+        background: rgba(218,54,51,0.1);
+    }
+    .preview-edit-row.deleted {
+        opacity: 0.35;
+        text-decoration: line-through;
+        pointer-events: none;
+    }
+    .preview-classify-select {
+        width: 100%;
+        background: var(--bg-deep);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        color: var(--text-primary);
+        font-size: 0.8rem;
+        padding: 6px 10px;
+        outline: none;
+        cursor: pointer;
+    }
+    .preview-classify-select:focus {
+        border-color: var(--accent-cyan);
+    }
+
+    /* Footer with confirm/cancel */
+    .preview-footer {
+        background: var(--bg-secondary);
+        border-top: 1px solid var(--border);
+        padding: 16px 24px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+    }
+    .preview-footer-info {
+        font-size: 0.72rem;
+        color: var(--text-muted);
+    }
+    .preview-footer-actions { display: flex; gap: 8px; }
+
+    /* Loading spinner */
+    .preview-loading {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 40px 20px;
+        color: var(--text-muted);
+        font-size: 0.85rem;
+    }
+    .preview-loading .spinner {
+        width: 32px; height: 32px;
+        border: 3px solid var(--border);
+        border-top-color: var(--accent-cyan);
+        border-radius: 50%;
+        animation: spin 0.6s linear infinite;
+        margin-bottom: 12px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Success banner */
+    .preview-all-clear {
+        text-align: center;
+        padding: 16px;
+        background: rgba(86, 211, 100, 0.08);
+        border: 1px solid rgba(86, 211, 100, 0.2);
+        border-radius: 8px;
+        margin-bottom: 18px;
+        font-size: 0.85rem;
+        color: var(--accent-green);
+    }
+
+    /* ================================================================
+     * 🗂️ REDESIGNED SAVE PREVIEW FORM — Clean structured layout
+     * Every field is visible. Every field is editable. PERIOD. 💅
+     * ================================================================ */
+
+    /* The main form container — wraps all section blocks */
+    .preview-form {
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+    }
+
+    /* One category block (Personal / Professional / Education etc.) */
+    .pf-section {
+        margin-bottom: 18px;
+    }
+
+    /* Category heading bar */
+    .pf-section-header {
+        font-size: 0.63rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
+        color: var(--text-muted);
+        padding: 6px 0 5px 0;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 4px;
+    }
+
+    /* One field row: label column | inputs column */
+    .pf-field {
+        display: grid;
+        grid-template-columns: 175px 1fr;
+        gap: 10px;
+        padding: 4px 0;
+        border-bottom: 1px solid rgba(42,49,64,0.25);
+        align-items: start;
+        min-height: 32px;
+    }
+    .pf-field:last-child { border-bottom: none; }
+
+    /* Label column — coloured dot + name + required marker + missing badge */
+    .pf-label {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 5px;
+        padding-top: 6px;
+        font-size: 0.76rem;
+        font-weight: 600;
+        color: var(--text-secondary);
+        cursor: default;
+        user-select: none;
+        line-height: 1.3;
+    }
+    .pf-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        flex-shrink: 0;
+    }
+    .pf-required {
+        color: var(--accent-red);
+        font-size: 0.7rem;
+        font-weight: 700;
+        line-height: 1;
+    }
+    .pf-missing-badge {
+        font-size: 0.56rem;
+        font-weight: 700;
+        color: var(--accent-orange);
+        background: rgba(240,136,62,0.12);
+        border: 1px solid rgba(240,136,62,0.35);
+        padding: 1px 5px;
+        border-radius: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+    }
+
+    /* Inputs column — stacks multiple rows vertically */
+    .pf-inputs {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        padding: 2px 0;
+    }
+
+    /* Single input row: text input + optional delete button */
+    .pf-input-row {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        transition: opacity 0.15s;
+    }
+    /* Deleted rows fade out and strike through */
+    /* 🐛 BUG FIX: Previously used pointer-events:none which blocked
+     * ALL clicks on the entire row — including the ↩ undo button!
+     * Now we keep the row interactive but disable only the INPUT via
+     * a child selector. The delete/undo button stays clickable.
+     * Like dimming the lights but leaving the exit sign on! 🚪💡 */
+    .pf-input-row.deleted {
+        opacity: 0.28;
+        text-decoration: line-through;
+    }
+    .pf-input-row.deleted .pf-input {
+        pointer-events: none;
+    }
+
+    /* The actual text input */
+    .pf-input {
+        flex: 1;
+        min-width: 0;
+        background: var(--bg-deep);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        color: var(--text-primary);
+        font-family: var(--font-mono);
+        font-size: 0.74rem;
+        padding: 5px 9px;
+        outline: none;
+        transition: border-color 0.15s, background 0.15s;
+    }
+    .pf-input:focus {
+        border-color: var(--accent-cyan);
+        background: rgba(126,232,250,0.03);
+    }
+    /* Yellow border when user edits an existing value */
+    .pf-input.edited {
+        border-color: var(--accent-yellow);
+        background: rgba(227,179,65,0.05);
+    }
+
+    /* ══════════════════════════════════════════════════════════════════
+       📝 TEXTAREA STYLES — For long-form fields like JOB_DESCRIPTION
+       
+       🐛 BUG FIX: Regular <input type="text"> can't handle multi-line
+       content! Newlines break the value="" attribute and browsers
+       truncate the text. Textareas save the day! 💅
+       ══════════════════════════════════════════════════════════════════ */
+    .pf-textarea {
+        flex: 1;
+        min-width: 0;
+        min-height: 60px;
+        max-height: 200px;
+        resize: vertical;
+        background: var(--bg-deep);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        color: var(--text-primary);
+        font-family: var(--font-mono);
+        font-size: 0.74rem;
+        padding: 8px 9px;
+        outline: none;
+        transition: border-color 0.15s, background 0.15s;
+        line-height: 1.5;
+        overflow-y: auto;
+    }
+    .pf-textarea:focus {
+        border-color: var(--accent-cyan);
+        background: rgba(126,232,250,0.03);
+    }
+    .pf-textarea.edited {
+        border-color: var(--accent-yellow);
+        background: rgba(227,179,65,0.05);
+    }
+    .pf-textarea.pf-add-input {
+        border-style: dashed;
+        color: var(--text-muted);
+        font-style: italic;
+        min-height: 40px;
+        background: transparent;
+    }
+    .pf-textarea.pf-add-input:focus,
+    .pf-textarea.pf-add-input.edited {
+        border-style: solid;
+        color: var(--text-primary);
+        font-style: normal;
+        background: var(--bg-deep);
+    }
+    /* Align delete button to top for textarea rows */
+    .pf-input-row:has(.pf-textarea) {
+        align-items: flex-start;
+    }
+    .pf-input-row:has(.pf-textarea) .pf-del-btn {
+        margin-top: 6px;
+    }
+
+    /* "Add…" input — dashed, italic, greyed — turns solid on focus/type */
+    .pf-add-input {
+        border-style: dashed;
+        color: var(--text-muted);
+        font-style: italic;
+        font-size: 0.72rem;
+        background: transparent;
+    }
+    .pf-add-input:focus,
+    .pf-add-input.edited {
+        border-style: solid;
+        color: var(--text-primary);
+        font-style: normal;
+        background: var(--bg-deep);
+    }
+
+    /* Delete / undo button beside each existing annotation row */
+    .pf-del-btn {
+        flex-shrink: 0;
+        width: 22px;
+        height: 22px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid transparent;
+        border-radius: 4px;
+        background: none;
+        color: var(--text-muted);
+        cursor: pointer;
+        font-size: 0.68rem;
+        line-height: 1;
+        transition: all 0.12s;
+    }
+    .pf-del-btn:hover {
+        color: var(--accent-red);
+        border-color: var(--accent-red);
+        background: rgba(218,54,51,0.1);
+    }
+    .pf-del-btn.undo {
+        color: var(--accent-green);
+        border-color: var(--accent-green);
+        background: rgba(86,211,100,0.1);
+    }
+
+    /* Classification row (Function + Industry) */
+    .pf-classify {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-bottom: 18px;
+        padding: 12px 14px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+    }
+    .pf-classify-field label {
+        display: block;
+        font-size: 0.61rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: var(--text-muted);
+        margin-bottom: 5px;
+    }
+    .pf-select {
+        width: 100%;
+        background: var(--bg-deep);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        color: var(--text-primary);
+        font-size: 0.78rem;
+        padding: 6px 9px;
+        outline: none;
+        cursor: pointer;
+        transition: border-color 0.15s;
+    }
+    .pf-select:focus { border-color: var(--accent-cyan); }
+
+    /* ===========================================
+     * 📦 EXPORT OPTIONS MODAL
+     * Because prompt() is so last season! 💅
+     * =========================================== */
+
+    /* ── Export overlay backdrop ── */
+    .export-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.78);
+        z-index: 700;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        /* Allows the overlay itself to scroll on very small screens */
+        overflow-y: auto;
+    }
+    .export-overlay.open { display: flex; }
+
+    /* ── Export modal card ──
+       Uses flex-column so header + body + footer stack properly.
+       max-height ensures the footer (confirm button) is ALWAYS visible,
+       even on short viewports — no more diva falling off the runway! 💅 */
+    .export-modal {
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        width: 100%;
+        max-width: 460px;
+        /* Flex column layout keeps header/footer pinned, body scrolls */
+        display: flex;
+        flex-direction: column;
+        max-height: calc(100vh - 60px); /* never taller than the viewport */
+        box-shadow: 0 24px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.05);
+        overflow: hidden;
+        animation: previewSlideIn 0.2s ease;
+        /* Ensure whole card is visible in viewport */
+        margin: auto;
+    }
+
+    /* ── Header: always pinned to top ── */
+    .export-modal-header {
+        background: linear-gradient(135deg, var(--bg-secondary) 0%, rgba(99,102,241,0.08) 100%);
+        border-bottom: 1px solid var(--border);
+        padding: 18px 22px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-shrink: 0; /* never squish the header */
+    }
+    .export-modal-header h3 {
+        font-family: var(--font-display);
+        font-size: 1.05rem;
+        font-weight: 700;
+        letter-spacing: -0.3px;
+    }
+
+    /* ── Body: scrollable if content overflows ── */
+    .export-modal-body {
+        padding: 22px;
+        overflow-y: auto; /* scroll when content is tall */
+        flex: 1;           /* take remaining space between header and footer */
+    }
+
+    /* ── Field rows inside the modal body ── */
+    .export-field {
+        margin-bottom: 18px;
+    }
+    .export-field:last-child { margin-bottom: 0; }
+    .export-field label {
+        display: block;
+        font-size: 0.72rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.6px;
+        margin-bottom: 7px;
+        font-weight: 600;
+    }
+    .export-field select {
+        width: 100%;
+        padding: 10px 14px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        font-family: var(--font-body);
+        font-size: 0.86rem;
+        cursor: pointer;
+        appearance: auto;
+        transition: border-color 0.15s;
+    }
+    .export-field select:hover { border-color: var(--accent-cyan); }
+    .export-field select:focus {
+        outline: none;
+        border-color: var(--accent-cyan);
+        box-shadow: 0 0 0 3px rgba(6,182,212,0.15);
+    }
+
+    /* ── Footer: always pinned to bottom with confirm button ── */
+    .export-modal-footer {
+        background: var(--bg-secondary);
+        border-top: 1px solid var(--border);
+        padding: 14px 22px;
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        flex-shrink: 0; /* never squish the footer — it MUST stay visible */
+    }
+    /* Make the confirm button extra satisfying to press 💅 */
+    .export-modal-footer .btn-primary {
+        min-width: 120px;
+        font-weight: 600;
+        letter-spacing: 0.2px;
+    }
+
+    /* ── Export info hint box (replaces inline style) ── */
+    .export-hint {
+        font-size: 0.75rem;
+        color: var(--text-muted);
+        padding: 10px 14px;
+        background: var(--bg-secondary);
+        border-radius: var(--radius);
+        border-left: 3px solid var(--accent-cyan);
+        line-height: 1.5;
+        margin-top: 4px;
+    }
+
+    /* ═══════════════════════════════════════════════════
+       TOAST NOTIFICATION SYSTEM 🍞✨
+       Replaces the plain browser alert() with gorgeous
+       animated toasts — because we deserve nice things!
+       ═══════════════════════════════════════════════════ */
+    #toast-container {
+        position: fixed;
+        bottom: 28px;
+        right: 28px;
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        pointer-events: none; /* clicks pass through the gap */
+    }
+    .toast {
+        pointer-events: all;
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 14px 18px;
+        border-radius: 12px;
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        box-shadow: 0 8px 32px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.04);
+        min-width: 280px;
+        max-width: 380px;
+        animation: toastIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+        position: relative;
+        overflow: hidden;
+    }
+    /* Coloured left-accent bar per toast type */
+    .toast::before {
+        content: '';
+        position: absolute;
+        left: 0; top: 0; bottom: 0;
+        width: 4px;
+        border-radius: 12px 0 0 12px;
+    }
+    .toast.toast-success::before { background: var(--accent-green); }
+    .toast.toast-error::before   { background: #f87171; }
+    .toast.toast-info::before    { background: var(--accent-cyan); }
+    .toast.toast-warning::before { background: var(--accent-yellow); }
+
+    .toast-icon { font-size: 1.2rem; flex-shrink: 0; margin-top: 1px; }
+    .toast-content { flex: 1; }
+    .toast-title {
+        font-family: var(--font-display);
+        font-size: 0.88rem;
+        font-weight: 700;
+        color: var(--text-primary);
+        margin-bottom: 2px;
+    }
+    .toast-msg {
+        font-size: 0.78rem;
+        color: var(--text-muted);
+        line-height: 1.5;
+    }
+    .toast-close {
+        background: none;
+        border: none;
+        color: var(--text-muted);
+        cursor: pointer;
+        font-size: 0.85rem;
+        padding: 0;
+        flex-shrink: 0;
+        opacity: 0.6;
+        transition: opacity 0.15s;
+    }
+    .toast-close:hover { opacity: 1; }
+    /* Progress bar showing auto-dismiss countdown */
+    .toast-progress {
+        position: absolute;
+        bottom: 0; left: 0;
+        height: 3px;
+        border-radius: 0 0 12px 12px;
+        animation: toastProgress linear forwards;
+    }
+    .toast.toast-success .toast-progress { background: var(--accent-green); }
+    .toast.toast-error   .toast-progress { background: #f87171; }
+    .toast.toast-info    .toast-progress { background: var(--accent-cyan); }
+    .toast.toast-warning .toast-progress { background: var(--accent-yellow); }
+
+    /* Slide-out animation */
+    .toast.toast-hiding {
+        animation: toastOut 0.25s ease forwards;
+    }
+
+    @keyframes toastIn {
+        from { opacity: 0; transform: translateX(60px) scale(0.92); }
+        to   { opacity: 1; transform: translateX(0) scale(1); }
+    }
+    @keyframes toastOut {
+        from { opacity: 1; transform: translateX(0) scale(1); }
+        to   { opacity: 0; transform: translateX(60px) scale(0.92); }
+    }
+    @keyframes toastProgress {
+        from { width: 100%; }
+        to   { width: 0%; }
+    }
+
+    /* Edge case suggestion */
+    .edge-hint {
+        padding: 6px 10px;
+        margin: 4px 0;
+        background: rgba(240,136,62,0.1);
+        border-left: 3px solid var(--accent-orange);
+        border-radius: 0 var(--radius) var(--radius) 0;
+        font-size: 0.75rem;
+        color: var(--accent-orange);
+    }
+
+    /* Toolbar */
+    .toolbar {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+
+    /* ===========================================
+     * 🔍 INSPECTOR MODALS — Labels / BIO / Edge
+     * Like popup dressing rooms for your data! 💄
+     * =========================================== */
+
+    .inspector-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.72);
+        z-index: 550;
+        align-items: flex-start;
+        justify-content: center;
+        padding: 40px 20px;
+        overflow-y: auto;
+        backdrop-filter: blur(3px);
+    }
+    .inspector-overlay.open { display: flex; }
+
+    .inspector-modal {
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        width: 100%;
+        max-width: 780px;
+        max-height: 80vh;
+        box-shadow: var(--shadow);
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        animation: previewSlideIn 0.2s ease;
+    }
+    .inspector-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 14px 20px;
+        background: var(--bg-secondary);
+        border-bottom: 1px solid var(--border);
+        flex-shrink: 0;
+    }
+    .inspector-header h3 {
+        font-family: var(--font-display);
+        font-size: 1rem;
+        font-weight: 700;
+    }
+    .inspector-body {
+        padding: 16px 20px;
+        overflow-y: auto;
+        flex: 1;
+    }
+
+    /* 🆕 Wider modal variant for Classification & Skills popup */
+    .classify-modal-wide {
+        width: 620px;
+        max-width: 90vw;
+        max-height: 85vh;
+    }
+
+    /* ============================================================
+     * 📏 IAA MODAL STYLES — Agreement Dashboard
+     * ============================================================ */
+
+    /* Wider modal for heatmap + metrics layout */
+    .iaa-modal-wide {
+        width: 820px;
+        max-width: 95vw;
+        max-height: 90vh;
+    }
+
+    /* ── IAA Annotator selector pills ───────────────────────────────────
+       Shown in the modal header — one pill per Annotator B + "All" pill.
+       Active pill is highlighted pink; inactive are subtle border style. */
+    .iaa-annotator-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 3px 10px;
+        border-radius: 20px;
+        border: 1px solid var(--border);
+        background: var(--bg-elevated);
+        color: var(--text-secondary);
+        font-size: 0.68rem;
+        font-family: var(--font-body);
+        cursor: pointer;
+        transition: all 0.15s ease;
+        white-space: nowrap;
+    }
+    .iaa-annotator-pill:hover {
+        border-color: var(--accent-pink);
+        color: var(--accent-pink);
+        background: rgba(247,120,186,0.08);
+    }
+    .iaa-annotator-pill.active {
+        border-color: var(--accent-pink);
+        background: rgba(247,120,186,0.18);
+        color: var(--accent-pink);
+        font-weight: 600;
+    }
+    .iaa-annotator-pill-count {
+        font-size: 0.60rem;
+        opacity: 0.7;
+        background: rgba(255,255,255,0.07);
+        padding: 1px 5px;
+        border-radius: 10px;
+    }
+    .iaa-annotator-add-btn {
+        border-style: dashed;
+        color: var(--text-muted);
+    }
+    .iaa-annotator-add-btn:hover {
+        border-color: var(--accent-green);
+        color: var(--accent-green);
+        background: rgba(86,211,100,0.08);
+    }
+
+    /* IAA mode banner — shown when annotator B is working */
+    .iaa-mode-banner {
+        background: linear-gradient(90deg, rgba(247,120,186,0.18), rgba(238,184,255,0.10), rgba(247,120,186,0.18));
+        border-top: 2px solid rgba(247,120,186,0.5);
+        border-bottom: 2px solid rgba(247,120,186,0.5);
+        padding: 12px 24px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 0.82rem;
+        color: var(--accent-pink);
+        animation: iaaBannerPulse 3s ease infinite;
+        position: relative;
+        overflow: hidden;
+    }
+    /* Animated shimmer across the banner */
+    .iaa-mode-banner::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(90deg,
+            transparent 0%,
+            rgba(247,120,186,0.08) 40%,
+            rgba(247,120,186,0.15) 50%,
+            rgba(247,120,186,0.08) 60%,
+            transparent 100%);
+        animation: iaaShimmer 4s ease infinite;
+    }
+    @keyframes iaaShimmer {
+        0% { transform: translateX(-100%); }
+        100% { transform: translateX(100%); }
+    }
+    @keyframes iaaBannerPulse {
+        0%, 100% { border-color: rgba(247,120,186,0.4); }
+        50% { border-color: rgba(247,120,186,0.8); }
+    }
+    .iaa-mode-banner > * { position: relative; z-index: 1; }
+    .iaa-mode-banner .iaa-badge {
+        background: var(--accent-pink);
+        color: var(--bg-primary);
+        font-size: 0.68rem;
+        font-weight: 800;
+        padding: 4px 12px;
+        border-radius: 4px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        animation: iaaBadgePulse 2s ease infinite;
+    }
+    @keyframes iaaBadgePulse {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(247,120,186,0.4); }
+        50% { box-shadow: 0 0 12px 3px rgba(247,120,186,0.3); }
+    }
+
+    /* ============================================================
+     * 📏🔥 IAA ACTIVE — body.iaa-active theme overrides
+     *
+     * When active, the ENTIRE page gets a pink accent treatment
+     * so Annotator B can NEVER forget they're in IAA mode.
+     * ============================================================ */
+    body.iaa-active {
+        outline: 3px solid rgba(247,120,186,0.5);
+        outline-offset: -3px;
+        animation: iaaPagePulse 3s ease infinite;
+    }
+    @keyframes iaaPagePulse {
+        0%, 100% { outline-color: rgba(247,120,186,0.35); }
+        50% { outline-color: rgba(247,120,186,0.7); }
+    }
+    body.iaa-active .header {
+        background: linear-gradient(180deg, var(--bg-primary) 0%, rgba(247,120,186,0.06) 100%);
+        border-bottom: 2px solid rgba(247,120,186,0.5);
+    }
+    body.iaa-active .text-panel {
+        background: linear-gradient(135deg, rgba(247,120,186,0.03) 0%, transparent 60%);
+    }
+    body.iaa-active .side-panel {
+        border-left: 2px solid rgba(247,120,186,0.4);
+    }
+    body.iaa-active .palette-section h3 {
+        color: var(--accent-pink);
+    }
+    body.iaa-active .resize-handle:hover,
+    body.iaa-active .resize-handle.dragging {
+        background: var(--accent-pink);
+    }
+    body.iaa-active .iaa-dimmed-btn {
+        opacity: 0.3;
+        pointer-events: none;
+        filter: grayscale(0.8);
+    }
+    body.iaa-active .anno-span {
+        box-shadow: 0 0 0 1px rgba(247,120,186,0.2);
+    }
+    /* Shrink layout to accommodate the IAA banner above it */
+    body.iaa-active .anno-layout {
+        height: calc(100vh - 140px);
+    }
+
+    /* Annotator name prompt modal */
+    .annotator-prompt-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.85);
+        z-index: 9999;
+        align-items: center;
+        justify-content: center;
+        backdrop-filter: blur(6px);
+    }
+    .annotator-prompt-overlay.open { display: flex; }
+    .annotator-prompt-card {
+        background: var(--bg-primary);
+        border: 1px solid var(--accent-pink);
+        border-radius: 16px;
+        padding: 36px 40px;
+        width: 380px;
+        max-width: 90vw;
+        text-align: center;
+        box-shadow: 0 0 60px rgba(247,120,186,0.15);
+        animation: previewSlideIn 0.3s ease;
+    }
+    .annotator-prompt-card h3 {
+        font-family: var(--font-display);
+        font-size: 1.2rem;
+        color: var(--accent-pink);
+        margin-bottom: 8px;
+    }
+    .annotator-prompt-card p {
+        font-size: 0.78rem;
+        color: var(--text-secondary);
+        margin-bottom: 18px;
+        line-height: 1.6;
+    }
+    .annotator-prompt-card input {
+        width: 100%;
+        padding: 10px 14px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--text-primary);
+        font-family: var(--font-body);
+        font-size: 0.88rem;
+        margin-bottom: 14px;
+        outline: none;
+        transition: border-color 0.2s;
+    }
+    .annotator-prompt-card input:focus {
+        border-color: var(--accent-pink);
+    }
+
+    /* IAA KPI cards row */
+    .iaa-kpi-row {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        margin-bottom: 18px;
+    }
+    .iaa-kpi-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 14px 12px;
+        text-align: center;
+    }
+    .iaa-kpi-value {
+        font-family: var(--font-display);
+        font-size: 1.4rem;
+        font-weight: 800;
+        margin-bottom: 2px;
+    }
+    .iaa-kpi-label {
+        font-size: 0.65rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    /* Heatmap grid */
+    .iaa-heatmap {
+        display: grid;
+        gap: 2px;
+        margin-bottom: 18px;
+    }
+    .iaa-heatmap-cell {
+        border-radius: 4px;
+        padding: 6px 4px;
+        text-align: center;
+        font-size: 0.62rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        transition: transform 0.15s, box-shadow 0.15s;
+        cursor: default;
+        position: relative;
+    }
+    .iaa-heatmap-cell:hover {
+        transform: scale(1.08);
+        box-shadow: 0 2px 12px rgba(0,0,0,0.4);
+        z-index: 2;
+    }
+    .iaa-heatmap-header {
+        font-size: 0.58rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        padding: 4px;
+        text-align: center;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .iaa-heatmap-row-label {
+        font-size: 0.62rem;
+        color: var(--text-secondary);
+        text-align: right;
+        padding-right: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    /* Per-document results table */
+    .iaa-doc-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.72rem;
+    }
+    .iaa-doc-table th {
+        background: var(--bg-secondary);
+        padding: 8px 10px;
+        text-align: left;
+        font-size: 0.65rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        border-bottom: 1px solid var(--border);
+    }
+    .iaa-doc-table td {
+        padding: 8px 10px;
+        border-bottom: 1px solid rgba(42,49,64,0.5);
+        color: var(--text-secondary);
+    }
+    .iaa-doc-table tr:hover td {
+        background: var(--bg-hover);
+    }
+
+    /* Kappa interpretation badge */
+    .kappa-badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 0.6rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+    .kappa-almost-perfect { background: rgba(86,211,100,0.2); color: #56d364; }
+    .kappa-substantial    { background: rgba(126,232,250,0.2); color: #7ee8fa; }
+    .kappa-moderate       { background: rgba(227,179,65,0.2);  color: #e3b341; }
+    .kappa-fair           { background: rgba(240,136,62,0.2);  color: #f0883e; }
+    .kappa-poor           { background: rgba(218,54,51,0.2);   color: #da3633; }
+
+    /* Empty state for IAA dashboard */
+    .iaa-empty-state {
+        text-align: center;
+        padding: 50px 30px;
+        color: var(--text-muted);
+    }
+    .iaa-empty-state .iaa-empty-icon {
+        font-size: 3rem;
+        margin-bottom: 12px;
+    }
+    .iaa-empty-state h4 {
+        font-family: var(--font-display);
+        color: var(--text-secondary);
+        margin-bottom: 8px;
+    }
+    .iaa-empty-state p {
+        font-size: 0.78rem;
+        line-height: 1.7;
+        max-width: 380px;
+        margin: 0 auto;
+    }
+
+    /* Badge on buttons to show annotation count */
+    .tab-badge {
+        display: inline-block;
+        background: var(--accent-cyan);
+        color: var(--bg-deep);
+        font-size: 0.58rem;
+        font-weight: 700;
+        padding: 1px 5px;
+        border-radius: 8px;
+        margin-left: 3px;
+        vertical-align: middle;
+    }
+
+    /* The entity palette section — always visible! */
+    .palette-section {
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--border);
+        /*
+         * flex:1 — palette fills ALL remaining height after Classification
+         * is pinned at the bottom. No arbitrary max-height needed anymore.
+         * min-height:0 is required: without it, flex children ignore
+         * overflow and the panel can still blow out. 🎨
+         */
+        flex: 1;
+        overflow-y: auto;
+        min-height: 0;
+    }
+    .palette-section h3 {
+        font-size: 0.68rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 8px;
+    }
+
+    /*
+     * Shared style for the Function / Industry <select> dropdowns.
+     * display:block + width:100% + box-sizing:border-box = selects fill
+     * their grid cell exactly, no overflow, no browser quirks. 🎯
+     * (Replaces class="btn" which injects inline-flex and breaks width.)
+     */
+    .classify-select {
+        display: block;
+        width: 100%;
+        box-sizing: border-box;
+        font-size: 0.72rem;
+        padding: 5px 6px;
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        font-family: var(--font-body);
+        cursor: pointer;
+        transition: border-color 0.15s;
+    }
+    .classify-select:hover { border-color: var(--accent-cyan); }
+    .classify-select:focus { outline: none; border-color: var(--accent-cyan); }
+
+    /* 🆕 Skill/Tag chip containers and chips */
+    .skill-tags-container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        min-height: 24px;
+        padding: 4px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+    }
+    .skill-tags-container:empty::before {
+        content: 'No items yet — use Re-run or add manually';
+        color: var(--text-muted);
+        font-size: 0.58rem;
+        font-style: italic;
+        padding: 2px 4px;
+    }
+    .skill-tag-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        font-size: 0.62rem;
+        padding: 2px 7px;
+        border-radius: 12px;
+        background: rgba(126, 232, 250, 0.12);
+        color: var(--accent-cyan);
+        border: 1px solid rgba(126, 232, 250, 0.25);
+        line-height: 1.4;
+        max-width: 100%;
+        word-break: break-word;
+    }
+    .skill-tag-chip.soft {
+        background: rgba(238, 184, 255, 0.12);
+        color: var(--accent-purple);
+        border-color: rgba(238, 184, 255, 0.25);
+    }
+    .skill-tag-chip.ai-tag {
+        background: rgba(86, 211, 100, 0.12);
+        color: var(--accent-green);
+        border-color: rgba(86, 211, 100, 0.25);
+    }
+    .skill-tag-chip .tag-remove {
+        cursor: pointer;
+        font-size: 0.55rem;
+        opacity: 0.6;
+        transition: opacity 0.15s;
+        margin-left: 2px;
+    }
+    .skill-tag-chip .tag-remove:hover {
+        opacity: 1;
+        color: var(--accent-red);
+    }
+    .skill-tag-input {
+        flex: 1;
+        min-width: 80px;
+        font-size: 0.62rem;
+        padding: 3px 6px;
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        border: 1px dashed var(--border);
+        border-radius: var(--radius);
+        font-family: var(--font-body);
+    }
+    .skill-tag-input:focus {
+        outline: none;
+        border-color: var(--accent-cyan);
+        border-style: solid;
+    }
+
+    /* ── Quick-pick palette ─────────────────────────────────────── */
+    .palette-group-label {
+        font-size: 0.58rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-muted);
+        margin: 8px 0 4px;
+    }
+    .palette-group-label:first-child { margin-top: 0; }
+    .palette-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 2px; }
+    .palette-chip {
+        font-size: 0.6rem;
+        padding: 2px 8px;
+        border-radius: 20px;
+        cursor: pointer;
+        border: 1px solid rgba(86,211,100,0.35);
+        color: var(--text-muted);
+        background: transparent;
+        transition: all 0.15s ease;
+        user-select: none;
+    }
+    .palette-chip:hover { border-color: var(--accent-green); color: var(--accent-green); }
+    .palette-chip.active {
+        background: rgba(86,211,100,0.18);
+        border-color: var(--accent-green);
+        color: var(--accent-green);
+        font-weight: 600;
+    }
+
+    /* Annotation list items */
+    .anno-list-empty {
+        color: var(--text-muted);
+        font-size: 0.78rem;
+        text-align: center;
+        padding: 20px 0;
+    }
+
+    /*
+     * 🔦 FOCUSED ANNOTATION ROW
+     * Lights up when the user clicks a highlighted span in the text.
+     * Two-beat pulse: bright cyan flash → fades to a subtle standing highlight
+     * so you always know WHERE you are in the list. Like a spotlight sweeping
+     * the crowd and landing on YOUR table! 🎤✨
+     */
+    @keyframes annoFocusPulse {
+        0%   { background: rgba(126,232,250,0.35); }
+        60%  { background: rgba(126,232,250,0.20); }
+        100% { background: rgba(126,232,250,0.12); }
+    }
+    .anno-list-item--focused {
+        animation: annoFocusPulse 0.6s ease forwards;
+        border-radius: 6px;
+        /* Left accent bar — a little "you are here" flag 🚩 */
+        border-left: 3px solid var(--accent-cyan) !important;
+        padding-left: 8px !important;
+    }
+    /* ===========================================
+     * ❓ HELP MODAL — The Fairy Codemother's Manual
+     * =========================================== */
+
+    /* Dark overlay behind the modal */
+    .help-overlay {
+        display: none;                   /* Hidden until openHelp() is called */
+        position: fixed;
+        inset: 0;                        /* Cover the entire viewport */
+        background: rgba(0, 0, 0, 0.72);
+        z-index: 500;
+        align-items: flex-start;         /* Modal sits near top, not dead centre */
+        justify-content: center;
+        padding: 40px 20px;
+        overflow-y: auto;
+    }
+    /* When open, switch display to flex so it centres the modal card */
+    .help-overlay.open { display: flex; }
+
+    /* The modal card itself */
+    .help-modal {
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        width: 100%;
+        max-width: 760px;
+        box-shadow: var(--shadow);
+        overflow: hidden;               /* Clip children to rounded corners */
+        position: relative;
+    }
+
+    /* Sticky header inside the modal */
+    .help-header {
+        background: var(--bg-secondary);
+        border-bottom: 1px solid var(--border);
+        padding: 20px 28px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+    .help-header h2 {
+        font-family: var(--font-display);
+        font-size: 1.2rem;
+        font-weight: 800;
+        color: var(--accent-purple);
+        letter-spacing: -0.5px;
+    }
+    .help-close {
+        width: 32px; height: 32px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--bg-elevated);
+        color: var(--text-secondary);
+        cursor: pointer;
+        font-size: 1rem;
+        display: flex; align-items: center; justify-content: center;
+        transition: all 0.15s;
+    }
+    .help-close:hover { border-color: var(--accent-red); color: var(--accent-red); }
+
+    /* Scrollable body inside the modal */
+    .help-body {
+        padding: 24px 28px;
+        overflow-y: auto;
+        max-height: calc(90vh - 80px);  /* Don't let it grow taller than the screen */
+    }
+
+    /* Section headers inside the manual */
+    .help-section {
+        margin-bottom: 28px;
+    }
+    .help-section h3 {
+        font-size: 0.78rem;
+        color: var(--accent-cyan);
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
+        font-weight: 700;
+        margin-bottom: 12px;
+        padding-bottom: 6px;
+        border-bottom: 1px solid var(--border);
+    }
+    .help-section p {
+        font-size: 0.88rem;
+        color: var(--text-secondary);
+        line-height: 1.7;
+        margin-bottom: 8px;
+    }
+
+    /* Step list — numbered workflow steps */
+    .help-steps {
+        counter-reset: step-counter;
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+    .help-steps li {
+        counter-increment: step-counter;
+        display: flex;
+        gap: 14px;
+        align-items: flex-start;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 12px 14px;
+        font-size: 0.86rem;
+        color: var(--text-secondary);
+        line-height: 1.5;
+    }
+    /* The big numbered circle before each step */
+    .help-steps li::before {
+        content: counter(step-counter);
+        flex-shrink: 0;
+        width: 24px; height: 24px;
+        background: var(--accent-cyan);
+        color: var(--bg-deep);
+        border-radius: 50%;
+        font-size: 0.72rem;
+        font-weight: 800;
+        display: flex; align-items: center; justify-content: center;
+        margin-top: 1px;
+    }
+    .help-steps li strong { color: var(--text-primary); }
+
+    /* Keyboard shortcut grid */
+    .shortcut-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 8px;
+    }
+    .shortcut-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 8px 12px;
+        font-size: 0.82rem;
+        color: var(--text-secondary);
+    }
+    /* Rendered keyboard key badge */
+    .kbd {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 28px; height: 22px;
+        padding: 0 6px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        border-bottom-width: 2px;         /* Classic keycap depth effect */
+        border-radius: 4px;
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        color: var(--accent-yellow);
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+
+    /* Tips / warning cards inside the manual */
+    .help-tip {
+        display: flex;
+        gap: 10px;
+        padding: 10px 14px;
+        border-radius: var(--radius);
+        font-size: 0.84rem;
+        line-height: 1.5;
+        margin-bottom: 8px;
+    }
+    .help-tip.tip-info    { background: rgba(126,232,250,0.08); border-left: 3px solid var(--accent-cyan); color: var(--accent-cyan); }
+    .help-tip.tip-warn    { background: rgba(240,136,62,0.08);  border-left: 3px solid var(--accent-orange); color: var(--accent-orange); }
+    .help-tip.tip-success { background: rgba(86,211,100,0.08);  border-left: 3px solid var(--accent-green); color: var(--accent-green); }
+
+    /* Entity category colour pill (used in the manual's entity reference) */
+    .entity-ref-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 3px 10px;
+        border-radius: 12px;
+        font-size: 0.74rem;
+        font-weight: 600;
+        margin: 2px;
+    }
+
+   <!-- ================================================================
+     📦 EXPORT MODAL — FULL GLAM EDITION ✨
+     ================================================================ -->
+<div class="export-overlay" id="exportOverlay" onclick="if(event.target===this)closeExportModal()">
+  <div class="export-modal">
+
+    <!-- Header -->
+    <div class="export-modal-header">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span style="font-size:1.6rem;">📦</span>
+        <h3 id="exportModalTitle" style="margin:0; font-size:1.25rem; color:var(--accent-cyan);">Export Options</h3>
+      </div>
+      <button class="export-close" onclick="closeExportModal()" title="Cancel">✕</button>
+    </div>
+
+    <!-- Body -->
+    <div class="export-modal-body" id="exportModalBody">
+      <!-- JS will fill this -->
+    </div>
+
+    <!-- Footer -->
+    <div class="export-modal-footer">
+      <button class="btn" onclick="closeExportModal()">Cancel</button>
+      <button class="btn btn-primary" id="exportConfirmBtn" onclick="confirmExport()">
+        📤 Export Now
+      </button>
+    </div>
+
+  </div>
+</div>
+

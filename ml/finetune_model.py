@@ -25,8 +25,7 @@ from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from datasets import Dataset
 import os
 from datetime import datetime
-import config
-
+from core import config
 class ResumeFineTuner:
     def __init__(self, model_name="Qwen/Qwen2.5-14B-Instruct", output_dir="resume_model_finetuned"):
         self.model_name = model_name

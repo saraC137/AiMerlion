@@ -3,7 +3,7 @@
 """
 
 import sys
-from ai_extractor_old_v3 import AIExtractor
+from archive.ai_extractor_old_v3 import AIExtractor
 import logging
 import coloredlogs
 import json

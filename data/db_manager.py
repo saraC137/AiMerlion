@@ -16,7 +16,7 @@ This module integrates with the existing AiMerlion pipeline WITHOUT replacing
 the current CSV/JSON export. It's an ADDITION, not a replacement, darling! 🌟
 
 Usage:
-    from db_manager import DatabaseManager
+    from data.db_manager import DatabaseManager
     db = DatabaseManager()           # Uses default 'resume_extractions.db'
     db.save_extraction(result, raw_text, folder_path)
     db.get_extraction_diagnostics(candidate_id=12345)

@@ -49,14 +49,14 @@ Field Mapping (DB → Your Schema):
   Function (17 categories), Industry (24 categories), Location (normalized)
 
 Usage:
-    python resume_exporter.py                          # Export all to JSON + CSV
-    python resume_exporter.py --format json            # JSON only
-    python resume_exporter.py --format csv             # CSV only
-    python resume_exporter.py --format ml              # ML training JSONL
-    python resume_exporter.py --id 12345               # Single candidate
-    python resume_exporter.py --status Complete         # Filter by status
-    python resume_exporter.py --reviewed-only          # Only reviewed candidates
-    python resume_exporter.py --output exports/        # Custom output directory
+    python -m analysis.resume_exporter                          # Export all to JSON + CSV
+    python -m analysis.resume_exporter --format json            # JSON only
+    python -m analysis.resume_exporter --format csv             # CSV only
+    python -m analysis.resume_exporter --format ml              # ML training JSONL
+    python -m analysis.resume_exporter --id 12345               # Single candidate
+    python -m analysis.resume_exporter --status Complete        # Filter by status
+    python -m analysis.resume_exporter --reviewed-only          # Only reviewed candidates
+    python -m analysis.resume_exporter --output exports/        # Custom output directory
 
 Dependencies:
     pip install pandas --break-system-packages  (CSV export only)
@@ -1080,7 +1080,35 @@ def transform_candidate(row: Dict) -> Dict:
         descriptions=all_responsibilities,
         certifications=str(row.get("certifications", "") or ""),
     )
-    
+
+    # 🆕 ML-enhanced classification — uses RandomForest (72 roles, 97% accuracy)
+    # Enhances keyword classification with ML prediction when confident.
+    # Graceful degradation: if .pkl files are missing, keywords still work! 💅
+    predicted_role = None
+    role_confidence = 0.0
+    try:
+        from ml.job_role_predictor import JobRolePredictor
+        _predictor = JobRolePredictor()
+        if _predictor.available:
+            raw_text = str(row.get("raw_text", "") or "")
+            if raw_text and len(raw_text.strip()) > 100:
+                role_result = _predictor.predict(raw_text)
+                predicted_role = role_result.get("predicted_role")
+                role_confidence = role_result.get("confidence", 0.0)
+                ml_function = role_result.get("function", "Others")
+
+                # Override keyword Function if ML is confident
+                if role_confidence >= 0.20 and ml_function != "Others":
+                    classified_function = ml_function
+                    logger.info(
+                        f"🤖 ML: {predicted_role} ({role_confidence:.1%}) "
+                        f"→ Function: {ml_function} for candidate {row.get('candidate_id')}"
+                    )
+    except ImportError:
+        pass  # job_role_predictor.py not installed
+    except Exception as e:
+        logger.debug(f"ML prediction skipped in export: {e}")
+
     # --- Normalize location ---
     raw_location = str(row.get("location", "") or "").strip()
     normalized_location = normalize_location(raw_location)
@@ -1101,6 +1129,8 @@ def transform_candidate(row: Dict) -> Dict:
         "Last Contact": "",                                 # Not in DB — placeholder
         "Function": classified_function,
         "Industry": classified_industry,
+        "Predicted Role": predicted_role or "",
+        "Role Confidence": f"{role_confidence:.0%}" if predicted_role else "",
         "Summary": str(row.get("summary", "") or "").strip(),
         "Language Skills": languages,
         "Work Experience": experience,
@@ -1498,15 +1528,17 @@ def run_export(
             records.append(record)
         except Exception as e:
             cid = row.get("candidate_id", "?")
-            logger.warning(f"⚠️ Transform failed for candidate {cid}: {e}")
-            errors.append({"candidate_id": cid, "error": str(e)})
-    
+            name = str(row.get("name", "") or "").strip() or f"ID:{cid}"
+            logger.warning(f"⚠️ Transform failed for candidate {cid} ({name}): {e}")
+            errors.append({"candidate_id": cid, "name": name, "error": str(e)})
+
     logger.info(f"✅ Transformed {len(records)} records ({len(errors)} errors)")
-    
+
     # Step 3: Export
     results = {
         "records": len(records),
         "errors": len(errors),
+        "failed_names": [e["name"] for e in errors],
         "timestamp": timestamp,
         "files": {},
     }
@@ -1569,11 +1601,11 @@ def main():
     🎬 Command-line interface for the resume exporter.
     
     Examples:
-        python resume_exporter.py
-        python resume_exporter.py --format json csv
-        python resume_exporter.py --id 101 102 103
-        python resume_exporter.py --status Complete --reviewed-only
-        python resume_exporter.py --format ml --output ml_data/
+        python -m analysis.resume_exporter
+        python -m analysis.resume_exporter --format json csv
+        python -m analysis.resume_exporter --id 101 102 103
+        python -m analysis.resume_exporter --status Complete --reviewed-only
+        python -m analysis.resume_exporter --format ml --output ml_data/
     """
     parser = argparse.ArgumentParser(
         description="💅✨ Fairy Codemother's Resume Data Exporter ✨💅",
@@ -1690,6 +1722,9 @@ Examples:
     print(f"  📋 Candidates exported: {results['records']}")
     if results['errors']:
         print(f"  ⚠️  Transform errors: {results['errors']}")
+        print(f"  ❌ Failed names:")
+        for name in results.get("failed_names", []):
+            print(f"       • {name}")
     print(f"  💼 Total jobs: {summary.get('total_jobs', 0)}")
     print(f"  🎓 Total education: {summary.get('total_education', 0)}")
     print(f"  🏷️  Total skills: {summary.get('total_skills', 0)}")

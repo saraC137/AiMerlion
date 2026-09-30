@@ -1,0 +1,40 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Annotate #{{ candidate_id }} | NER Tool</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=Syne:wght@700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+    {% include "_shared.css" %}{% include "annotate/_page.css" %}    </style>
+</head>
+<body>
+{% include "annotate/_body.html" %}<script>
+
+const DOC_ID = {{ doc_id | tojson }};
+
+{% include "annotate/_ui_panels.js" %}{% include "annotate/_annotation_core.js" %}{% include "annotate/_save.js" %}{% include "annotate/_assist_tools.js" %}{% include "annotate/_classification.js" %}{% include "annotate/_ui_extras.js" %}{% include "annotate/_iaa.js" %}// =================================================================
+// 🚀 INIT
+// =================================================================
+buildPalette();
+buildShortcutGrid();
+initAnnotatorName();   // 👤 Prompt for annotator name on first visit
+updateAnnotatorBadge(); // 👤 Show current annotator in header badge
+renderText();
+autoDetectIAAMode();   // 📏 Auto-enter IAA mode if activated from queue page
+
+// Populate classification dropdowns with stored values from server
+// NOTE: Using tojson filter to prevent Jinja2 HTML-escaping '&' chars
+// in values like "Accounting & Finance" → would become "&amp;" and break matching!
+populateClassification(
+    {{ stored_function | tojson }},
+    {{ stored_industry | tojson }},
+    {{ stored_hard_skills | tojson }},
+    {{ stored_soft_skills | tojson }},
+    {{ stored_tags | tojson }}
+);
+</script>
+</body>
+</html>

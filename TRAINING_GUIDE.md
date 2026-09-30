@@ -109,7 +109,7 @@ Output goes to `resume_model_finetuned/`.
 ### Step 4: Train the spaCy NER model (optional, complementary)
 
 ```bash
-python train_ner.py --db resume_extractions.db --all
+python -m ml.train_ner --db resume_extractions.db --all
 ```
 
 Requires at least 5 completed documents and 10 examples per entity type. Output goes to `ml_output/`.
@@ -131,7 +131,7 @@ Two external datasets are available for supplementing your training data.
 **Import and generate JSONL:**
 
 ```bash
-python import_majinuub_resume_parsing.py
+python -m data_prep.import_majinuub_resume_parsing
 ```
 
 This creates:
@@ -141,7 +141,7 @@ This creates:
 **To merge with your own annotated data:**
 
 ```bash
-python import_majinuub_resume_parsing.py --merge-with train_data.jsonl
+python -m data_prep.import_majinuub_resume_parsing --merge-with train_data.jsonl
 ```
 
 This appends the Majinuub examples to your existing `train_data.jsonl` and outputs a merged file.
@@ -176,19 +176,19 @@ SkillSpan is best suited for the **spaCy NER model** (token-level tagging), not 
 **Import into the database (for spaCy training):**
 
 ```bash
-python import_skillspan.py --db resume_extractions.db
+python -m data_prep.import_skillspan --db resume_extractions.db
 ```
 
 **Import as JSONL (for LLM training, experimental):**
 
 ```bash
-python import_skillspan.py --db resume_extractions.db --jsonl
+python -m data_prep.import_skillspan --db resume_extractions.db --jsonl
 ```
 
 **Then train spaCy NER with SkillSpan included:**
 
 ```bash
-python train_ner.py --db resume_extractions.db --all
+python -m ml.train_ner --db resume_extractions.db --all
 ```
 
 ---
@@ -218,7 +218,7 @@ python data_prep/prepare_training_data.py --db resume_extractions.db
 python ml/finetune_unsloth.py --train-file train_data.jsonl --epochs 3
 
 # 3b. (Optional) Train spaCy NER
-python train_ner.py --db resume_extractions.db --all
+python -m ml.train_ner --db resume_extractions.db --all
 
 # 4. Deploy via Ollama
 ollama create aimerlion-resume -f resume_model_finetuned/Modelfile
@@ -230,12 +230,12 @@ ollama create aimerlion-resume -f resume_model_finetuned/Modelfile
 
 ```bash
 # LLM path — Majinuub data
-python import_majinuub_resume_parsing.py
+python -m data_prep.import_majinuub_resume_parsing
 python ml/finetune_unsloth.py --train-file training_data/majinuub_train.jsonl
 
 # NER path — SkillSpan data
-python import_skillspan.py --db resume_extractions.db
-python train_ner.py --db resume_extractions.db --all
+python -m data_prep.import_skillspan --db resume_extractions.db
+python -m ml.train_ner --db resume_extractions.db --all
 ```
 
 ---
@@ -250,8 +250,8 @@ python annotation_tool.py
 python data_prep/prepare_training_data.py --db resume_extractions.db
 
 # 3. Import external data and merge
-python import_majinuub_resume_parsing.py --merge-with train_data.jsonl
-python import_skillspan.py --db resume_extractions.db
+python -m data_prep.import_majinuub_resume_parsing --merge-with train_data.jsonl
+python -m data_prep.import_skillspan --db resume_extractions.db
 
 # 4. Train LLM on merged data
 python ml/finetune_unsloth.py \
@@ -260,7 +260,7 @@ python ml/finetune_unsloth.py \
   --epochs 3
 
 # 5. Train spaCy NER (uses both your annotations + SkillSpan)
-python train_ner.py --db resume_extractions.db --all
+python -m ml.train_ner --db resume_extractions.db --all
 
 # 6. Deploy
 ollama create aimerlion-resume -f resume_model_finetuned/Modelfile

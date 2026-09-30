@@ -1,5 +1,5 @@
 # Save as test_model.py
-from ai_extractor_finetuned import AIExtractorFineTuned
+from archive.ai_extractor_finetuned import AIExtractorFineTuned
 
 extractor = AIExtractorFineTuned()
 

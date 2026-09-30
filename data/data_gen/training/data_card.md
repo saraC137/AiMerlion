@@ -65,7 +65,7 @@ Alpaca-style JSON array. Each record has:
 ## After training
 
 1. Save LoRA adapter to `models/qwen7b_lite_v1/`
-2. Run: `python evaluate_lite.py` (next script we'll write)
+2. Run: `python -m analysis.evaluate_lite` (next script we'll write)
 3. Compare F1 against baseline `ai_extractor.py` on golden test set
 
 ## Decision threshold

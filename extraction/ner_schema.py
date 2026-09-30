@@ -32,7 +32,7 @@ Dependencies:
     pip install spacy --break-system-packages
 
 Usage:
-    from ner_schema import EntitySchema, BIOTagger, PreAnnotator
+    from extraction.ner_schema import EntitySchema, BIOTagger, PreAnnotator
     schema = EntitySchema()
     tagger = BIOTagger(schema)
     tokens, tags = tagger.tag_text(text, annotations)

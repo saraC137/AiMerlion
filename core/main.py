@@ -41,15 +41,15 @@ import math
 import time
 import unicodedata
 import json
-import config
-from utils import display_menu, save_checkpoint, load_checkpoint, get_checkpoint_info, clear_checkpoint, print_batch_table, FeedbackLoopSystem, InteractiveCorrectionSystem, PatternLearningSystem, PerformanceMonitor, standardize_phone_number, standardize_date
+from core import config
+from core.utils import display_menu, save_checkpoint, load_checkpoint, get_checkpoint_info, clear_checkpoint, print_batch_table, FeedbackLoopSystem, InteractiveCorrectionSystem, PatternLearningSystem, PerformanceMonitor, standardize_phone_number, standardize_date
 # 🗄️ Database Manager for raw + structured storage
 if config.DATABASE_ENABLED:
-    from db_manager import DatabaseManager
+    from data.db_manager import DatabaseManager
 from extraction.ai_validator import AIValidator
 from extraction.marker_extractor import get_marker_extractor
 from extraction.document_parser import DocumentParser
-from pdf_inspector import analyze_pdf_type
+from extraction.pdf_inspector import analyze_pdf_type
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -129,7 +129,7 @@ class UltimateResumeExtractor:
         # writes into raw_text_output/. (Marker is a singleton — no double load.)
         self.hybrid_extractor = None
         try:
-            from extract_raw_text import HybridExtractor
+            from data_prep.extract_raw_text import HybridExtractor
             self.hybrid_extractor = HybridExtractor()
             logger.info("🔗 HybridExtractor initialized (shared raw-text pipeline)")
         except Exception as e:
@@ -1658,7 +1658,7 @@ class UltimateResumeExtractor:
         🎯 Extract data with proper field mapping!
         Returns formatted dict + whether AI was used
         """
-        from utils import standardize_phone_number, standardize_date
+        from core.utils import standardize_phone_number, standardize_date
         
         final_results = {}
         ai_assisted = False
@@ -2731,7 +2731,7 @@ def process_resumes(extractor, folder_list, processed_folders, batch_size, exist
      # 🧠 ML: Auto-train models after batch processing
     if config.ML_ENABLED and hasattr(config, 'ML_AUTO_TRAIN_AFTER_BATCH') and config.ML_AUTO_TRAIN_AFTER_BATCH:
         try:
-            from ml_engine import MLEngine
+            from ml.ml_engine import MLEngine
             logger.info("🧠 Auto-training ML models on latest data...")
             engine = MLEngine(db_path=config.DATABASE_FILE)
             train_results = engine.train_all()
@@ -3274,7 +3274,7 @@ def list_candidates_and_files(extractor: "UltimateResumeExtractor"):
 def main():
     """🎭 The Main Show with MENU MAGIC!"""
 
-    from utils import display_menu, save_checkpoint, load_checkpoint, get_checkpoint_info, clear_checkpoint, print_batch_table, FeedbackLoopSystem, InteractiveCorrectionSystem, PatternLearningSystem, PerformanceMonitor, select_folders_to_process_enhanced
+    from core.utils import display_menu, save_checkpoint, load_checkpoint, get_checkpoint_info, clear_checkpoint, print_batch_table, FeedbackLoopSystem, InteractiveCorrectionSystem, PatternLearningSystem, PerformanceMonitor, select_folders_to_process_enhanced
 
     folder_list = []
     processed_folders = []

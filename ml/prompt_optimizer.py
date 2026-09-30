@@ -632,8 +632,7 @@ def get_optimized_prompt(field: str, text: str) -> str:
 
 def main():
     """Run prompt optimization."""
-    import config
-    
+    from core import config
     print("="*70)
     print("PROMPT OPTIMIZATION SYSTEM")
     print("="*70)

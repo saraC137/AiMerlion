@@ -17,7 +17,7 @@ coloredlogs.install(level='INFO', logger=logger,
 
 # Try to import config for OCR settings
 try:
-    import config
+    from core import config
 except ImportError:
     config = None
 

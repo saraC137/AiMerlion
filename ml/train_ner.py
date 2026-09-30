@@ -20,16 +20,16 @@ Pipeline Phases:
 
 Usage:
     # Run the full pipeline (all phases)
-    python train_ner.py --db resume_extractions.db --all
+    python -m ml.train_ner --db resume_extractions.db --all
 
     # Run individual phases
-    python train_ner.py --db resume_extractions.db --validate
-    python train_ner.py --db resume_extractions.db --split
-    python train_ner.py --db resume_extractions.db --train-ner
-    python train_ner.py --db resume_extractions.db --train-classifier
+    python -m ml.train_ner --db resume_extractions.db --validate
+    python -m ml.train_ner --db resume_extractions.db --split
+    python -m ml.train_ner --db resume_extractions.db --train-ner
+    python -m ml.train_ner --db resume_extractions.db --train-classifier
 
     # Customize settings
-    python train_ner.py --db resume_extractions.db --all --min-docs 10 --epochs 50
+    python -m ml.train_ner --db resume_extractions.db --all --min-docs 10 --epochs 50
 
 Dependencies:
     pip install spacy scikit-learn numpy --break-system-packages
@@ -137,7 +137,7 @@ def load_annotated_documents(db_path: str, status_filter: str = "completed") -> 
     # We import HERE (not at top-level) so the script can still show
     # help text even if ner_schema.py isn't in the Python path.
     try:
-        from ner_schema import (
+        from extraction.ner_schema import (
             EntitySchema, AnnotationStorage, TrainingExporter,
             AnnotatedDocument, BIOTagger
         )
@@ -344,7 +344,7 @@ def validate_data(
     # ── Check 5: BIO consistency (orphaned I- tags) ───────────────────
     # This checks if the BIO tagger would produce valid sequences
     try:
-        from ner_schema import EntitySchema, BIOTagger
+        from extraction.ner_schema import EntitySchema, BIOTagger
         schema = EntitySchema()
         tagger = BIOTagger(schema)
 
@@ -694,13 +694,22 @@ def train_ner_model(
                 entities.append((ann.char_start, ann.char_end, ann.entity_type))
                 seen_spans.append((ann.char_start, ann.char_end, ann.entity_type))
 
-            # Create the spaCy Example
+            # ── BULLETPROOF: Wrap in try/except and skip bad docs ───
+            # If ANY entity in this doc causes E024, we skip the
+            # entire doc rather than crashing the whole pipeline.
+            # Like a casting director — if an actor can't perform,
+            # we recast, we don't cancel the show! 🎭
             try:
                 doc = nlp_model.make_doc(adoc.raw_text)
                 example = Example.from_dict(doc, {"entities": entities})
+
+                # Test that this example can actually train
+                # by doing a dry-run prediction
+                nlp_model.update([example], sgd=None, losses={}, drop=0.0)
+
                 examples.append(example)
             except Exception as e:
-                logger.warning(f"Failed to create Example for {adoc.doc_id}: {e}")
+                logger.warning(f"Skipping doc {adoc.doc_id}: {e}")
                 skipped += 1
 
         if skipped > 0:
@@ -1013,7 +1022,7 @@ def train_classifier(
     Console.info("Loading classification data from database...")
 
     try:
-        from ner_schema import EntitySchema, TrainingExporter
+        from extraction.ner_schema import EntitySchema, TrainingExporter
         schema = EntitySchema()
         exporter = TrainingExporter(schema)
 
@@ -1303,10 +1312,10 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python train_ner.py --db resume_extractions.db --all
-  python train_ner.py --db resume_extractions.db --validate
-  python train_ner.py --db resume_extractions.db --train-ner --epochs 50
-  python train_ner.py --db resume_extractions.db --train-classifier
+  python -m ml.train_ner --db resume_extractions.db --all
+  python -m ml.train_ner --db resume_extractions.db --validate
+  python -m ml.train_ner --db resume_extractions.db --train-ner --epochs 50
+  python -m ml.train_ner --db resume_extractions.db --train-classifier
         """
     )
 

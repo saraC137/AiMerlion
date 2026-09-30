@@ -55,7 +55,7 @@ from flask import (
 )
 
 # 🆕 ML-powered job role prediction
-from job_role_predictor import HybridClassifier
+from ml.job_role_predictor import HybridClassifier
 _hybrid_classifier = HybridClassifier()  # Loads .pkl files once at startup
 
 # =============================================================================

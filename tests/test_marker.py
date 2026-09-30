@@ -6,7 +6,7 @@ import os
 import sys
 import logging
 import coloredlogs
-from marker_extractor import MarkerExtractor
+from extraction.marker_extractor import MarkerExtractor
 
 # Fix Windows console encoding
 if sys.platform == 'win32':

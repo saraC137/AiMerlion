@@ -2,10 +2,9 @@ import os
 import sys
 import pandas as pd
 import json
-from main import UltimateResumeExtractor, find_candidate_folders
-from utils import save_checkpoint, load_checkpoint
-import config
-
+from core.main import UltimateResumeExtractor, find_candidate_folders
+from core.utils import save_checkpoint, load_checkpoint
+from core import config
 def save_data_and_progress(extracted_data, candidate_folder):
     """
     Asks the user to save the extracted data and update the progress checkpoint.

@@ -1,0 +1,570 @@
+
+<!-- ================================================================
+     HEADER — Two-row layout: Title row + Tool bar
+     Like a marquee above the stage, darling! 🎭
+     ================================================================ -->
+<div class="header" style="flex-direction:column; align-items:stretch; gap:0; padding:0;">
+
+    <!-- Row 1: Navigation + Title + Save Actions -->
+    <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 24px;">
+        <div style="display:flex; align-items:center; gap:12px;">
+            <a href="/?page={{ back_page }}&status={{ back_status }}#row-{{ candidate_id }}" class="btn btn-sm" style="font-size:0.72rem; padding:4px 10px;">← Back</a>
+            <h1 style="font-size:1.1rem;">🏷️ <span>#{{ candidate_id }}</span>
+                {% if structured.name %}<span style="font-weight:400; color:var(--text-secondary); font-size:0.82rem; margin-left:4px;">{{ structured.name }}</span>{% endif %}
+            </h1>
+            <!-- id="statusBadge" lets JS update this live after every save
+                 without needing a full page reload! 💅 -->
+            <span id="statusBadge"
+                  class="badge {{ 'badge-complete' if ann_status == 'completed' else 'badge-progress' if ann_status == 'in_progress' else 'badge-pending' }}">
+                {{ ann_status }}
+            </span>
+            <!-- 👤 Current annotator — shows who's working, click to change -->
+            <span id="annotatorBadge"
+                  style="font-size:0.75rem; color:var(--accent-cyan); cursor:pointer;
+                         padding:4px 12px; border:1px solid var(--accent-cyan);
+                         border-radius:12px; display:inline-flex; align-items:center; gap:4px;
+                         transition: background 0.15s, color 0.15s;"
+                  onmouseenter="this.style.background='rgba(126,232,250,0.12)'"
+                  onmouseleave="this.style.background='transparent'"
+                  onclick="changeAnnotatorName()"
+                  title="Click to change annotator name">
+                👤 <span id="annotatorBadgeName">—</span>
+                <span style="font-size:0.6rem; opacity:0.6;">✎</span>
+            </span>
+        </div>
+        <div style="display:flex; gap:6px;" id="normalSaveButtons">
+            <button class="btn" onclick="saveAnnotations('in_progress')" title="Save draft (Ctrl+S)">💾 Save</button>
+            <button class="btn btn-success" onclick="showSavePreview('completed')" title="Validate & mark complete">✅ Complete</button>
+        </div>
+    </div>
+
+    <!-- Row 2: Tool buttons — grouped by function -->
+    <div style="display:flex; align-items:center; justify-content:space-between; padding:6px 24px; background:var(--bg-secondary); border-top:1px solid var(--border);">
+        <!-- Left: Annotation tools -->
+        <div style="display:flex; gap:6px;">
+            <button class="btn btn-sm" onclick="runPreAnnotate()" title="Re-run auto-labeling">🤖 Pre-Annotate</button>
+            <button class="btn btn-sm" onclick="clearAll()" title="Remove all annotations">🗑️ Clear</button>
+        </div>
+        <!-- Center: Inspector popups -->
+        <div style="display:flex; gap:6px;">
+            <button class="btn btn-sm" onclick="openLabelsModal()" title="View all labels">
+                📋 Labels <span class="tab-badge" id="headerLabelsBadge">0</span>
+            </button>
+            <button class="btn btn-sm" onclick="openBIOModal()" title="Preview BIO tags">🏷️ BIO</button>
+            <button class="btn btn-sm" onclick="openEdgeModal()" title="Edge case scan">🧩 Edge</button>
+            <button class="btn btn-sm" onclick="openIAAModal()" title="Inter-Annotator Agreement dashboard"
+                    style="border-color:var(--accent-pink); color:var(--accent-pink);">
+                📏 IAA
+            </button>
+            <button class="btn btn-sm" onclick="openClassifyModal()" title="Classification & Skills"
+                    style="border-color:var(--accent-purple); color:var(--accent-purple);">
+                🧠 Classify
+            </button>
+            <!-- 📋 Annotations popup button — clicks open the full Labels inspector modal 
+                 (the same rich popup that openLabelsModal() builds). The badge counter
+                 is updated live by updateAnnoList() whenever annotations change. 🎭 -->
+            <button class="btn btn-sm" onclick="openLabelsModal()" title="View all annotations in popup">
+                📋 Annotations
+                <span class="tab-badge" id="headerAnnotationsBadge">0</span>
+            </button>
+        </div>
+        <!-- Right: Help -->
+        <div>
+            <button class="btn btn-sm" onclick="openHelp()" title="User manual" style="border-color:var(--accent-purple); color:var(--accent-purple);">❓ Help</button>
+        </div>
+    </div>
+</div>
+
+<!-- ================================================================
+     📏 IAA MODE BANNER — Between toolbar and main layout.
+     THIS POSITION IS CRITICAL! Must be ABOVE the anno-layout grid
+     or the banner renders off-screen below the viewport! 🎭
+     ================================================================ -->
+<div id="iaaBanner" class="iaa-mode-banner" style="display:none;">
+    <span class="iaa-badge">IAA MODE</span>
+    <span>Annotating as <strong id="iaaBannerName"
+          style="cursor:pointer; border-bottom:2px dashed var(--accent-pink);
+                 padding-bottom:1px; transition: opacity 0.15s;"
+          onmouseenter="this.style.opacity='0.7'"
+          onmouseleave="this.style.opacity='1'"
+          onclick="changeIAAAnnotatorName()"
+          title="Click to change Annotator B name">—</strong>
+          <span style="font-size:0.55rem; opacity:0.5; cursor:pointer;"
+                onclick="changeIAAAnnotatorName()">✎ edit</span>
+          (Annotator B).
+          Primary annotations hidden · Label from scratch.</span>
+    <!-- Save status indicator — shows ✅ after successful save, ⚠️ if unsaved changes -->
+    <span id="iaaSaveStatus" style="font-size:0.72rem; color:var(--text-muted);
+          margin-left:8px; transition: color 0.3s;">
+        <!-- Populated dynamically by JS -->
+    </span>
+    <button class="btn btn-sm" onclick="saveIAAAnnotations()"
+            id="iaaSaveBtn"
+            style="margin-left:auto; font-size:0.78rem; padding:6px 18px;
+                   background:rgba(247,120,186,0.15);
+                   border: 2px solid var(--accent-pink); color:var(--accent-pink); font-weight:700;">
+        💾 Save IAA
+    </button>
+    <button class="btn btn-sm" onclick="exitIAAMode()"
+            style="font-size:0.68rem; padding:4px 12px;">
+        ✕ Exit
+    </button>
+</div>
+
+    <!-- MAIN LAYOUT — 3 columns: text | drag-handle | side panel -->
+<div class="anno-layout" id="annoLayout">
+
+    <!-- LEFT: Annotated Text -->
+    <div class="text-panel" id="textPanel">
+        <div class="text-content" id="textContent"></div>
+    </div>
+
+    <!-- DRAG HANDLE — grab and drag left/right to resize the side panel.
+         Think of it as the velvet rope between VIP and the dance floor! 🚪💅 -->
+    <div class="resize-handle" id="resizeHandle" title="Drag to resize panel"></div>
+
+    <!-- RIGHT: Side Panel — Entity Palette + Classify + Annotation List -->
+    <div class="side-panel">
+
+        <!-- 
+            🎨 ENTITY PALETTE — Always visible at top.
+            Your makeup station is ALWAYS open, honey! 💄
+        -->
+        <div class="palette-section">
+            <h3>🎨 Entity Palette <small style="opacity:0.5; font-size:0.58rem;">(select then highlight)</small></h3>
+            <div id="entityPalette"></div>
+        </div>
+
+        <!-- 
+            🧠 CLASSIFICATION — Moved to popup modal!
+            Just a quick-access button here to open it. 💅
+        -->
+        <div style="padding:8px 14px; border-top:1px solid var(--border); flex-shrink:0;">
+            <button class="btn btn-sm" onclick="openClassifyModal()" 
+                    style="width:100%; font-size:0.68rem; border-color:var(--accent-purple); color:var(--accent-purple);">
+                🧠 Classification & Skills
+            </button>
+        </div>
+
+    </div><!-- end side-panel -->
+</div>
+
+<!-- ================================================================
+     ❓ HELP MODAL — Fairy Codemother's Annotation Manual
+     Click the dark backdrop or press Escape to close.
+     ================================================================ -->
+<div class="help-overlay" id="helpOverlay" onclick="closeHelpOnBackdrop(event)">
+  <div class="help-modal" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+
+    <!-- Modal Header -->
+    <div class="help-header">
+      <h2 id="helpTitle">✨ Annotation Tool — User Manual</h2>
+      <button class="help-close" onclick="closeHelp()" title="Close manual">✕</button>
+    </div>
+
+    <!-- Modal Body — all the good stuff! -->
+    <div class="help-body">
+
+      <!-- ── SECTION 1: Quick Start ── -->
+      <div class="help-section">
+        <h3>🚀 Quick Start — The 3-Step Routine</h3>
+        <p>Annotating a resume is a 3-step dance. Master these and you'll be flying through the queue!</p>
+        <ol class="help-steps">
+          <li><div><strong>Pick your entity label</strong> from the palette on the right panel — click a coloured button (e.g. <em>Person Name</em>, <em>Email Address</em>) OR press its keyboard shortcut number. The active label will glow with a white border.</div></li>
+          <li><div><strong>Highlight the text</strong> in the resume on the left — click and drag across the words you want to label. Release the mouse and the annotation appears as a coloured highlight instantly.</div></li>
+          <li><div><strong>Save your work</strong> — press <span class="kbd">Ctrl S</span> to save a draft anytime, or click <em>✅ Mark Complete</em> when the resume is fully annotated and ready for export.</div></li>
+        </ol>
+      </div>
+
+      <!-- ── SECTION 2: Highlighting Tips ── -->
+      <div class="help-section">
+        <h3>🖱️ Highlighting — Tips for Accurate Selection</h3>
+        <div class="help-tip tip-info">
+          💡 <span>Always <strong>select an entity label first</strong>, THEN drag to highlight. Dragging without an active label does nothing — the text stays unselected.</span>
+        </div>
+        <div class="help-tip tip-warn">
+          ⚠️ <span><strong>Avoid dragging into coloured label chips</strong> — the tiny floating tags above highlighted text (like "PERSON", "EMAIL"). If your selection clips one, a warning toast appears. Just try again, starting your drag slightly lower or to the side of the chip.</span>
+        </div>
+        <div class="help-tip tip-warn">
+          ⚠️ <span><strong>Overlapping annotations</strong> on the same layer are not allowed. If you try to highlight text that's already labelled, you'll get a warning. Delete the existing annotation first, then re-label.</span>
+        </div>
+        <div class="help-tip tip-success">
+          ✅ <span>The tool <strong>automatically trims</strong> leading and trailing whitespace from your selection — no need to be pixel-perfect at the word edges.</span>
+        </div>
+        <div class="help-tip tip-success">
+          ✅ <span>Clicking any coloured highlight in the text panel will <strong>jump to that annotation</strong> in the Labels list tab on the right.</span>
+        </div>
+      </div>
+
+      <!-- ── SECTION 3: Keyboard Shortcuts ── -->
+      <div class="help-section">
+        <h3>⌨️ Keyboard Shortcuts</h3>
+        <p>Speed up your workflow — no mouse needed for most actions!</p>
+        <div class="shortcut-grid" id="shortcutGrid">
+          <!-- Static shortcuts always available -->
+          <div class="shortcut-item"><span class="kbd">Ctrl S</span> Save draft</div>
+          <div class="shortcut-item"><span class="kbd">Del</span> Delete last annotation</div>
+          <div class="shortcut-item"><span class="kbd">Esc</span> Deselect active label</div>
+          <!-- Entity shortcut keys are injected dynamically by buildShortcutGrid() on init -->
+        </div>
+      </div>
+
+      <!-- ── SECTION 4: The Side Panel Tabs ── -->
+      <div class="help-section">
+        <h3>🗂️ Side Panel — What Each Section Does</h3>
+        <ol class="help-steps">
+          <li><div><strong>🎨 Entity Palette</strong> (top, always visible) — Your label buttons, organised by category: Personal, Professional, Education, Skills. Buttons with a keyboard shortcut show the key hint on the right side of the button.</div></li>
+          <li><div><strong>📋 Labels tab</strong> — Lists every annotation you've added. Each item shows the entity type, a preview of the labelled text, and a <em>✕</em> delete button. The badge on the tab shows the total count.</div></li>
+          <li><div><strong>🏷️ BIO tab</strong> — Previews the BIO-encoded training format (B-ENTITY = beginning of entity, I-ENTITY = inside entity, O = outside / no label). Hit <em>🔄 Refresh</em> after adding annotations. This is exactly what your NER model sees during training!</div></li>
+          <li><div><strong>🧩 Edge tab</strong> — Scans the resume for tricky annotation patterns like date ranges containing "Present" or "Organisation, Location" combos that need splitting. Hit <em>🔍 Scan</em> to run the check and see hints.</div></li>
+          <li><div><strong>🧠 Classify tab</strong> — Shows automatically predicted Function and Industry based on the resume text. You can correct them using the dropdowns and save. These values will appear in the exported talent database profiles.</div></li>
+        </ol>
+      </div>
+
+      <!-- ── SECTION 5: Toolbar Buttons ── -->
+      <div class="help-section">
+        <h3>🔧 Toolbar Buttons Explained</h3>
+        <ol class="help-steps">
+          <li><div><strong>🤖 Pre-Annotate</strong> — Runs the auto-labeller with a confidence threshold you choose (0.0–1.0, default 0.6). It adds suggested labels without overwriting your existing human annotations.</div></li>
+          <li><div><strong>🧩 Edge Cases</strong> — Jumps to the Edge tab and scans the text for commonly mis-annotated patterns.</div></li>
+          <li><div><strong>🏷️ BIO Preview</strong> — Jumps to the BIO tab and loads the current token-tag breakdown.</div></li>
+          <li><div><strong>🗑️ Clear</strong> — Removes ALL annotations after a confirmation prompt. This cannot be undone!</div></li>
+          <li><div><strong>💾 Save Draft</strong> — Saves with status <em>in_progress</em>. Come back and continue later.</div></li>
+          <li><div><strong>✅ Mark Complete</strong> — Saves with status <em>completed</em>. Only completed resumes are included in training data exports.</div></li>
+        </ol>
+      </div>
+
+      <!-- ── SECTION 6: Edge Cases Guide ── -->
+      <div class="help-section">
+        <h3>🧩 Common Edge Cases & How to Handle Them</h3>
+        <div class="help-tip tip-warn">
+          ⚠️ <span><strong>Date ranges with "Present" or "Current"</strong> — e.g. <em>"Jan 2020 – Present"</em>. The word "Present" MUST be included inside the <em>WORK_DATE</em> span. Do NOT stop your selection before it.</span>
+        </div>
+        <div class="help-tip tip-warn">
+          ⚠️ <span><strong>Organisation + Location on the same line</strong> — e.g. <em>"DBS Bank, Singapore"</em>. Create TWO separate annotations: <em>ORGANIZATION</em> for "DBS Bank" and <em>LOCATION</em> for "Singapore". Do NOT label the full line as one entity.</span>
+        </div>
+        <div class="help-tip tip-warn">
+          ⚠️ <span><strong>Combined Gender/Age field</strong> — e.g. <em>"Female/22"</em> or <em>"Male / 35"</em>. Label the <strong>entire combined string</strong> as <em>GENDER</em> — do NOT split gender and age into separate spans. The age is considered part of that single field value.</span>
+        </div>
+        <div class="help-tip tip-info">
+          💡 <span><strong>Marital Status field</strong> — e.g. <em>"Single"</em>, <em>"Married"</em>, <em>"Divorced"</em>. Label only the status VALUE as <em>MARITAL_STATUS</em>, not the field label ("Status:") itself.</span>
+        </div>
+        <div class="help-tip tip-info">
+          💡 <span><strong>Qualifications with honours</strong> — e.g. <em>"B.Eng (Hons)"</em>. Include the full string including the honours notation inside the <em>DEGREE</em> span.</span>
+        </div>
+        <div class="help-tip tip-info">
+          💡 <span><strong>Multiple phone numbers</strong> — label each number as a separate <em>PHONE</em> annotation, not both in one span.</span>
+        </div>
+        <div class="help-tip tip-info">
+          💡 <span><strong>NRIC/Passport numbers</strong> — always label the full alphanumeric string including any trailing letter (e.g. "S9243711F").</span>
+        </div>
+      </div>
+
+      <!-- ── SECTION 7: Export ── -->
+      <div class="help-section">
+        <h3>📤 Exporting Data</h3>
+        <p>Two types of exports are available from the main queue page (← Back):</p>
+        <ol class="help-steps">
+          <li><div><strong>📊 Export CSV</strong> — Talent database profile in Excel-compatible CSV. One row per candidate. Nested fields (Work Experience, Education, tags/skills) are stored as JSON inside their cells. Open in Excel and use <em>Data → Text to Columns</em> or Power Query to expand them.</div></li>
+          <li><div><strong>📋 Export JSON</strong> — Same talent database profile but as a clean JSON array. One object per candidate with all structured fields. Ready to import into your CRM or ATS system.</div></li>
+          <li><div><strong>🤖 Export Training Data</strong> — NER model training formats: CoNLL-2003, spaCy v3 JSON, HuggingFace JSONL, or full metadata JSON. Only for ML/NLP use — not for the talent database.</div></li>
+        </ol>
+        <div class="help-tip tip-info">
+          💡 <span>Profile exports (CSV/JSON) include all annotated fields: Name, Phone, Email, Current Company, Current Title, Current Location, <strong>Expected Location</strong>, Gender, <strong>Function</strong>, <strong>Industry</strong>, Summary, Language Skills, Work Experience, Education, <strong>Project Experience</strong>, and skill <strong>tags</strong>. Only <em>Team</em>, <em>Last Contact</em>, and <em>Created By</em> require manual input in your talent database.</span>
+        </div>
+        <div class="help-tip tip-info">
+          💡 <span>Only resumes with status <em>completed</em> are included by default. You can choose <em>in_progress</em> or <em>all</em> when prompted.</span>
+        </div>
+      </div>
+
+    </div><!-- /help-body -->
+  </div><!-- /help-modal -->
+</div><!-- /help-overlay -->
+
+<!-- ================================================================
+     🪞 SAVE PREVIEW MODAL — Quality check before committing!
+     "A queen inspects her outfit before the ball!" 👑
+     ================================================================ -->
+<div class="preview-overlay" id="previewOverlay" onclick="closePreviewOnBackdrop(event)">
+  <div class="preview-modal" role="dialog" aria-modal="true" aria-labelledby="previewTitle">
+
+    <!-- Modal Header -->
+    <div class="preview-header">
+      <h2 id="previewTitle" style="color: var(--accent-cyan);">
+        🪞 Save Preview — <span id="previewStatusLabel">Draft</span>
+      </h2>
+      <button class="preview-close" onclick="closePreview()" title="Cancel (Escape)">✕</button>
+    </div>
+
+    <!-- Modal Body — populated by JS -->
+    <div class="preview-body" id="previewBody">
+      <div class="preview-loading">
+        <div class="spinner"></div>
+        Validating annotations... ✨
+      </div>
+    </div>
+
+    <!-- Modal Footer — Confirm / Cancel -->
+    <div class="preview-footer">
+      <div class="preview-footer-info" id="previewFooterInfo">
+        Press <strong>Enter</strong> to confirm, <strong>Escape</strong> to cancel
+      </div>
+      <div class="preview-footer-actions">
+        <button class="btn" onclick="closePreview()">← Go Back</button>
+        <button class="btn btn-primary" id="previewConfirmBtn" onclick="confirmSave()">
+          💾 Confirm Save
+        </button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ================================================================
+     📋 LABELS INSPECTOR MODAL — Full annotation list popup
+     ================================================================ -->
+<div class="inspector-overlay" id="labelsOverlay" onclick="if(event.target===this)closeInspector('labels')">
+  <div class="inspector-modal" role="dialog" aria-modal="true">
+    <div class="inspector-header">
+      <h3>📋 All Annotations <span class="tab-badge" id="labelsModalBadge">0</span></h3>
+      <button class="preview-close" onclick="closeInspector('labels')" title="Close (Escape)">✕</button>
+    </div>
+    <div class="inspector-body" id="labelsModalBody">
+      <div class="anno-list-empty">Loading…</div>
+    </div>
+  </div>
+</div>
+
+<!-- ================================================================
+     🏷️ BIO PREVIEW INSPECTOR MODAL
+     ================================================================ -->
+<div class="inspector-overlay" id="bioOverlay" onclick="if(event.target===this)closeInspector('bio')">
+  <div class="inspector-modal" role="dialog" aria-modal="true">
+    <div class="inspector-header">
+      <h3>🏷️ BIO Tag Preview</h3>
+      <button class="preview-close" onclick="closeInspector('bio')" title="Close (Escape)">✕</button>
+    </div>
+    <div class="inspector-body">
+      <button class="btn btn-sm" onclick="loadBIOPreview()" style="margin-bottom:10px; width:100%;">
+          🔄 Refresh BIO Preview
+      </button>
+      <div style="margin-bottom:8px; font-size:0.72rem; color:var(--text-muted);" id="bioStats">
+          Click Refresh to generate BIO tag preview.
+      </div>
+      <div class="bio-preview" id="bioPreview">
+          <div style="color:var(--text-muted); font-size:0.78rem; text-align:center; padding:20px 0;">
+              Press Refresh to load tags. ✨
+          </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================================================================
+     🧩 EDGE CASES INSPECTOR MODAL
+     ================================================================ -->
+<div class="inspector-overlay" id="edgeOverlay" onclick="if(event.target===this)closeInspector('edge')">
+  <div class="inspector-modal" role="dialog" aria-modal="true">
+    <div class="inspector-header">
+      <h3>🧩 Edge Case Analysis</h3>
+      <button class="preview-close" onclick="closeInspector('edge')" title="Close (Escape)">✕</button>
+    </div>
+    <div class="inspector-body">
+      <button class="btn btn-sm" onclick="loadEdgeCases()" style="margin-bottom:10px; width:100%;">
+          🔍 Scan for Edge Cases
+      </button>
+      <div id="edgeHints">
+          <div style="color:var(--text-muted); font-size:0.78rem; text-align:center; padding:20px 0;">
+              Click Scan to detect tricky annotation patterns. 🧩
+          </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================================================================
+     🧠 CLASSIFICATION & SKILLS MODAL
+     
+     The grand Classification popup! Contains Function, Industry,
+     Hard Skills, Soft Skills, and AI-generated Tags. 
+     Opens via the 🧠 Classify toolbar button or sidebar button.
+     
+     Uses the inspector-overlay pattern (same as Labels/BIO/Edge)
+     but wider to fit the skills chip layout. Think of it as 
+     opening a full talent dossier — the whole story on one page! 💅✨
+     ================================================================ -->
+<div class="inspector-overlay" id="classifyOverlay" onclick="if(event.target===this)closeInspector('classify')">
+  <div class="inspector-modal classify-modal-wide" role="dialog" aria-modal="true">
+    <div class="inspector-header" style="border-bottom-color:var(--accent-purple);">
+      <h3>🧠 Classification & Skills</h3>
+      <button class="preview-close" onclick="closeInspector('classify')" title="Close (Escape)">✕</button>
+    </div>
+    <div class="inspector-body" style="padding:20px 24px;">
+
+      <!-- Function + Industry dropdowns — two-column -->
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px;">
+        <div>
+          <label style="font-size:0.7rem; color:var(--text-muted); display:block; margin-bottom:4px; font-weight:600;">
+            🧠 Function / Department
+          </label>
+          <select id="functionSelect" class="classify-select">
+            <!-- options populated by populateClassification() in JS -->
+          </select>
+        </div>
+        <div>
+          <label style="font-size:0.7rem; color:var(--text-muted); display:block; margin-bottom:4px; font-weight:600;">
+            🏢 Industry Sector
+          </label>
+          <select id="industrySelect" class="classify-select">
+            <!-- options populated by populateClassification() in JS -->
+          </select>
+        </div>
+      </div>
+
+      <!-- Hard Skills -->
+      <div style="margin-bottom:14px;">
+        <label style="font-size:0.7rem; color:var(--accent-cyan); display:block; margin-bottom:4px; font-weight:600;">
+          🔧 Hard Skills <small style="opacity:0.5; color:var(--text-muted);">(technical skills from resume)</small>
+        </label>
+        <div id="hardSkillsContainer" class="skill-tags-container"></div>
+        <div style="display:flex; gap:4px; margin-top:5px;">
+          <input id="hardSkillInput" type="text" class="skill-tag-input"
+                 placeholder="Add hard skill…" 
+                 onkeydown="if(event.key==='Enter'){addSkillTag('hard');event.preventDefault();}">
+          <button class="btn btn-sm" onclick="addSkillTag('hard')" 
+                  style="font-size:0.65rem; padding:3px 10px; flex-shrink:0;">+ Add</button>
+        </div>
+      </div>
+
+      <!-- Soft Skills -->
+      <div style="margin-bottom:14px;">
+        <label style="font-size:0.7rem; color:var(--accent-purple); display:block; margin-bottom:4px; font-weight:600;">
+          💬 Soft Skills <small style="opacity:0.5; color:var(--text-muted);">(interpersonal skills from resume)</small>
+        </label>
+        <div id="softSkillsContainer" class="skill-tags-container"></div>
+        <div style="display:flex; gap:4px; margin-top:5px;">
+          <input id="softSkillInput" type="text" class="skill-tag-input"
+                 placeholder="Add soft skill…"
+                 onkeydown="if(event.key==='Enter'){addSkillTag('soft');event.preventDefault();}">
+          <button class="btn btn-sm" onclick="addSkillTag('soft')" 
+                  style="font-size:0.65rem; padding:3px 10px; flex-shrink:0;">+ Add</button>
+        </div>
+      </div>
+
+      <!-- Tags -->
+      <div style="margin-bottom:16px;">
+        <label style="font-size:0.7rem; color:var(--accent-green); display:block; margin-bottom:4px; font-weight:600;">
+          🏷️ Tags <small style="opacity:0.5; color:var(--text-muted);">(customizable keywords for organizing, filtering &amp; searching)</small>
+        </label>
+
+        <!-- Active tag chips -->
+        <div id="tagsContainer" class="skill-tags-container tags-ai"></div>
+
+        <!-- Manual input row -->
+        <div style="display:flex; gap:4px; margin-top:5px;">
+          <input id="tagInput" type="text" class="skill-tag-input"
+                 placeholder="Type a custom tag…"
+                 onkeydown="if(event.key==='Enter'){addSkillTag('tag');event.preventDefault();}">
+          <button class="btn btn-sm" onclick="addSkillTag('tag')"
+                  style="font-size:0.65rem; padding:3px 10px; flex-shrink:0;">+ Add</button>
+          <button class="btn btn-sm" id="paletteToggleBtn"
+                  onclick="toggleTagPalette()"
+                  style="font-size:0.65rem; padding:3px 10px; flex-shrink:0; opacity:0.75;"
+                  title="Quick-pick common tags">⚡ Quick Pick</button>
+        </div>
+
+        <!-- ── Quick-pick palette ──────────────────────────────── -->
+        <div id="tagPalette" style="display:none; margin-top:10px;
+             border:1px solid rgba(86,211,100,0.2); border-radius:8px;
+             padding:10px 12px; background:rgba(86,211,100,0.04);">
+
+          <div style="font-size:0.62rem; color:var(--text-muted);
+               margin-bottom:8px; letter-spacing:0.04em; text-transform:uppercase;">
+            Click to add · Click again to remove
+          </div>
+
+          <div id="tagPaletteGroups"></div>
+        </div>
+      </div>
+
+      <!-- Action row + Status -->
+      <div style="display:flex; gap:8px; align-items:center;">
+        <button class="btn btn-sm" onclick="reclassify()" style="font-size:0.72rem; padding:6px 16px;">
+          🔄 Re‑run AI Classification
+        </button>
+        <button class="btn btn-sm btn-primary" onclick="saveClassification()" style="font-size:0.72rem; padding:6px 16px;">
+          💾 Save Classification
+        </button>
+        <div id="classifyStatus" style="font-size:0.65rem; color:var(--text-muted); margin-left:8px;"></div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ================================================================
+     📏 IAA DASHBOARD MODAL
+     
+     The grand agreement showdown! Shows Cohen's Kappa, F1 scores,
+     and a gorgeous heatmap of per-entity agreement. Like a talent
+     show scoreboard where every judge's vote is visible! 🏆👩‍⚖️👨‍⚖️
+     ================================================================ -->
+<div class="inspector-overlay" id="iaaOverlay" onclick="if(event.target===this)closeInspector('iaa')">
+  <div class="inspector-modal iaa-modal-wide" role="dialog" aria-modal="true">
+    <div class="inspector-header" style="border-bottom-color:var(--accent-pink); flex-wrap:wrap; gap:8px;">
+      <h3>📏 Inter-Annotator Agreement</h3>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <!-- Toggle: show this doc only vs. all docs -->
+        <button class="btn btn-sm" id="iaaToggleScope" onclick="toggleIAAScope()"
+                style="font-size:0.65rem; padding:3px 10px;">
+            🔍 This Doc
+        </button>
+        <button class="preview-close" onclick="closeInspector('iaa')" title="Close (Escape)">✕</button>
+      </div>
+      <!-- ── Annotator selector row ─────────────────────────────────
+           Shown below the title row. Pills for each Annotator B + "All".
+           Hidden until annotators are loaded from the API. -->
+      <div id="iaaAnnotatorSelector"
+           style="display:none; flex-wrap:wrap; gap:6px; width:100%;
+                  padding-top:6px; border-top:1px solid var(--border); margin-top:2px;">
+        <!-- Pills injected by renderAnnotatorSelector() -->
+      </div>
+    </div>
+    <div class="inspector-body" id="iaaModalBody" style="padding:20px 24px;">
+      <!-- Content injected by renderIAADashboard() -->
+      <div style="text-align:center; padding:40px; color:var(--text-muted);">
+        Loading IAA data... ⏳
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================================================================
+     👤 ANNOTATOR NAME PROMPT
+     
+     Shows on first visit (if no annotator name in localStorage).
+     Like the sign-in sheet at the stage door — you can't go on
+     without putting your name down, darling! 🎭✍️
+     ================================================================ -->
+<div class="annotator-prompt-overlay" id="annotatorPromptOverlay">
+  <div class="annotator-prompt-card">
+    <div style="font-size:2.2rem; margin-bottom:8px;">🎭</div>
+    <h3>Welcome, Annotator!</h3>
+    <p>
+      Enter your name so we can track who annotated what.
+      This enables <strong>Inter-Annotator Agreement</strong> (IAA)
+      — comparing annotations across different people! 📏
+    </p>
+    <input type="text" id="annotatorNameInput" placeholder="Your name (e.g. Soraya, Ahmad, etc.)"
+           maxlength="50" autocomplete="off"
+           onkeydown="if(event.key==='Enter')confirmAnnotatorName()">
+    <div style="display:flex; gap:8px; justify-content:center;">
+      <button class="btn btn-sm btn-primary" onclick="confirmAnnotatorName()"
+              style="padding:8px 24px; font-size:0.8rem;">
+        ✨ Let's Go!
+      </button>
+    </div>
+    <div id="annotatorNameError" style="color:var(--accent-red); font-size:0.7rem; margin-top:8px; display:none;"></div>
+  </div>
+</div>
+

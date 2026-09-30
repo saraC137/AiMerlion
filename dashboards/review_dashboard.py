@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 
 # 🧠 ML Engine integration (graceful degradation if not available)
 try:
-    from ml_engine import MLEngine
+    from ml.ml_engine import MLEngine
     ML_AVAILABLE = True
 except ImportError:
     ML_AVAILABLE = False

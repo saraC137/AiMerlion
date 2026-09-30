@@ -43,7 +43,7 @@ Dependencies:
     pip install scikit-learn joblib numpy --break-system-packages
 
 Usage:
-    from ml_engine import MLEngine
+    from ml.ml_engine import MLEngine
     engine = MLEngine(db_path="resume_extractions.db")
     engine.train_all()                          # Train on existing data
     scores = engine.score_candidate(12345)      # Score a single candidate

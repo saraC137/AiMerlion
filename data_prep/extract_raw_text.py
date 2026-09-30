@@ -17,8 +17,8 @@ from datetime import datetime
 from typing import Optional
 from difflib import SequenceMatcher
 import numpy as np
-from marker_extractor import get_marker_extractor
-from pdf_inspector import analyze_pdf_type
+from extraction.marker_extractor import get_marker_extractor
+from extraction.pdf_inspector import analyze_pdf_type
 
 # Fix Windows console encoding
 if sys.platform == 'win32':
@@ -622,8 +622,7 @@ def extract_raw_text(resume_folder: str = "merlion_resumes", output_folder: str 
 
 
 if __name__ == "__main__":
-    import config
-
+    from core import config
     # Get extraction limit from user
     limit = get_extraction_limit()
 

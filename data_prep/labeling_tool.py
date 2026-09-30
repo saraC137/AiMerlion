@@ -9,8 +9,7 @@ from typing import Dict, List, Optional
 from datetime import datetime
 import jsonlines
 
-import config
-
+from core import config
 class InteractiveLabelingTool:
     """
     Interactive tool for labeling resume extractions.
@@ -215,7 +214,7 @@ class InteractiveLabelingTool:
         skipping those that are already labeled.
         Returns list of dicts with file_path, folder_path, and id.
         """
-        from main import find_candidate_folders, find_resume_files
+        from core.main import find_candidate_folders, find_resume_files
         import re
 
         # Load labeled IDs
@@ -413,7 +412,7 @@ def main():
     
     # Start labeling
     print("\nInitializing extraction system...")
-    from main import UltimateResumeExtractor
+    from core.main import UltimateResumeExtractor
     
     extractor = UltimateResumeExtractor(config.MODEL_NAME)
     

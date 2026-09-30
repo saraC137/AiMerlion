@@ -99,7 +99,7 @@ class ComprehensiveExtractionTester:
         try:
             # Try to import from the project files
             sys.path.insert(0, '.')
-            from ai_extractor import AIExtractor
+            from extraction.ai_extractor import AIExtractor
             
             print("📦 Importing AIExtractor...")
             

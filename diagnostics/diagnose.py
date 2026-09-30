@@ -54,7 +54,7 @@ try:
     if 'ai_extractor' in sys.modules:
         del sys.modules['ai_extractor']
     
-    import ai_extractor
+    from extraction import ai_extractor
     actual_file = ai_extractor.__file__
     print(f"✅ Imported from: {actual_file}")
     

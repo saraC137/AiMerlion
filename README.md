@@ -58,44 +58,44 @@ Key configuration options include:
 
 ## 6. Usage
 
-The main entry point for the application is `main.py`. You can run it from the command line:
+Run everything from the repo root as a module (`python -m package.script`), so
+package imports and relative data paths (`resume_extractions.db`, `models/`) resolve.
 
 ```bash
-python main.py
+python -m core.main              # resume extraction pipeline (interactive menu)
+python -m annotation             # NER annotation tool -> http://localhost:5055
+python -m analysis.evaluate_lite # baseline vs fine-tuned evaluation
 ```
-
-This will launch an interactive menu with the following options:
-
-*   Process resumes
-*   Generate reports
-*   Diagnose AI
-*   Exit
 
 ## 7. Project Structure
 
+Code is grouped by task:
+
 ```
 AiMerlion/
-├───merlion_resumes/      # Input resumes folder
-├───main.py               # Main application entry point
-├───ai_extractor.py       # Core AI extraction logic
-├───document_parser.py    # PDF text extraction and OCR
-├───config.py             # Project configuration
-├───requirements.txt      # Project dependencies
-├───utils.py              # Utility functions
-├───evaluator.py          # (Not fully analyzed) Tools for evaluating extraction quality
-├───finetune_model.py     # (Not fully analyzed) Scripts for fine-tuning AI models
-├───labeling_tool.py      # (Not fully analyzed) A tool for labeling data
-└───...
+├── annotation/        # NER annotation tool (Flask, port 5055)
+│   ├── app.py         #   app, config, NER components, DB connection
+│   ├── queries.py     #   read-only DB helpers
+│   ├── routes/        #   annotate, annotators, export, classify, iaa
+│   └── templates/     #   index.html, annotate.html + index/ and annotate/ partials
+├── core/              # pipeline entry point, config, utils
+├── extraction/        # regex+AI extractor, document/PDF parsing, NER schema, SG normalizer
+├── data/              # DB manager, synthetic data generation, golden test set
+├── data_prep/         # raw text extraction, dataset importers, training data prep
+├── ml/                # fine-tuning, NER/classifier training, GGUF export, role predictor, vector search
+├── analysis/          # evaluation, run comparison, quality audits, exports
+├── dashboards/        # review + classification dashboards, accuracy validator API
+├── diagnostics/       # health checks, DB maintenance, one-off probes
+├── tests/             # test scripts (pytest: tests/test_sg_normalizer.py)
+├── archive/           # old versions; root_copies/ and replaced/ hold pre-reorg duplicates
+└── annotation_tool.py # launcher kept for `python annotation_tool.py`
 ```
 
 ## 8. Key Modules
 
-*   `main.py`: The main entry point of the application.
-*   `ai_extractor.py`: Handles the AI-powered data extraction from resumes.
-*   `document_parser.py`: Responsible for parsing various document formats, including PDFs with OCR fallback.
-*   `config.py`: Centralized configuration for the project.
-*   `evaluator.py`: Provides tools to evaluate the performance of the extraction process.
-*   `finetune_model.py`: Contains scripts for fine-tuning the AI models used in the project.
-*   `labeling_tool.py`: A tool to assist in labeling resume data for model training.
-*   `utils.py`: A collection of utility functions used across the project.
-```
+*   `core/main.py`: pipeline entry point.
+*   `extraction/ai_extractor.py`: hybrid regex + AI field extraction.
+*   `extraction/document_parser.py`: document parsing with OCR fallback.
+*   `extraction/ner_schema.py`: entity schema, tokenizer, BIO tagger, annotation storage, IAA.
+*   `annotation/`: web tool for labelling resume entities.
+*   `analysis/evaluate_lite.py`: scores extractors against the golden test set.
